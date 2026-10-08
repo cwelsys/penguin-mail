@@ -212,6 +212,11 @@ impl<R> ListFeed<R> {
         true
     }
 
+    /// Whether the mailbox holds rows past the ones loaded.
+    pub fn more(&self) -> bool {
+        self.more
+    }
+
     /// The threads a splice re-read arrived. `fresh` is nothing when the
     /// mailbox cannot re-read threads on their own, and `prunes` says the
     /// mailbox is a folder, which can drop the rows that left it.

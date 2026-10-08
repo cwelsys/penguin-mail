@@ -1600,12 +1600,16 @@ impl MainWindow {
                 .await
                 .unwrap_or(None);
             let prunes = this.shown().folder().is_some();
-            let splice = this.screen.borrow_mut().feed().spliced(ticket, fresh, prunes);
+            let (splice, more) = {
+                let mut screen = this.screen.borrow_mut();
+                let feed = screen.feed();
+                (feed.spliced(ticket, fresh, prunes), feed.more())
+            };
             match splice {
                 Splice::Stale => {}
                 Splice::Put(fresh) => {
                     let title = this.shown().title();
-                    this.list.replace_threads(&changed, fresh.rows);
+                    this.list.replace_threads(&changed, fresh.rows, more);
                     this.follow_selection();
                     this.list.set_title(&title, &fresh.subtitle);
                 }

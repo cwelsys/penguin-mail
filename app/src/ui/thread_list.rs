@@ -573,8 +573,14 @@ impl ThreadList {
 
     /// Puts fresh rows in place of the ones belonging to `changed` threads.
     /// Rows that came back keep the list in date order; the rest drop out.
-    pub fn replace_threads(&self, changed: &[(AccountId, String)], fresh: Vec<ThreadSummary>) {
-        let rows = merge_changed(&self.rows.borrow(), changed, fresh);
+    /// `more` says the mailbox holds rows past the loaded ones.
+    pub fn replace_threads(
+        &self,
+        changed: &[(AccountId, String)],
+        fresh: Vec<ThreadSummary>,
+        more: bool,
+    ) {
+        let rows = merge_changed(&self.rows.borrow(), changed, fresh, more);
         let title = self.empty.title().to_string();
         let icon = self
             .empty
@@ -914,27 +920,32 @@ fn neighbour(len: usize, first: usize, last: usize) -> Option<usize> {
 
 /// `rows` with fresh rows in place of the ones belonging to `changed`
 /// threads, in date order. A thread missing from `fresh` left the mailbox.
+///
+/// When `more` rows follow the loaded ones, a fresh row that now sorts
+/// below the last loaded row waits for the page that holds it instead of
+/// jumping in early. The last loaded row itself still comes back: the
+/// floor is taken before the changed rows are removed, so that row is
+/// measured against itself and not against the row above it.
 fn merge_changed(
     rows: &[Row],
     changed: &[(AccountId, String)],
     fresh: Vec<ThreadSummary>,
+    more: bool,
 ) -> Vec<Row> {
     let touched = |row: &ThreadSummary| {
         changed
             .iter()
             .any(|(account_id, id)| *account_id == row.account_id && *id == row.id)
     };
+    let floor = rows.last().filter(|_| more).map(|last| order(last));
     let mut rows: Vec<Row> = rows
         .iter()
         .filter(|row| !touched(row))
         .map(Rc::clone)
         .collect();
-    // Past the last loaded row the list is incomplete, so a row that
-    // sorts below it waits for the next page instead of jumping in.
-    let floor = rows.last().map(Rc::clone);
     for row in fresh {
         let row = Rc::new(row);
-        if floor.as_ref().is_some_and(|last| order(&row) < order(last)) {
+        if floor.is_some_and(|last| order(&row) < last) {
             continue;
         }
         let at = rows.partition_point(|held| order(held) > order(&row));
@@ -986,5 +997,45 @@ mod tests {
         assert_eq!(neighbour(5, 3, 4), Some(2));
         assert_eq!(neighbour(5, 0, 4), None);
         assert_eq!(neighbour(1, 0, 0), None);
+    }
+
+    fn dated(id: &str, last_message_at: i64) -> ThreadSummary {
+        ThreadSummary {
+            account_id: 1,
+            id: id.into(),
+            last_message_at,
+            ..ThreadSummary::default()
+        }
+    }
+
+    fn ids(rows: &[Row]) -> Vec<&str> {
+        rows.iter().map(|row| row.id.as_str()).collect()
+    }
+
+    #[test]
+    fn the_bottom_row_of_a_complete_list_comes_back_after_a_change() {
+        let rows: Vec<Row> = [("a", 3), ("b", 2), ("c", 1)]
+            .map(|(id, at)| Rc::new(dated(id, at)))
+            .into();
+        let merged = merge_changed(&rows, &[(1, "c".into())], vec![dated("c", 1)], false);
+        assert_eq!(ids(&merged), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn the_last_loaded_row_of_a_partial_list_comes_back_after_a_change() {
+        let rows: Vec<Row> = [("a", 3), ("b", 2), ("c", 1)]
+            .map(|(id, at)| Rc::new(dated(id, at)))
+            .into();
+        let merged = merge_changed(&rows, &[(1, "c".into())], vec![dated("c", 1)], true);
+        assert_eq!(ids(&merged), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_row_below_a_partial_list_waits_for_its_page() {
+        let rows: Vec<Row> = [("a", 3), ("b", 2), ("c", 1)]
+            .map(|(id, at)| Rc::new(dated(id, at)))
+            .into();
+        let merged = merge_changed(&rows, &[(1, "b".into())], vec![dated("b", 0)], true);
+        assert_eq!(ids(&merged), ["a", "c"]);
     }
 }
