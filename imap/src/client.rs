@@ -394,7 +394,7 @@ impl<D: Dial> ImapClient<D> {
     fn give_up_a_slot(&self) -> bool {
         self.inner
             .limit
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n > 1).then(|| n - 1)
             })
             .is_ok()
