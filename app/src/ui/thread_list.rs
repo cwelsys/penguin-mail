@@ -5,6 +5,7 @@
 mod entry;
 
 use std::cell::{Cell, RefCell};
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -955,9 +956,13 @@ fn merge_changed(
 }
 
 /// Where a row sorts in the list: newest first, ties broken as the store
-/// breaks them.
-fn order(row: &ThreadSummary) -> (i64, i64, &str) {
-    (row.last_message_at, -row.account_id, row.id.as_str())
+/// breaks them, by account and then id ascending.
+fn order(row: &ThreadSummary) -> (i64, i64, Reverse<&str>) {
+    (
+        row.last_message_at,
+        -row.account_id,
+        Reverse(row.id.as_str()),
+    )
 }
 
 #[cfg(test)]
@@ -1037,5 +1042,14 @@ mod tests {
             .into();
         let merged = merge_changed(&rows, &[(1, "b".into())], vec![dated("b", 0)], true);
         assert_eq!(ids(&merged), ["a", "c"]);
+    }
+
+    #[test]
+    fn rows_with_the_same_date_sort_by_id_as_the_store_does() {
+        let rows: Vec<Row> = [("a", 1), ("c", 1)]
+            .map(|(id, at)| Rc::new(dated(id, at)))
+            .into();
+        let merged = merge_changed(&rows, &[], vec![dated("b", 1)], false);
+        assert_eq!(ids(&merged), ["a", "b", "c"]);
     }
 }
