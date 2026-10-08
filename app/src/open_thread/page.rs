@@ -56,11 +56,15 @@ impl Cleaned {
 fn clean(source: &str, pictures: &str) -> Cleaned {
     let html = sanitize_html(source, Some(pictures));
     let lower = html.to_ascii_lowercase();
+    let history = quoted::history_in_html(&html);
+    // The folded history is out of sight, so what it quotes does not get
+    // to pick the page's colours.
+    let shown = history.as_ref().map_or(lower.as_str(), |fold| &lower[..fold.start]);
     Cleaned {
         mark: body_mark(source, pictures),
         remote: loads_remote(&lower),
-        paints: paints_itself(&lower),
-        history: quoted::history_in_html(&html),
+        paints: paints_itself(shown),
+        history,
         html,
     }
 }
@@ -767,6 +771,20 @@ mod tests {
         }
         let red = clean("<p style=\"color:#c00\">Due today</p>", "mailrs-cid:1/m1/0/");
         assert!(red.paints, "a colour the writer chose still keeps the sheet");
+    }
+
+    #[test]
+    fn a_newsletter_in_the_folded_history_does_not_make_a_reply_paint_itself() {
+        let reply = clean(
+            "<div>Thanks, saw it.</div><div><br><blockquote type=\"cite\">\
+             <div>On Friday, Ann wrote:</div><br>\
+             <table bgcolor=\"#ffffff\"><tr><td style=\"color:#111\">Playbook</td></tr></table>\
+             </blockquote></div>",
+            "mailrs-cid:1/m1/0/",
+        );
+        let history = reply.history.clone().expect("a fold");
+        assert!(reply.html[history].contains("Playbook"));
+        assert!(!reply.paints);
     }
 
     /// A remote picture a sender left inside a comment never reaches the
