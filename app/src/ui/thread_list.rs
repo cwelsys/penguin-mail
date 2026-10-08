@@ -574,29 +574,7 @@ impl ThreadList {
     /// Puts fresh rows in place of the ones belonging to `changed` threads.
     /// Rows that came back keep the list in date order; the rest drop out.
     pub fn replace_threads(&self, changed: &[(AccountId, String)], fresh: Vec<ThreadSummary>) {
-        let touched = |row: &ThreadSummary| {
-            changed
-                .iter()
-                .any(|(account_id, id)| *account_id == row.account_id && *id == row.id)
-        };
-        let mut rows: Vec<Row> = self
-            .rows
-            .borrow()
-            .iter()
-            .filter(|row| !touched(row))
-            .map(Rc::clone)
-            .collect();
-        // Past the last loaded row the list is incomplete, so a row that
-        // sorts below it waits for the next page instead of jumping in.
-        let floor = rows.last().map(Rc::clone);
-        for row in fresh {
-            let row = Rc::new(row);
-            if floor.as_ref().is_some_and(|last| order(&row) < order(last)) {
-                continue;
-            }
-            let at = rows.partition_point(|held| order(held) > order(&row));
-            rows.insert(at, row);
-        }
+        let rows = merge_changed(&self.rows.borrow(), changed, fresh);
         let title = self.empty.title().to_string();
         let icon = self
             .empty
@@ -932,6 +910,37 @@ fn neighbour(len: usize, first: usize, last: usize) -> Option<usize> {
     } else {
         first.checked_sub(1)
     }
+}
+
+/// `rows` with fresh rows in place of the ones belonging to `changed`
+/// threads, in date order. A thread missing from `fresh` left the mailbox.
+fn merge_changed(
+    rows: &[Row],
+    changed: &[(AccountId, String)],
+    fresh: Vec<ThreadSummary>,
+) -> Vec<Row> {
+    let touched = |row: &ThreadSummary| {
+        changed
+            .iter()
+            .any(|(account_id, id)| *account_id == row.account_id && *id == row.id)
+    };
+    let mut rows: Vec<Row> = rows
+        .iter()
+        .filter(|row| !touched(row))
+        .map(Rc::clone)
+        .collect();
+    // Past the last loaded row the list is incomplete, so a row that
+    // sorts below it waits for the next page instead of jumping in.
+    let floor = rows.last().map(Rc::clone);
+    for row in fresh {
+        let row = Rc::new(row);
+        if floor.as_ref().is_some_and(|last| order(&row) < order(last)) {
+            continue;
+        }
+        let at = rows.partition_point(|held| order(held) > order(&row));
+        rows.insert(at, row);
+    }
+    rows
 }
 
 /// Where a row sorts in the list: newest first, ties broken as the store
