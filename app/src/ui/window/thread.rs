@@ -28,8 +28,8 @@ use crate::protection::Read;
 use crate::settings::MarkRead;
 use crate::translation::{self, Language, Prose, Translation};
 use crate::ui::conversation::ConversationView;
-use crate::ui::invitation::{AddTo, Showing};
 use crate::ui::invitation::strip::{self, Strip};
+use crate::ui::invitation::{AddTo, Showing};
 use crate::wanted::Screen;
 
 impl MainWindow {
@@ -241,8 +241,15 @@ impl Desk for Ports {
         self.view.find(|open| open.arrived(message_id))
     }
 
-    fn interface_language(&self) -> Option<Language> {
-        self.window()?.interface_language()
+    fn translation_language(&self) -> Option<String> {
+        Some(
+            self.window()?
+                .settings_with(|s| crate::assistant::language::selected(&s.ai.language)),
+        )
+    }
+
+    fn translation_revision(&self) -> Option<u64> {
+        Some(self.window()?.settings_with(|s| s.ai.language_revision))
     }
 
     fn translation_destination(&self) -> Result<String, String> {
@@ -250,6 +257,12 @@ impl Desk for Ports {
             .window()
             .ok_or_else(|| "the window has closed".to_string())?;
         window.settings_with(|s| translation::destination(&s.ai).map(|(_, goes)| goes))
+    }
+
+    fn never_translate(&self) -> Vec<String> {
+        self.window()
+            .map(|window| window.settings_with(|s| s.never_translate.clone()))
+            .unwrap_or_default()
     }
 }
 
@@ -552,7 +565,7 @@ impl Effects for Ports {
 
     fn translate(
         &self,
-        into: Language,
+        into: String,
         pieces: Vec<String>,
     ) -> Answer<'_, Result<Vec<Option<String>>, String>> {
         Box::pin(async move {
@@ -563,7 +576,7 @@ impl Effects for Ports {
             self.core
                 .call(async move {
                     let pieces: Vec<&str> = pieces.iter().map(String::as_str).collect();
-                    translation::ask(config, into, &pieces)
+                    translation::ask(config, &into, &pieces)
                         .await
                         .map_err(anyhow::Error::msg)
                 })
@@ -677,6 +690,10 @@ impl Effects for Ports {
 
     fn translated(&self, message_id: String, translation: Translation) {
         self.view.translated(message_id, translation);
+    }
+
+    fn keep_translations(&self, into: &str) {
+        self.view.keep_translations(into);
     }
 
     fn turn_translation(&self, message_id: &str) -> bool {

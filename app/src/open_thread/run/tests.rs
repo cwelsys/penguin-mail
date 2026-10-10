@@ -595,6 +595,28 @@ async fn a_short_answer_from_someone_else_borrows_nothing() {
 }
 
 #[tokio::test]
+async fn a_language_the_reader_never_translates_gets_no_card() {
+    let window = FakeWindow::with_body(portuguese());
+    window.with(|screen| screen.never = vec!["es".to_string(), "pt".to_string()]);
+    window.run().open(row(THREAD)).await;
+    assert_eq!(window.0.borrow().cards.last(), Some(&Card::Hidden));
+}
+
+#[tokio::test]
+async fn taking_a_language_off_the_list_offers_its_card_again() {
+    let window = FakeWindow::with_body(portuguese());
+    window.with(|screen| screen.never = vec!["pt".to_string()]);
+    window.run().open(row(THREAD)).await;
+    window.with(|screen| screen.never.clear());
+    window.run().offer_translation_again();
+    let last = window.0.borrow().cards.last().cloned();
+    assert!(
+        matches!(last, Some(Card::Offered { from: Some(from), .. }) if from.code == "pt"),
+        "{last:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_message_in_the_interface_language_gets_no_card() {
     let window = FakeWindow::new();
     window.run().open(row(THREAD)).await;
@@ -1037,4 +1059,80 @@ async fn hours_for_a_thread_the_reader_left_go_nowhere() {
     window.run().open(row(THREAD)).await;
     assert!(window.took(Step::Strip));
     assert!(!window.took(Step::StripKnown));
+}
+
+#[tokio::test]
+async fn ai_language_changes_translation_without_changing_the_interface() {
+    for language in ["Russian", "Czech", "Slovak"] {
+        let window = FakeWindow::with_body(body(
+            "Please read the attached document and let us know if you have any questions. We will send you the details tomorrow. Thank you for your help.",
+        ));
+        window.with(|screen| screen.language = Some(language.into()));
+        window.run().open(row(THREAD)).await;
+        assert!(matches!(
+            window.0.borrow().cards.last(),
+            Some(Card::Offered { .. })
+        ));
+        window.run().translate().await;
+        assert_eq!(window.0.borrow().requested_languages, [language]);
+        assert_eq!(
+            window.open(|open| open.translations["m1"].into.clone()),
+            Some(language.into())
+        );
+    }
+}
+
+#[tokio::test]
+async fn changing_the_ai_language_discards_only_old_translations() {
+    let window = FakeWindow::with_body(portuguese());
+    window.run().open(row(THREAD)).await;
+    window.run().translate().await;
+    window.run().offer_translation_again();
+    assert_eq!(window.open(|open| open.translations.len()), Some(1));
+    window.with(|screen| screen.language = Some("Czech".into()));
+    window.run().offer_translation_again();
+    assert_eq!(window.open(|open| open.translations.len()), Some(0));
+    assert!(page(&window).contains("Olá Ana"));
+    assert!(!page(&window).contains("Hello Ana"));
+    assert!(matches!(
+        window.0.borrow().cards.last(),
+        Some(Card::Offered { .. })
+    ));
+    window.run().translate().await;
+    assert_eq!(window.0.borrow().requested_languages, ["English", "Czech"]);
+}
+
+#[tokio::test]
+async fn changing_language_during_translation_discards_the_old_answer_and_error() {
+    for reply in [
+        Ok(vec![Some("Old translation".into())]),
+        Err("offline".into()),
+    ] {
+        let window = FakeWindow::with_body(portuguese());
+        window.with(|screen| {
+            screen.languages_during_translation = vec!["Russian".into()];
+            screen.translation = reply;
+        });
+        window.run().open(row(THREAD)).await;
+        window.run().translate().await;
+        assert!(!window.took(Step::Translated));
+        assert!(window.0.borrow().toasts.is_empty());
+        assert_eq!(window.open(|open| open.translations.len()), Some(0));
+    }
+}
+
+#[tokio::test]
+async fn returning_to_the_original_language_drops_the_in_flight_answer_and_error() {
+    for reply in [Ok(vec![Some("Old translation".into())]), Err("offline".into())] {
+        let window = FakeWindow::with_body(portuguese());
+        window.with(|screen| {
+            screen.languages_during_translation = vec!["Czech".into(), "English".into()];
+            screen.translation = reply;
+        });
+        window.run().open(row(THREAD)).await;
+        window.run().translate().await;
+        assert!(!window.took(Step::Translated));
+        assert!(window.0.borrow().toasts.is_empty());
+        assert_eq!(window.open(|open| open.translations.len()), Some(0));
+    }
 }

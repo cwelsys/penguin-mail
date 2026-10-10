@@ -25,9 +25,9 @@ use super::{Answer, Card, Desk, Effects, Fetched, InlinePictures, Stored, Thread
 use crate::open_thread::{Document, InlineImage, OpenThread, Page, ToClean, Unsent};
 use crate::protection::Read;
 use crate::render::Theme;
-use crate::translation::{self, Language, Prose, Translation};
-use crate::ui::invitation::{AddTo, Showing};
+use crate::translation::{Language, Prose, Translation};
 use crate::ui::invitation::strip::{Strip, Verdict};
+use crate::ui::invitation::{AddTo, Showing};
 use crate::wanted::Screen as OnScreen;
 
 /// The account and thread every fixture belongs to.
@@ -125,8 +125,13 @@ pub struct Screen {
     pub translation: Result<Vec<Option<String>>, String>,
     /// The Mark as Read setting.
     pub delay: Option<u32>,
-    pub interface: Option<Language>,
+    pub language: Option<String>,
+    pub requested_languages: Vec<String>,
+    pub languages_during_translation: Vec<String>,
+    pub language_revision: u64,
     pub destination: Result<String, String>,
+    /// The languages the person never translates, by code.
+    pub never: Vec<String>,
     /// The step the reader opens something else during.
     pub moves_on: Option<Step>,
     /// What opening something else does to the thread on screen. Another
@@ -363,11 +368,6 @@ pub fn queued(problem: Option<&str>) -> Queued {
     }
 }
 
-/// The English interface.
-pub fn english() -> Language {
-    translation::interface_language("", "en", &[]).expect("English is known")
-}
-
 impl FakeWindow {
     /// A window with nothing open, where the store holds the fixture
     /// thread with one unread message and no body, and Gmail has that
@@ -413,8 +413,12 @@ impl FakeWindow {
             queued: HashMap::new(),
             translation: Ok(vec![Some("Hello Ana".to_string())]),
             delay: Some(2),
-            interface: Some(english()),
+            language: Some("English".into()),
+            requested_languages: Vec::new(),
+            languages_during_translation: Vec::new(),
+            language_revision: 0,
             destination: Ok("The message goes to a model on this computer.".to_string()),
+            never: Vec::new(),
             moves_on: None,
             moving: |open| open.thread_id = ELSEWHERE.to_string(),
             steps: Vec::new(),
@@ -610,12 +614,20 @@ impl Desk for FakeWindow {
         self.open(|open| open.arrived(message_id)).flatten()
     }
 
-    fn interface_language(&self) -> Option<Language> {
-        self.with(|screen| screen.interface)
+    fn translation_language(&self) -> Option<String> {
+        self.with(|screen| screen.language.clone())
+    }
+
+    fn translation_revision(&self) -> Option<u64> {
+        Some(self.with(|screen| screen.language_revision))
     }
 
     fn translation_destination(&self) -> Result<String, String> {
         self.with(|screen| screen.destination.clone())
+    }
+
+    fn never_translate(&self) -> Vec<String> {
+        self.with(|screen| screen.never.clone())
     }
 }
 
@@ -779,10 +791,17 @@ impl Effects for FakeWindow {
 
     fn translate(
         &self,
-        _into: Language,
+        into: String,
         _pieces: Vec<String>,
     ) -> Answer<'_, Result<Vec<Option<String>>, String>> {
         self.reached(Step::Translate);
+        self.with(|screen| {
+            screen.requested_languages.push(into);
+            for language in std::mem::take(&mut screen.languages_during_translation) {
+                screen.language_revision += 1;
+                screen.language = Some(language);
+            }
+        });
         let said = self.with(|screen| screen.translation.clone());
         Box::pin(async move { said })
     }
@@ -912,6 +931,18 @@ impl Effects for FakeWindow {
         });
         self.with(|screen| screen.cards.push(card));
         self.draw();
+    }
+
+    fn keep_translations(&self, into: &str) {
+        let changed = self.with(|screen| {
+            screen
+                .open
+                .as_mut()
+                .is_some_and(|open| open.keep_translations(into))
+        });
+        if changed {
+            self.draw();
+        }
     }
 
     fn turn_translation(&self, message_id: &str) -> bool {

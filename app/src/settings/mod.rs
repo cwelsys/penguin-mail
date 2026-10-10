@@ -50,6 +50,9 @@ pub struct Settings {
     /// Put up a notification before calendar events, at the times each
     /// event or its calendar sets.
     pub event_reminders: bool,
+    /// Languages, by code such as `pt`, whose messages get no translation
+    /// card: the person reads them as they are.
+    pub never_translate: Vec<String>,
     pub smart_mailboxes: Vec<mailrs_domain::SmartMailbox>,
     /// Account addresses in sidebar order; accounts not listed follow.
     pub account_order: Vec<String>,
@@ -291,6 +294,11 @@ impl Use {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiSettings {
+    /// Language of answers, summaries and translations. Empty follows the interface.
+    pub language: String,
+    /// Invalidates in-flight translations without persisting a request lifetime.
+    #[serde(skip)]
+    pub language_revision: u64,
     /// The assistant's connection.
     pub provider: AiProvider,
     /// The local server's API address, ending in `/v1`.
@@ -319,6 +327,8 @@ pub struct AiSettings {
 impl Default for AiSettings {
     fn default() -> Self {
         AiSettings {
+            language: String::new(),
+            language_revision: 0,
             provider: AiProvider::Off,
             base_url: "http://localhost:1234/v1".into(),
             local_model: String::new(),
@@ -440,6 +450,7 @@ impl Default for Settings {
             language: String::new(),
             notifications: true,
             notification_previews: true,
+            never_translate: Vec::new(),
             default_account: None,
             signatures: BTreeMap::new(),
             undo_send: UndoSend::Ten,
@@ -899,6 +910,17 @@ impl Settings {
                 }
             })
             .collect();
+    }
+
+    /// Stops offering to translate messages in `language`, or starts again.
+    /// The list keeps each code once, in the order they were added.
+    pub fn never_translate(&mut self, language: &str, never: bool) {
+        let listed = self.never_translate.iter().any(|code| code == language);
+        match (never, listed) {
+            (true, false) => self.never_translate.push(language.to_string()),
+            (false, true) => self.never_translate.retain(|code| code != language),
+            _ => {}
+        }
     }
 
     /// What goes below a message sent from `email`. A signature written here
