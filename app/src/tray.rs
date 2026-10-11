@@ -159,6 +159,44 @@ pub fn pixmaps() -> Vec<ksni::Icon> {
         .collect()
 }
 
+/// The badge's red, GNOME's red 3.
+const BADGE: [f32; 3] = [224.0, 27.0, 36.0];
+
+/// `icon` with a dot in its top right corner, which says mail is unread.
+// shortcut: a dot, not the count; drawing digits needs a font, and the
+// title and tooltip already give the number.
+fn badged(icon: &ksni::Icon) -> ksni::Icon {
+    let (width, height) = (icon.width as usize, icon.height as usize);
+    let mut data = icon.data.clone();
+    if data.len() < width * height * 4 {
+        return icon.clone();
+    }
+    let radius = width as f32 * 0.2;
+    let (cx, cy) = (width as f32 - radius, radius);
+    for y in 0..height {
+        for x in 0..width {
+            let distance = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            // One pixel of soft edge.
+            let cover = (radius - distance + 0.5).clamp(0.0, 1.0);
+            if cover == 0.0 {
+                continue;
+            }
+            let pixel = &mut data[(y * width + x) * 4..][..4];
+            let under = f32::from(pixel[0]) / 255.0 * (1.0 - cover);
+            let alpha = cover + under;
+            for (channel, badge) in pixel[1..].iter_mut().zip(BADGE) {
+                *channel = ((badge * cover + f32::from(*channel) * under) / alpha).round() as u8;
+            }
+            pixel[0] = (alpha * 255.0).round() as u8;
+        }
+    }
+    ksni::Icon {
+        width: icon.width,
+        height: icon.height,
+        data,
+    }
+}
+
 pub struct MailTray {
     pub unread: i64,
     /// Each account's id, address and unread INBOX count.
@@ -168,7 +206,7 @@ pub struct MailTray {
     pub can_update: bool,
     /// A newer release waiting to be installed.
     pub update: Option<String>,
-    /// The app icon for a host that cannot find `icon_name`; see `pixmaps`.
+    /// The app icon; see `pixmaps`.
     pub pixmaps: Vec<ksni::Icon>,
 }
 
@@ -194,17 +232,16 @@ impl ksni::Tray for MailTray {
         )
     }
 
+    /// No name, so every host draws the penguin from the pixmaps.
     fn icon_name(&self) -> String {
-        if self.unread > 0 {
-            "mail-unread-symbolic"
-        } else {
-            "mail-read-symbolic"
-        }
-        .into()
+        String::new()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        self.pixmaps.clone()
+        match self.unread > 0 {
+            true => self.pixmaps.iter().map(badged).collect(),
+            false => self.pixmaps.clone(),
+        }
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -322,6 +359,27 @@ mod tests {
             super::argb_from_rgba(2, 2, 10, &rgba),
             [4, 1, 2, 3, 8, 5, 6, 7, 12, 9, 10, 11, 16, 13, 14, 15]
         );
+    }
+
+    #[test]
+    fn unread_mail_puts_a_dot_in_the_top_right_corner() {
+        let blank = ksni::Icon {
+            width: 22,
+            height: 22,
+            data: [255, 10, 20, 30].repeat(22 * 22),
+        };
+        let badged = super::badged(&blank);
+        assert_eq!(badged.data.len(), blank.data.len());
+        let at = |x: usize, y: usize| badged.data[(y * 22 + x) * 4..][..4].to_vec();
+        assert_eq!(at(16, 5), [255, 224, 27, 36], "the middle of the dot");
+        assert_eq!(at(2, 19), [255, 10, 20, 30], "the far corner");
+        let clear = ksni::Icon {
+            data: vec![0; 22 * 22 * 4],
+            ..blank
+        };
+        let dot = super::badged(&clear).data;
+        assert_eq!(dot[(5 * 22 + 16) * 4..][..4], [255, 224, 27, 36]);
+        assert_eq!(dot[(19 * 22 + 2) * 4], 0, "nothing drawn away from the dot");
     }
 
     #[test]
