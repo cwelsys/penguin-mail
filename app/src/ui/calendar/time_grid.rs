@@ -83,7 +83,7 @@ pub struct Nudging {
 /// Width of the hour-label gutter down the left edge, shared with
 /// `AllDayStrip` so the day columns of both widgets line up. The values
 /// here are the approved mockup's (`calendar-mockup/mockups.py`).
-pub const GUTTER: f32 = 60.0;
+pub const GUTTER: f32 = 66.0;
 /// Height of one hour's row: 08:00 to 20:00 fill a 900-pixel window.
 pub const HOUR: f32 = 62.0;
 /// How far one all-day lane sits below the one above it.
@@ -2448,8 +2448,8 @@ mod tests {
 
     #[test]
     fn a_card_in_the_second_of_two_lanes_takes_the_right_half_of_its_column() {
-        let r = rect(1, 7, 1, 2, 10.0, 11.5, 60.0 + 7.0 * 100.0);
-        assert_eq!((r.0, r.2), (211.5, 45.5));
+        let r = rect(1, 7, 1, 2, 10.0, 11.5, GUTTER + 7.0 * 100.0);
+        assert_eq!((r.0, r.2), (GUTTER + 151.5, 45.5));
         assert_eq!((r.1, r.3), (621.5, 90.0));
     }
 
@@ -2507,8 +2507,8 @@ mod tests {
 
     #[test]
     fn an_all_day_card_spans_its_days_minus_the_inset() {
-        let (x, y, w, h) = all_day_rect(1, 3, 0, 7, 60.0 + 7.0 * 100.0);
-        assert_eq!((x, w), (163.0, 194.0));
+        let (x, y, w, h) = all_day_rect(1, 3, 0, 7, GUTTER + 7.0 * 100.0);
+        assert_eq!((x, w), (GUTTER + 103.0, 194.0));
         assert_eq!((y, h), (4.0, 24.0));
     }
 
