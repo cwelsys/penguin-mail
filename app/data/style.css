@@ -572,6 +572,8 @@ toolbarview.sidebar-card.undershoot-bottom > .bottom-bar { box-shadow: none; bor
 
 /* Follow Up: the banner above All Inboxes. */
 .follow-up-banner {
+  /* The title's unread line hangs 7px below the header. */
+  margin-top: 7px;
   padding: 6px 6px 6px 14px;
   background: alpha(var(--accent-bg-color), 0.16);
 }
