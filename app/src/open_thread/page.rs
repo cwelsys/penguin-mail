@@ -23,7 +23,7 @@ use mailrs_domain::{AccountId, MessageBody, MessageMeta};
 use super::{OpenThread, inline};
 use crate::quoted;
 use crate::render::{self, BodyState, Head, MessageView, Sanitized, TAIL, Theme};
-use crate::sanitize::sanitize_html;
+use crate::sanitize::sanitize;
 use crate::translation::{Body, Prose};
 
 /// A message body after cleaning, with a mark of the HTML and the picture
@@ -54,16 +54,18 @@ impl Cleaned {
 
 /// Cleans the HTML of one body, pointing its pictures at `pictures`.
 fn clean(source: &str, pictures: &str) -> Cleaned {
-    let html = sanitize_html(source, Some(pictures));
+    let dark = crate::dark_messages::on();
+    let html = sanitize(source, Some(pictures), dark);
     let lower = html.to_ascii_lowercase();
     let history = quoted::history_in_html(&html);
     // The folded history is out of sight, so what it quotes does not get
     // to pick the page's colours.
     let shown = history.as_ref().map_or(lower.as_str(), |fold| &lower[..fold.start]);
     Cleaned {
-        mark: body_mark(source, pictures),
+        mark: mark_in(source, pictures, dark),
         remote: loads_remote(&lower),
-        paints: paints_itself(shown),
+        // An adapted body sits on the window's colors like a note.
+        paints: !dark && paints_itself(shown),
         history,
         html,
     }
@@ -466,17 +468,23 @@ fn html_of(body: &MessageBody) -> Option<&str> {
 /// than its length, because two bodies of the same length are still two
 /// bodies: opening an encrypted message puts a different body under the
 /// same message id, and the reader would otherwise go on looking at the
-/// cleaned ciphertext.
+/// cleaned ciphertext. Dark message mode counts too, so turning it on or
+/// off, or the window going dark, cleans every body again.
 fn body_mark(html: &str, pictures: &str) -> u64 {
+    mark_in(html, pictures, crate::dark_messages::on())
+}
+
+fn mark_in(html: &str, pictures: &str, dark: bool) -> u64 {
     let mut whole = DefaultHasher::new();
     html.hash(&mut whole);
     pictures.hash(&mut whole);
+    dark.hash(&mut whole);
     whole.finish()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Article, Cleaned, Page, body_mark, clean};
+    use super::{Article, Cleaned, Page, body_mark, clean, mark_in};
     use crate::open_thread::OpenThread;
     use crate::render::Theme;
     use mailrs_domain::{MessageBody, MessageMeta, Target};
@@ -785,6 +793,15 @@ mod tests {
         let history = reply.history.clone().expect("a fold");
         assert!(reply.html[history].contains("Playbook"));
         assert!(!reply.paints);
+    }
+
+    #[test]
+    fn a_body_cleaned_for_dark_message_mode_has_its_own_mark() {
+        let pictures = "mailrs-cid:1/m1/0/";
+        assert_ne!(
+            mark_in("<p>Hello</p>", pictures, false),
+            mark_in("<p>Hello</p>", pictures, true)
+        );
     }
 
     /// A remote picture a sender left inside a comment never reaches the

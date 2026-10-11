@@ -3616,8 +3616,13 @@ impl MainWindow {
                 }
                 self.reopen_for_photos();
             }
-            // The app follows the light or dark choice; no window to redraw.
-            Effect::Theme => {}
+            // The app follows the light or dark choice. Dark message mode
+            // cleans the open messages again.
+            Effect::Theme => {
+                for view in self.views() {
+                    view.render(false);
+                }
+            }
             Effect::Language => self.offer_restart(),
             Effect::Calendar => self.calendar.week_start_changed(),
             Effect::Translation => {

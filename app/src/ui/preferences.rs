@@ -170,6 +170,13 @@ fn general_page(
         settings.color_scheme,
         Change::ColorScheme,
     ));
+    appearance.add(&switch(
+        app,
+        &gettext("Dark Message Mode"),
+        Some(&gettext("In a dark window, show messages in dark colors too")),
+        settings.dark_message_mode,
+        Change::DarkMessageMode,
+    ));
     appearance.add(&language_row(app, settings));
     appearance.add(&never_translate_row(app, settings));
     page.add(&appearance);

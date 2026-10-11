@@ -705,6 +705,7 @@ pub fn escape(s: &str) -> String {
 /// missing.
 const HTML_BODY_CSS: &str = "@font-face{font-family:Helvetica;src:local(\"Liberation Sans\"),local(\"Arimo\"),local(\"Helvetica\")}\
 :host{all:initial;display:block;contain:content}\
+:host(.plain){color-scheme:inherit}\
 :host(.plain) .root{color:var(--fg)}:host(.plain) a{color:var(--accent-text)}\
 .root{font:14px/1.5 var(--ui-font,-apple-system),\"Adwaita Sans\",Cantarell,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;\
 color:#1d1d20;overflow-wrap:break-word;overflow-x:auto;container-type:inline-size}\

@@ -340,6 +340,8 @@ impl App {
             ColorScheme::Light => adw::ColorScheme::ForceLight,
             ColorScheme::Dark => adw::ColorScheme::ForceDark,
         });
+        crate::dark_messages::set_wanted(self.settings.borrow().dark_message_mode);
+        crate::dark_messages::set_window_dark(adw::StyleManager::default().is_dark());
     }
 
     /// Shows the window on `account_id`'s inbox, as the sidebar's Inbox row

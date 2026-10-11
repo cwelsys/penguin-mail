@@ -22,6 +22,8 @@ use std::collections::HashSet;
 
 use ammonia::{Builder, UrlRelative};
 
+use crate::dark_messages::adapt;
+
 const EXTRA_TAGS: [&str; 5] = ["style", "font", "center", "span", "div"];
 
 const LAYOUT_ATTRIBUTES: [&str; 17] = [
@@ -48,7 +50,19 @@ const LAYOUT_ATTRIBUTES: [&str; 17] = [
 /// the escaped `Content-ID`, the address the conversation view serves that
 /// picture at; with no `pictures` it loses its source.
 pub fn sanitize_html(html: &str, pictures: Option<&str>) -> String {
-    let root = Root::read(html, pictures);
+    sanitize(html, pictures, false)
+}
+
+/// As [`sanitize_html`]. With `dark`, the message is adapted for a dark
+/// page: its colors go through [`adapt`], and the rules it wrote for dark
+/// mode stay.
+pub fn sanitize(html: &str, pictures: Option<&str>, dark: bool) -> String {
+    let mut root = Root::read(html, pictures);
+    if dark {
+        root.html = adapt(&root.html);
+        root.body = adapt(&root.body);
+        root.link = None;
+    }
     let pictures = pictures.map(str::to_string);
     let mut builder = Builder::default();
     builder
@@ -67,10 +81,12 @@ pub fn sanitize_html(html: &str, pictures: Option<&str>) -> String {
         .url_relative(UrlRelative::Deny)
         .link_rel(Some("noopener noreferrer"))
         .strip_comments(true)
-        .attribute_filter(move |element, attribute, value| {
-            filter_url(pictures.as_deref(), element, attribute, value)
+        .attribute_filter(move |element, attribute, value| match (dark, attribute) {
+            (true, "bgcolor" | "color") => None,
+            (true, "style") => Some(Cow::Owned(adapt(value))),
+            _ => filter_url(pictures.as_deref(), element, attribute, value),
         });
-    let (styled, rewrote) = restyle(&builder.clean(html).to_string());
+    let (styled, rewrote) = restyle(&builder.clean(html).to_string(), dark);
     name_images(&root.wrap(&styled, rewrote))
 }
 
@@ -375,8 +391,9 @@ fn has_alt(tag: &str) -> bool {
 /// that only apply in dark mode and the `color-scheme` declarations that
 /// ask for one, and points `html` and `body` selectors at the elements
 /// that stand in for those tags. Everything else stays as it was. Also
-/// says whether any selector changed.
-fn restyle(html: &str) -> (String, bool) {
+/// says whether any selector changed. A message adapted for a dark page
+/// keeps its dark mode rules, and each of its rules goes through [`adapt`].
+fn restyle(html: &str, adapted: bool) -> (String, bool) {
     if !html.contains("<style") {
         return (html.to_string(), false);
     }
@@ -395,12 +412,12 @@ fn restyle(html: &str) -> (String, bool) {
             .unwrap_or(rest.len());
         out.push_str(&rest[..open]);
         let css = &rest[open..end];
-        let css = if dark {
+        let css = if dark && !adapted {
             Cow::Owned(clean_css(css))
         } else {
             Cow::Borrowed(css)
         };
-        let (css, hit) = point_at_stand_ins(&css);
+        let (css, hit) = point_at_stand_ins(&css, adapted);
         rewrote |= hit;
         out.push_str(&css);
         rest = &rest[end..];
@@ -413,7 +430,7 @@ fn restyle(html: &str) -> (String, bool) {
 /// stand-ins, and whether any changed. It reads selectors at the top and
 /// inside grouping rules such as `@media`, and copies declaration blocks
 /// and other at-rules, such as `@font-face`, as they are.
-fn point_at_stand_ins(css: &str) -> (String, bool) {
+fn point_at_stand_ins(css: &str, adapted: bool) -> (String, bool) {
     let mut out = String::with_capacity(css.len() + 32);
     let mut changed = false;
     let mut rest = css;
@@ -443,7 +460,19 @@ fn point_at_stand_ins(css: &str) -> (String, bool) {
         }
         let block = &rest[stop..];
         let after = skip_block(block).unwrap_or_default();
-        out.push_str(&block[..block.len() - after.len()]);
+        let block = &block[..block.len() - after.len()];
+        let declarations = block
+            .strip_prefix('{')
+            .and_then(|inside| inside.strip_suffix('}'))
+            .filter(|inside| adapted && !head.starts_with('@') && !inside.contains('{'));
+        match declarations {
+            Some(inside) => {
+                out.push('{');
+                out.push_str(&adapt(inside));
+                out.push('}');
+            }
+            None => out.push_str(block),
+        }
         rest = after;
     }
     (out, changed)
@@ -1005,5 +1034,72 @@ mod body_tests {
     #[test]
     fn mail_with_nothing_on_its_body_is_not_wrapped() {
         assert_eq!(clean("<html><body><p>Hi</p></body></html>"), "<p>Hi</p>");
+    }
+}
+
+#[cfg(test)]
+mod adapted_tests {
+    use super::sanitize;
+
+    fn clean(html: &str) -> String {
+        sanitize(html, None, true)
+    }
+
+    #[test]
+    fn inline_colors_written_for_a_white_page_go() {
+        let out = clean(
+            "<table bgcolor=\"#ffffff\"><tr><td style=\"background:#fff;color:#111;padding:8px\">\
+             <font color=\"#333333\">Playbook</font></td></tr></table>",
+        );
+        assert!(!out.contains("bgcolor") && !out.contains("#fff") && !out.contains("#111"), "{out}");
+        assert!(!out.contains("#333333"), "{out}");
+        assert!(out.contains("padding:8px") && out.contains("Playbook"), "{out}");
+    }
+
+    #[test]
+    fn a_button_keeps_its_brand_color() {
+        let out = clean("<a href=\"https://example.com\" style=\"background:#1a73e8;color:#fff\">Open</a>");
+        assert!(out.contains("background:#1a73e8;color:#fff"), "{out}");
+    }
+
+    #[test]
+    fn stylesheet_rules_are_adapted_and_dark_rules_stay() {
+        let out = clean(
+            "<style>.card{border:1px solid #dadce0;background:#fff}.value{color:#222}\
+             @media (max-width:600px){.card{background:#fafafa;width:100%}}\
+             @media (prefers-color-scheme: dark){.value{color:#e8eaed !important}\
+             .card{background:#1f1f1f !important}}\
+             @font-face{font-family:x;src:url(x.woff)}</style>\
+             <div class=\"card\"><div class=\"value\">Friday</div></div>",
+        );
+        assert!(out.contains(".card{border:1px solid #dadce0}"), "{out}");
+        assert!(out.contains(".value{}"), "{out}");
+        assert!(out.contains("@media (max-width:600px){.card{width:100%}}"), "{out}");
+        assert!(out.contains(".value{color:#e8eaed !important}"), "{out}");
+        assert!(out.contains(".card{background:#1f1f1f !important}"), "{out}");
+        assert!(out.contains("@font-face{font-family:x;src:url(x.woff)}"), "{out}");
+    }
+
+    #[test]
+    fn the_body_tag_loses_its_white_page() {
+        let out = clean(
+            "<body bgcolor=\"#ffffff\" text=\"#000000\" link=\"#0000ee\" \
+             style=\"margin:0;background-image:linear-gradient(#fff,#eee)\"><p>Hi</p></body>",
+        );
+        assert!(out.contains("style=\"margin:0\""), "{out}");
+        assert!(!out.contains("#ffffff") && !out.contains("#000000") && !out.contains("#0000ee"), "{out}");
+        assert!(!out.contains("gradient"), "{out}");
+    }
+
+    #[test]
+    fn a_newsletter_loses_its_gradient_and_blend_mode() {
+        let out = clean(
+            "<div style=\"background:linear-gradient(180deg,#fff,#f0f0f0);padding:24px\">\
+             <img src=\"https://example.com/logo.png\" style=\"mix-blend-mode:multiply;width:120px\">\
+             <h1 style=\"color:#202124\">Weekly digest</h1></div>",
+        );
+        assert!(!out.contains("gradient") && !out.contains("mix-blend-mode"), "{out}");
+        assert!(!out.contains("#202124"), "{out}");
+        assert!(out.contains("padding:24px") && out.contains("width:120px"), "{out}");
     }
 }

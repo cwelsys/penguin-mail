@@ -28,6 +28,7 @@ pub enum Change {
     /// Moves one step up or down the text sizes; `0` goes back to the default.
     StepTextSize(i32),
     ColorScheme(ColorScheme),
+    DarkMessageMode(bool),
     /// The locale the interface speaks; empty follows the desktop.
     Language(String),
     Notifications(bool),
@@ -245,6 +246,7 @@ impl Change {
                 };
             }
             Change::ColorScheme(scheme) => settings.color_scheme = scheme,
+            Change::DarkMessageMode(on) => settings.dark_message_mode = on,
             Change::Language(code) => settings.language = code,
             Change::Notifications(on) => settings.notifications = on,
             Change::NotificationPreviews(on) => settings.notification_previews = on,
@@ -540,6 +542,7 @@ settable! {
         RemoteImages => remote_images,
         TextSize => text_size,
         ColorScheme => color_scheme,
+        DarkMessageMode => dark_message_mode,
         Notifications => notifications,
         NotificationPreviews => notification_previews,
         NotifyVipsOnly => notify_vips_only,
@@ -765,6 +768,7 @@ impl Effects {
             remote_images,
             text_size,
             color_scheme,
+            dark_message_mode,
             language,
             notifications,
             notification_previews,
@@ -905,7 +909,10 @@ impl Effects {
                 Effect::Contacts => {
                     *contacts != before.contacts || *contact_accounts != before.contact_accounts
                 }
-                Effect::Theme => *color_scheme != before.color_scheme,
+                Effect::Theme => {
+                    *color_scheme != before.color_scheme
+                        || *dark_message_mode != before.dark_message_mode
+                }
                 Effect::Language => *language != before.language,
                 Effect::Calendar => *week_start != before.week_start,
                 Effect::Translation => {
@@ -1023,6 +1030,7 @@ mod tests {
         assert!(effects(Change::SuggestFollowUps(false)).has(Effect::FollowUps));
         assert!(effects(Change::TextSize(TextSize::Large)).has(Effect::TextSize));
         assert!(effects(Change::ColorScheme(ColorScheme::Dark)).has(Effect::Theme));
+        assert!(effects(Change::DarkMessageMode(true)).has(Effect::Theme));
         assert!(
             effects(Change::WeekStart(mailrs_domain::calendar::week::WeekStart::Monday))
                 .has(Effect::Calendar)

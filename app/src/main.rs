@@ -13,6 +13,7 @@ mod clock_format;
 mod compose;
 mod contacts;
 mod core;
+mod dark_messages;
 mod demo;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod drive;

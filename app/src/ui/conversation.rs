@@ -1503,6 +1503,7 @@ impl ConversationView {
                 .map(|name| crate::render::css_family(&name))
                 .unwrap_or_default(),
         };
+        crate::dark_messages::set_window_dark(theme.dark);
         let page = open.page(&theme);
         let background = if theme.dark {
             // #1e1e21, the view colour style.css sets for dark windows.

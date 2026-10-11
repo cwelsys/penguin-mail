@@ -25,6 +25,9 @@ pub struct Settings {
     pub remote_images: RemoteImages,
     pub text_size: TextSize,
     pub color_scheme: ColorScheme,
+    /// Dark message mode: in a dark window, messages written for a white
+    /// page lose those colors and follow the window.
+    pub dark_message_mode: bool,
     /// The locale the interface speaks, such as `pt_PT`. Empty follows the
     /// desktop. Read once at startup, since GTK reads its own locale then
     /// and never again.
@@ -447,6 +450,7 @@ impl Default for Settings {
             remote_images: RemoteImages::Ask,
             text_size: TextSize::Normal,
             color_scheme: ColorScheme::System,
+            dark_message_mode: false,
             language: String::new(),
             notifications: true,
             notification_previews: true,
