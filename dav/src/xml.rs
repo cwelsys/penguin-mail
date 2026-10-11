@@ -259,7 +259,7 @@ pub mod body {
     }
 
     fn multiget(element: &str, namespace: &str, data: &str, hrefs: &[String]) -> String {
-        let listed: String = hrefs.iter().map(|h| format!("<D:href>{}</D:href>", escape(&crate::ids::wire_href(h)))).collect();
+        let listed: String = hrefs.iter().map(|h| format!("<D:href>{}</D:href>", escape(&crate::ids::encode_path(&crate::ids::path_of(h))))).collect();
         format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
 <{element} xmlns:D="DAV:" {namespace}><D:prop><D:getetag/>{data}</D:prop>{listed}</{element}>"#
@@ -346,5 +346,12 @@ mod tests {
     #[test]
     fn the_sync_request_carries_its_token_escaped() {
         assert!(body::sync_collection("a&b").contains("<D:sync-token>a&amp;b</D:sync-token>"));
+    }
+
+    #[test]
+    fn a_multiget_names_a_resource_on_another_host_by_its_path() {
+        let asked = ["https://p1-contacts.example.com:443/me/card/a b.vcf".to_string(), "/me/card/c.vcf".to_string()];
+        let q = body::addressbook_multiget(&asked);
+        assert!(q.contains("<D:href>/me/card/a%20b.vcf</D:href><D:href>/me/card/c.vcf</D:href>"), "{q}");
     }
 }
