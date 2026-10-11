@@ -374,7 +374,9 @@ impl ThreadList {
         self.title.set_label(title);
         self.subtitle.set_label(subtitle);
         let layout = super::narrow_header::header_layout(self.narrow.get());
-        self.subtitle.set_visible(layout.subtitle && !subtitle.is_empty());
+        // An empty line keeps its room, so the list stays where it is when
+        // the last unread message is read.
+        self.subtitle.set_visible(layout.subtitle);
         self.page.set_title(title);
     }
 
@@ -387,8 +389,7 @@ impl ThreadList {
             return;
         }
         let layout = super::narrow_header::header_layout(narrow);
-        self.subtitle
-            .set_visible(layout.subtitle && !self.subtitle.label().is_empty());
+        self.subtitle.set_visible(layout.subtitle);
         match layout.small_title {
             true => self.title.add_css_class("small"),
             false => self.title.remove_css_class("small"),
