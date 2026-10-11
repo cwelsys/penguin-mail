@@ -44,6 +44,10 @@ const ANSWER_ORDER: [Answer; 3] = [Answer::Yes, Answer::Maybe, Answer::No];
 /// that gets less height than its content needs, so notes shown whole
 /// with no cap closed the popover on a 1080-pixel screen.
 const NOTES_TALLEST: i32 = 480;
+/// How many characters wide a title or the notes ask to be before they
+/// wrap. A wrapping label otherwise asks for its whole paragraph on one
+/// line, and the popover grows as wide as the screen.
+const TEXT_WIDEST: i32 = 48;
 
 /// Who organized the event, by name where a guest row gives one,
 /// otherwise the bare organizer address the event carries.
@@ -162,6 +166,7 @@ impl EventPopover {
         let title = gtk::Label::builder()
             .xalign(0.0)
             .wrap(true)
+            .max_width_chars(TEXT_WIDEST)
             .css_classes(["popover-title"])
             .hexpand(true)
             .build();
@@ -248,6 +253,7 @@ impl EventPopover {
             .wrap(true)
             .wrap_mode(pango::WrapMode::WordChar)
             .use_markup(true)
+            .max_width_chars(TEXT_WIDEST)
             .build();
         // Past NOTES_TALLEST the notes scroll, so the popover never needs
         // more height than a screen gives it. The undershoot classes draw a
@@ -971,6 +977,7 @@ pub(crate) mod checks {
 
     pub fn run() {
         show_more_keeps_the_popover_short_enough_to_place();
+        one_long_paragraph_does_not_widen_the_popover();
         show_more_hands_the_focus_on_as_it_hides();
         show_all_hands_the_focus_on_as_it_hides();
         the_block_keeps_its_tooltip_off_the_popover();
@@ -1055,6 +1062,26 @@ pub(crate) mod checks {
 
         let (needed, _, _, _) = popover.popover.measure(gtk::Orientation::Vertical, -1);
         assert!(needed < 600, "the popover needs {needed} px with the notes shown whole");
+        window.destroy();
+    }
+
+    fn one_long_paragraph_does_not_widen_the_popover() {
+        let window = gtk::Window::new();
+        let parent = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let anchor = gtk::Button::new();
+        parent.append(&anchor);
+        window.set_child(Some(&parent));
+        let popover = EventPopover::new(&parent, &parent);
+        let event = Event {
+            title: "A weekly hour to work side by side ".repeat(8),
+            description: "There will likely be a bit of chat as everyone gets going. ".repeat(20),
+            ..Event::default()
+        };
+        let o = Occurrence { account_id: 1, event: Arc::new(event), start: 0, end: 3_600_000 };
+        popover.show(anchor.upcast_ref(), &o, &Calendar::default(), |_, _| {}, None, None, None);
+
+        let (_, wanted, _, _) = popover.popover.measure(gtk::Orientation::Horizontal, -1);
+        assert!(wanted < 700, "the popover asks for {wanted} px of width");
         window.destroy();
     }
 
