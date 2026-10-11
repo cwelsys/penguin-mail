@@ -474,6 +474,20 @@ pub fn size_of(conn: &Connection, account_id: AccountId, message_id: &str) -> Re
         .optional()?)
 }
 
+/// The name on the newest message `email` sent that carries one.
+pub fn sent_name(conn: &Connection, account_id: AccountId, email: &str) -> Result<Option<String>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT m.from_name FROM messages m \
+             JOIN message_mailboxes h ON h.account_id = m.account_id AND h.message_id = m.id \
+             JOIN mailboxes b ON b.key = h.mailbox \
+             WHERE m.account_id = ?1 AND b.role = 'sent' AND lower(m.from_addr) = lower(?2) \
+             AND m.from_name <> '' ORDER BY m.date DESC, m.id DESC LIMIT 1",
+        )?
+        .query_row(params![account_id, email], |row| row.get(0))
+        .optional()?)
+}
+
 /// Deletes a message with its labels and body. Returns its thread, or `None`
 /// when the message was not stored.
 fn delete_message(

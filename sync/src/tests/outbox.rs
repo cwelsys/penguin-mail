@@ -357,6 +357,28 @@ async fn attachments_and_identity_come_from_gmail() {
 }
 
 #[tokio::test]
+async fn an_account_gmail_names_no_sender_for_takes_the_name_on_its_sent_mail() {
+    let h = harness().await;
+    h.bootstrap_all().await;
+    let email = h.fake.with(|s| {
+        s.display_name = None;
+        s.email.clone()
+    });
+    let named = |id: &str, name: Option<&str>, from: &str, date, labels: &[&str]| {
+        let mut m = meta(id, id, date, labels);
+        m.from = Some(mailrs_domain::Address { name: name.map(str::to_string), email: from.into() });
+        m
+    };
+    let now = crate::now_millis();
+    h.fake.deliver(named("old", Some("Old Name"), &email, now - 3000, &["SENT"]));
+    h.fake.deliver(named("mine", Some("Dana Reis"), &email.to_uppercase(), now - 2000, &["SENT"]));
+    h.fake.deliver(named("bare", None, &email, now - 1000, &["SENT"]));
+    h.fake.deliver(named("spoof", Some("Not Me"), &email, now, &["INBOX"]));
+    h.sync.incremental().await.unwrap();
+    assert_eq!(settings(&h).display_name(h.account_id).await.unwrap().as_deref(), Some("Dana Reis"));
+}
+
+#[tokio::test]
 async fn the_automatic_reply_and_signature_pass_through() {
     let h = harness().await;
     h.fake.with(|s| s.signature = Some("Me\nExample Co".into()));

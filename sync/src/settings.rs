@@ -483,13 +483,21 @@ impl<A: Accounts> AccountSettings<A> {
     }
 
     /// The name the account's server puts on its outgoing mail, if one is
-    /// set.
+    /// set. Gmail lists none for an address that sends under the Google
+    /// account's own name, so the name on that address's sent mail stands
+    /// in.
     pub async fn display_name(&self, account_id: AccountId) -> Result<Option<String>, SyncError> {
         let addresses = self.send_as(account_id).await?;
-        Ok(addresses
-            .into_iter()
-            .find(|address| address.default)
-            .and_then(|address| address.name))
+        let Some(address) = addresses.into_iter().find(|address| address.default) else {
+            return Ok(None);
+        };
+        if address.name.is_some() {
+            return Ok(address.name);
+        }
+        Ok(self
+            .db
+            .read(move |c| mailrs_store::messages::sent_name(c, account_id, &address.email))
+            .await?)
     }
 
     /// The signature of the default address, as plain text.
