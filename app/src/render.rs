@@ -824,8 +824,6 @@ justify-content:center;overflow:hidden;color:#fff;font-weight:700;font-size:15px
 .who{{position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\
 .name{{font-weight:800;color:inherit;text-decoration:none}}\
 .name:hover{{text-decoration:underline}}\
-.unread .name::before{{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;\
-background:var(--accent);margin-right:7px;vertical-align:1px}}\
 .address{{color:var(--dim);font-size:12.5px;font-weight:500;margin-left:8px}}\
 .date{{grid-column:4;grid-row:1;color:var(--dim);font-size:12.5px;white-space:nowrap}}\
 .line{{grid-column:2 / -1;color:var(--dim);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\
