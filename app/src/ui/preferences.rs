@@ -177,6 +177,13 @@ fn general_page(
         settings.dark_message_mode,
         Change::DarkMessageMode,
     ));
+    appearance.add(&switch(
+        app,
+        &gettext("Penguin in the Tray"),
+        Some(&gettext("Show the app icon with a dot for unread mail, not the theme's envelope")),
+        settings.tray_penguin,
+        Change::TrayPenguin,
+    ));
     appearance.add(&language_row(app, settings));
     appearance.add(&never_translate_row(app, settings));
     page.add(&appearance);

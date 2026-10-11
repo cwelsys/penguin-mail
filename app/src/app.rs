@@ -312,6 +312,7 @@ impl App {
     fn apply_effects(self: &Rc<Self>, effects: &Effects) {
         if effects.has(Effect::Theme) {
             self.apply_style();
+            self.count_for_tray();
         }
         if effects.has(Effect::Calendar) {
             crate::locale_time::set_week_start_setting(self.settings.borrow().week_start);
@@ -1535,6 +1536,7 @@ impl App {
             can_update: self.updater.is_some(),
             update: None,
             pixmaps: crate::tray::pixmaps(),
+            penguin: self.settings.borrow().tray_penguin,
         };
         let slot = Arc::clone(&self.tray);
         // The restart that returns memory execs in place and keeps the pid,
@@ -1593,6 +1595,7 @@ impl App {
             return;
         };
         let accounts = self.accounts.borrow().clone();
+        let penguin = self.settings.borrow().tray_penguin;
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let counts = this
@@ -1617,6 +1620,7 @@ impl App {
             this.core.spawn(async move {
                 handle
                     .update(move |tray: &mut MailTray| {
+                        tray.penguin = penguin;
                         tray.unread = counts.iter().map(|a| a.unread).sum();
                         tray.accounts = counts;
                     })

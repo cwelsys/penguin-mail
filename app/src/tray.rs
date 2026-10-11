@@ -208,6 +208,8 @@ pub struct MailTray {
     pub update: Option<String>,
     /// The app icon; see `pixmaps`.
     pub pixmaps: Vec<ksni::Icon>,
+    /// Show the app icon rather than the icon theme's envelope.
+    pub penguin: bool,
 }
 
 impl MailTray {
@@ -232,13 +234,18 @@ impl ksni::Tray for MailTray {
         )
     }
 
-    /// No name, so every host draws the penguin from the pixmaps.
+    /// With no name, every host draws the penguin from the pixmaps.
     fn icon_name(&self) -> String {
-        String::new()
+        match (self.penguin, self.unread > 0) {
+            (true, _) => "",
+            (false, true) => "mail-unread-symbolic",
+            (false, false) => "mail-read-symbolic",
+        }
+        .into()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        match self.unread > 0 {
+        match self.penguin && self.unread > 0 {
             true => self.pixmaps.iter().map(badged).collect(),
             false => self.pixmaps.clone(),
         }
@@ -484,6 +491,7 @@ mod tests {
             can_update: false,
             update: None,
             pixmaps: Vec::new(),
+            penguin: true,
         };
         let menu = tray.menu();
         let MenuItem::Standard(line) = &menu[0] else {
