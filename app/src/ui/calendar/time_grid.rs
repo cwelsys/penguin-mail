@@ -353,12 +353,19 @@ fn shade(text: &gtk::gdk::RGBA) -> gtk::gdk::RGBA {
     wash
 }
 
-/// "09:00" or "9:00 AM" at `hour`, in the clock
+/// "09:00" or "9 AM" at `hour`, in the clock
 /// [`crate::clock_format::current`] names.
 fn hour_text(hour: u32) -> String {
     chrono::NaiveTime::from_hms_opt(hour, 0, 0)
         .map(crate::clock_format::time_text)
+        .map(|text| on_the_hour(&text))
         .unwrap_or_default()
+}
+
+/// A 12-hour time without its zero minutes: "10:00 AM" is wider than the
+/// gutter at a large text size, and "10 AM" is not.
+fn on_the_hour(text: &str) -> String {
+    text.replace(":00 ", " ")
 }
 
 /// The calendar an occurrence's event names, as its own colour (the
@@ -2598,6 +2605,12 @@ mod tests {
     fn an_hour_label_reads_the_clock() {
         mailrs_domain::translate::set_date_locale("en_US");
         assert_eq!(hour_text(9), "09:00");
+    }
+
+    #[test]
+    fn a_12_hour_label_drops_its_zero_minutes() {
+        assert_eq!(on_the_hour("10:00 AM"), "10 AM");
+        assert_eq!(on_the_hour("09:00"), "09:00");
     }
 
     fn at<Z: TimeZone>(zone: &Z, y: i32, m: u32, day: u32, h: u32, min: u32) -> EpochMillis {
