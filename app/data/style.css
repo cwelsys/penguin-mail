@@ -1026,9 +1026,9 @@ button.day-heading { min-height: 26px; padding: 0 14px; border-radius: 13px; }
   font-feature-settings: "tnum";
 }
 .all-day-label {
-  font-size: 0.65em;
+  font-size: 0.6em;
   font-weight: 700;
-  letter-spacing: 0.6px;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
