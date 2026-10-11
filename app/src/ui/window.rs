@@ -994,6 +994,14 @@ impl MainWindow {
         window
             .conversation
             .set_zoom(app.settings_with(|s| s.text_size.zoom()));
+        let mut counts_changed = window.core.lists().counts_changed();
+        let weak = Rc::downgrade(&window);
+        glib::spawn_future_local(async move {
+            while counts_changed.changed().await.is_ok() {
+                let Some(window) = weak.upgrade() else { break };
+                window.refresh_counts();
+            }
+        });
         window.refresh_accounts(Reload::Yes);
         window.reload_image_senders();
         window.check_keyring_plug();
@@ -1333,7 +1341,7 @@ impl MainWindow {
         }
     }
 
-    /// What the sidebar and the category switcher show. Two grouped
+    /// What the sidebar and the category switcher show. Grouped
     /// queries replace the one-per-mailbox counting this used to do, and
     /// every request made before they start shares them.
     fn refresh_counts(self: &Rc<Self>) {
@@ -2508,7 +2516,7 @@ impl MainWindow {
         let forwarded_html = html.clone();
         // Every address the account sends as, so the reply comes from the
         // one the message was written to.
-        let mine = app.my_addresses(account_id);
+        let mine = app.my_addresses(account_id, &target);
         let mut draft = compose::respond(
             kind,
             account_id,
@@ -2769,20 +2777,22 @@ impl MainWindow {
         self.look_for_servers(account);
     }
 
-    /// Keeps `name` as the account's one send-as address, for a provider
+    /// Keeps `name` on the account's own send-as address, for a provider
     /// that does not tell the client what its person sends as. Microsoft
     /// gives a name at sign-in, and `offered::reads_send_as` asks only
     /// Gmail.
     fn keep_send_as_name(&self, account: &Account, name: Option<String>) {
         if let (Some(app), Some(name)) = (self.app.upgrade(), name) {
+            let mut addresses = app.settings().senders(&account.email);
+            if let Some(own) = addresses
+                .iter_mut()
+                .find(|a| a.email.eq_ignore_ascii_case(&account.email))
+            {
+                own.name = Some(name);
+            }
             app.change_settings(Change::SendAsAddresses {
                 account: account.email.clone(),
-                addresses: vec![crate::compose::SendAsAddress {
-                    email: account.email.clone(),
-                    name: Some(name),
-                    signature: String::new(),
-                    default: true,
-                }],
+                addresses,
                 at: mailrs_sync::now_millis(),
             });
         }
@@ -3166,6 +3176,7 @@ impl MainWindow {
         second.append(Some(&gettext("Preferences")), Some("win.preferences"));
         second.append(Some(&gettext("Keyboard Shortcuts")), Some("win.shortcuts"));
         second.append(Some(&gettext("About Penguin Mail")), Some("win.about"));
+        second.append(Some(&gettext("Donate")), Some("win.donate"));
         second.append(Some(&gettext("Quit")), Some("win.quit"));
         menu.append_section(None, &second);
         let button = gtk::MenuButton::builder()
@@ -4021,6 +4032,7 @@ mod tests {
             provider_name: None,
         };
         let label = |account_id| Label {
+            role: None,
             account_id,
             id: "Label_1".into(),
             name: "Work".into(),

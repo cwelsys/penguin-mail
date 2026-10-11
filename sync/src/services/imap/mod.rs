@@ -109,6 +109,9 @@ struct Known {
     tray_only: bool,
     /// When the slow poll last looked at every synced mailbox.
     last_slow: Option<Instant>,
+    /// Each manual check gets a number so a request during a poll stays due.
+    full_check_requested: u64,
+    full_check_completed: u64,
     /// Every look covers every synced mailbox, for tests that should not
     /// wait for the slow poll.
     every_look: bool,
@@ -360,6 +363,40 @@ impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
             .is_none_or(|f| f.role.is_none() && !f.flagged)
     }
 
+    async fn unread_counts(&self) -> Result<HashMap<MailSet, i64>, BackendError> {
+        use futures::{StreamExt, stream};
+        use tokio::time::timeout;
+
+        let limit = Duration::from_secs(10);
+        let Ok(listed) = timeout(limit, self.ensure_listed()).await else {
+            return Ok(HashMap::new());
+        };
+        listed?;
+        let folders: Vec<_> = self.known().folders.iter()
+            .filter(|f| !f.parent_only)
+            .map(|f| (f.id.clone(), f.role))
+            .collect();
+        let mut counts = HashMap::new();
+        let mut replies = stream::iter(folders).map(|(id, role)| async move {
+            let count = timeout(limit, self.api.unread(&id)).await;
+            (id, role, count)
+        }).buffer_unordered(2);
+        while let Some((id, role, count)) = replies.next().await {
+            match count {
+                Ok(Ok(count)) => {
+                    counts.insert(MailSet::Mailbox(id), i64::from(count));
+                    if let Some(role) = role {
+                        counts.insert(MailSet::Role(role), i64::from(count));
+                    }
+                }
+                Ok(Err(ImapError::NoMailbox(_) | ImapError::Refused(_))) => continue,
+                // Keep the folders already counted if the connection stops answering.
+                Ok(Err(_)) | Err(_) => break,
+            }
+        }
+        Ok(counts)
+    }
+
     async fn mailboxes(&self) -> Result<Vec<RemoteMailbox>, BackendError> {
         self.list_mailboxes().await
     }
@@ -409,6 +446,11 @@ impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
 
     fn set_window_open(&self, open: bool) {
         self.known().tray_only = !open;
+    }
+
+    fn check_now(&self) {
+        let mut known = self.known();
+        known.full_check_requested = known.full_check_requested.wrapping_add(1);
     }
 
     fn poll_interval(&self) -> Option<Duration> {

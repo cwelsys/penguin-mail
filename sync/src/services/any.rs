@@ -282,6 +282,12 @@ impl MailBackend for AnyMail {
         forward_all_now!(AnyMail, self, made_by_person(id))
     }
 
+    async fn unread_counts(
+        &self,
+    ) -> Result<std::collections::HashMap<mailrs_domain::MailSet, i64>, BackendError> {
+        forward_all!(AnyMail, self, unread_counts())
+    }
+
     async fn mailboxes(&self) -> Result<Vec<RemoteMailbox>, BackendError> {
         forward_all!(AnyMail, self, mailboxes())
     }
@@ -320,6 +326,10 @@ impl MailBackend for AnyMail {
 
     fn set_window_open(&self, open: bool) {
         forward_all_now!(AnyMail, self, set_window_open(open))
+    }
+
+    fn check_now(&self) {
+        forward_all_now!(AnyMail, self, check_now())
     }
 
     fn poll_interval(&self) -> Option<Duration> {
