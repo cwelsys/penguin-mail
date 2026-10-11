@@ -25,7 +25,7 @@ use mailrs_gmail::{
     LabelColor, Person, RemoteLabel, SETTINGS_SCOPE, SendAs, limiter, structure,
 };
 use mailrs_mime::Parts;
-use mailrs_mime::html::html_to_text;
+use mailrs_mime::html::html_to_text_with_links;
 
 use super::{
     AutoReplyService, Backfill, CalendarService, Changes, ContactsService, Found, IdentityService,
@@ -707,7 +707,8 @@ impl<G: GmailApi> AutoReplyService for Google<G> {
 impl<G: GmailApi> IdentityService for Google<G> {
     /// Gmail's send-as list, one `sendAs.list` call. An alias still waiting
     /// on its owner to confirm it is left out, since Gmail would refuse to
-    /// send from it. Signatures come as HTML and leave as text.
+    /// send from it. Signatures come as HTML and leave as text, their links
+    /// as Markdown.
     async fn identities(&self) -> Result<Vec<SendAsAddress>, BackendError> {
         Ok(paced(self.gmail.send_as())
             .await?
@@ -716,7 +717,7 @@ impl<G: GmailApi> IdentityService for Google<G> {
             .map(|identity| SendAsAddress {
                 name: Some(identity.display_name).filter(|n| !n.trim().is_empty()),
                 email: identity.send_as_email,
-                signature: html_to_text(&identity.signature),
+                signature: html_to_text_with_links(&identity.signature),
                 default: identity.is_default,
             })
             .collect())

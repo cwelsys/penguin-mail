@@ -2021,6 +2021,20 @@ mod tests {
     }
 
     #[test]
+    fn a_link_in_a_signature_is_sent_and_survives_the_rich_body() {
+        let old = "Dana\nFollow us on [LinkedIn](https://l.example/dana) or call [555 0100](tel:5550100)";
+        let signed = with_signature("Hi Ann", old);
+        let html = markdown_to_html(&signed);
+        assert!(html.contains(r#"<a href="https://l.example/dana">LinkedIn</a>"#), "{html}");
+        assert!(html.contains(r#"<a href="tel:5550100">555 0100</a>"#), "{html}");
+        let rich = crate::richtext::RichBody::from_markdown(&signed);
+        assert!(rich.to_html().contains(r#"href="https://l.example/dana""#), "{}", rich.to_html());
+        let round_tripped = rich.to_markdown();
+        let swapped = restyle_signature(&round_tripped, old, "Dana, Sales");
+        assert!(swapped.contains("\n\n-- \nDana, Sales"), "{swapped:?} came from {round_tripped:?}");
+    }
+
+    #[test]
     fn a_signature_someone_edited_is_left_alone() {
         // Losing a rewritten sign-off to a dropdown would be worse than
         // showing the wrong one, so an edited block stays put.

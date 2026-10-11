@@ -168,6 +168,18 @@ pub fn html_to_text(html: &str) -> String {
     text.finish()
 }
 
+/// [`html_to_text`] with each link kept as Markdown, `[words](address)`,
+/// or `<address>` where the words are the address. A signature is read
+/// this way, since the composer takes it as Markdown.
+pub fn html_to_text_with_links(html: &str) -> String {
+    let mut text = Text { links: true, ..Text::default() };
+    walk(html, |piece| match piece {
+        Piece::Text(words) => text.words(words),
+        Piece::Tag(tag) => text.tag(&tag),
+    });
+    text.finish()
+}
+
 #[derive(Default)]
 struct Text {
     out: String,
@@ -178,6 +190,10 @@ struct Text {
     /// Whitespace came since the last word, and a space is owed before the
     /// next one.
     space: bool,
+    /// Whether links are kept.
+    links: bool,
+    /// Where the words of the open link start in `out`, and its address.
+    link: Option<(usize, String)>,
 }
 
 impl Text {
@@ -215,6 +231,7 @@ impl Text {
             return;
         }
         match tag.name {
+            "a" if self.links => self.link(tag),
             "br" => self.push_break(),
             // A paragraph stands apart from what comes before and after
             // it, the way its margins set it apart in a browser.
@@ -228,6 +245,35 @@ impl Text {
             }
             name if block(name) => self.end_line(1),
             _ => {}
+        }
+    }
+
+    fn link(&mut self, tag: &Tag<'_>) {
+        let Some((start, address)) = self.link.take() else {
+            let address = tag.attribute("href").unwrap_or_default().trim();
+            let known = ["http://", "https://", "mailto:", "tel:"].iter().any(|s| address.starts_with(s));
+            if !tag.closing && known && !address.contains(['<', '>', '\n']) {
+                if self.space && !self.out.is_empty() && !self.out.ends_with('\n') {
+                    self.out.push(' ');
+                }
+                self.space = false;
+                self.link = Some((self.out.len(), address.to_string()));
+            }
+            return;
+        };
+        let words = &self.out[start..];
+        if words.is_empty() || words.contains(['[', ']', '\n']) {
+            return;
+        }
+        if address == words || address.strip_prefix("mailto:") == Some(words) {
+            self.out.insert(start, '<');
+            self.out.push('>');
+            return;
+        }
+        self.out.insert(start, '[');
+        match address.contains([' ', '(', ')']) {
+            true => self.out.push_str(&format!("](<{address}>)")),
+            false => self.out.push_str(&format!("]({address})")),
         }
     }
 
@@ -283,6 +329,26 @@ mod tests {
         );
         assert_eq!(html_to_text("<p>One</p><p>Two</p>"), "One\n\nTwo");
         assert_eq!(html_to_text("plain"), "plain");
+    }
+
+    #[test]
+    fn a_signature_keeps_its_links_as_markdown() {
+        let html = concat!(
+            r#"<div>Mobile: <a href="tel:5550100">555-0100</a></div>"#,
+            r#"<div><a href="https://e.com/">www.e.com</a></div>"#,
+            r#"<div>Our <a href="https://e.com/film?a=1&amp;b=2" target="_blank">new film</a> is out.</div>"#,
+            r#"<div>Follow us on <a href="https://l.example/a (b)">LinkedIn</a> and <a href="https://f.example">Facebook</a></div>"#,
+            r#"<div><a href="https://e.com/x">https://e.com/x</a> <a href="mailto:ann@e.com">ann@e.com</a></div>"#,
+            r#"<div><a href="javascript:x()">run</a> <a name="top">anchor</a> <a href="https://e.com/i"><img src="i.png"></a></div>"#,
+        );
+        assert_eq!(
+            html_to_text_with_links(html),
+            "Mobile: [555-0100](tel:5550100)\n[www.e.com](https://e.com/)\n\
+             Our [new film](https://e.com/film?a=1&b=2) is out.\n\
+             Follow us on [LinkedIn](<https://l.example/a (b)>) and [Facebook](https://f.example)\n\
+             <https://e.com/x> <ann@e.com>\nrun anchor"
+        );
+        assert_eq!(html_to_text(html).lines().next(), Some("Mobile: 555-0100"));
     }
 
     #[test]

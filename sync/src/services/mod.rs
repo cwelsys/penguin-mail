@@ -75,7 +75,8 @@ use crate::{BackendError, MailOp};
 pub struct SendAsAddress {
     pub email: String,
     pub name: Option<String>,
-    /// The signature the server holds for this address, as plain text.
+    /// The signature the server holds for this address, as text with its
+    /// links in Markdown.
     pub signature: String,
     /// The address the server sends from when the writer picks none.
     pub default: bool,
