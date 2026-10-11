@@ -1003,6 +1003,8 @@ impl App {
                         });
                     }
                     tracing::warn!(error = %err, "could not read the address book");
+                    this.contacts_stale.set(true);
+                    this.reload_contacts();
                 }
             }
         });

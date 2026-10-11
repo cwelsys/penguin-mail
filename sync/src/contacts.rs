@@ -111,13 +111,16 @@ impl<A: Accounts> ContactBook<A> {
     }
 
     /// Refreshes every account whose address book has aged out, and leaves
-    /// the rest alone. Reports what the refreshes added up to.
+    /// the rest alone. Reports what the refreshes added up to. An account
+    /// that fails does not stop the ones after it; the first failure is
+    /// the answer once all were tried.
     pub async fn refresh_stale(
         &self,
         accounts: &[AccountId],
         now: EpochMillis,
     ) -> Result<Refreshed, SyncError> {
         let mut total = Refreshed::default();
+        let mut failed = None;
         for account_id in accounts {
             let stored = self
                 .db
@@ -129,15 +132,19 @@ impl<A: Accounts> ContactBook<A> {
             if stored.is_some_and(|(_, at)| now.saturating_sub(at) < REFRESH_AFTER) {
                 continue;
             }
-            match self.refresh(*account_id).await? {
-                Permitted::Done(one) => {
+            match self.refresh(*account_id).await {
+                Ok(Permitted::Done(one)) => {
                     total.contacts += one.contacts;
                     total.photos += one.photos;
                 }
-                Permitted::NeedsPermission => total.needs_permission.push(*account_id),
+                Ok(Permitted::NeedsPermission) => total.needs_permission.push(*account_id),
+                Err(err) => failed = failed.or(Some(err)),
             }
         }
-        Ok(total)
+        match failed {
+            Some(err) => Err(err),
+            None => Ok(total),
+        }
     }
 
     /// Drops everything stored for an account, photos included. Turning

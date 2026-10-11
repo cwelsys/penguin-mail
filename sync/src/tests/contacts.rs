@@ -165,6 +165,28 @@ async fn an_account_without_the_permission_does_not_hold_up_the_rest() {
 }
 
 #[tokio::test]
+async fn an_account_that_fails_does_not_keep_the_next_one_from_being_read() {
+    let h = harness().await;
+    let b = book(&h);
+    h.fake.with(|s| {
+        s.contacts = vec![person(
+            "people/c1",
+            "Mara Okafor",
+            &["mara@example.org"],
+            None,
+        )]
+    });
+    h.fake.fail_next(GmailError::Network("down".into()));
+    let read = b
+        .book
+        .refresh_stale(&[h.account_id, h.account_id], crate::now_millis())
+        .await;
+    assert!(read.is_err());
+    let stored = h.db.read(address_book::list).await.unwrap();
+    assert_eq!(stored.len(), 1);
+}
+
+#[tokio::test]
 async fn an_expired_sync_token_reads_the_whole_address_book_again() {
     let h = harness().await;
     let b = book(&h);
