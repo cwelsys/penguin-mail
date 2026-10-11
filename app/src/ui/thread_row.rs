@@ -314,6 +314,11 @@ impl ThreadRow {
         self.imp().item.set(Some(item));
     }
 
+    /// The list item the row sits in.
+    pub fn item(&self) -> Option<gtk::ListItem> {
+        self.imp().item.upgrade()
+    }
+
     /// The position in the list the row shows, or `None` while it shows
     /// nothing.
     pub fn position(&self) -> Option<u32> {

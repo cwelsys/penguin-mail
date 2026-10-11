@@ -82,6 +82,8 @@ pub struct ThreadList {
     /// decodes after a newer hand-over is dropped.
     photos_asked: Cell<u64>,
     muted: Cell<bool>,
+    /// Draws the row in a list item from the thread the item holds.
+    draw: Rc<dyn Fn(&glib::Object)>,
     /// The menu a right click on a row opens. It has no model until the
     /// window hands over the conversation's own through `set_row_menu`.
     row_popover: gtk::PopoverMenu,
@@ -158,7 +160,7 @@ impl ThreadList {
         let photos: Rc<RefCell<HashMap<String, gdk::Texture>>> =
             Rc::new(RefCell::new(HashMap::new()));
         let faces = Rc::clone(&photos);
-        factory.connect_bind(move |_, item| {
+        let draw: Rc<dyn Fn(&glib::Object)> = Rc::new(move |item| {
             let item = item
                 .downcast_ref::<gtk::ListItem>()
                 .expect("list items are ListItems");
@@ -182,6 +184,8 @@ impl ThreadList {
             };
             row.bind(&thread, shown.get(), vip, avatar);
         });
+        let bound = Rc::clone(&draw);
+        factory.connect_bind(move |_, item| bound(item));
         let view = gtk::ListView::builder()
             .model(&selection)
             .factory(&factory)
@@ -347,6 +351,7 @@ impl ThreadList {
             photos,
             photos_asked: Cell::new(0),
             muted: Cell::new(false),
+            draw,
             row_popover,
         });
         let weak = Rc::downgrade(&list);
@@ -536,11 +541,16 @@ impl ThreadList {
         {
             let new = self.rows.borrow();
             if let Some(change) = splice(&old, &new) {
-                let added: Vec<glib::BoxedAnyObject> = new[change.added]
-                    .iter()
-                    .map(|row| glib::BoxedAnyObject::new(Rc::clone(row)))
-                    .collect();
-                self.store.splice(change.position, change.removed, &added);
+                let before = &old[change.position as usize..][..change.removed as usize];
+                if same_threads(before, &new[change.added.clone()]) {
+                    self.redraw(change.position, &new[change.added]);
+                } else {
+                    let added: Vec<glib::BoxedAnyObject> = new[change.added]
+                        .iter()
+                        .map(|row| glib::BoxedAnyObject::new(Rc::clone(row)))
+                        .collect();
+                    self.store.splice(change.position, change.removed, &added);
+                }
             }
         }
         self.reselect(&keys);
@@ -553,6 +563,28 @@ impl ThreadList {
             } else {
                 "list"
             });
+    }
+
+    /// Hands the items from `position` on their threads as they are now and
+    /// draws the ones on screen again. The items stay in the model, so the
+    /// selection, the focus and the scroll position stay with them.
+    fn redraw(&self, position: u32, fresh: &[Row]) {
+        for (item, row) in (position..).zip(fresh) {
+            if let Some(object) = self.store.item(item).and_downcast::<glib::BoxedAnyObject>() {
+                *object.borrow_mut::<Row>() = Rc::clone(row);
+            }
+        }
+        let changed = position..position + fresh.len() as u32;
+        let mut child = self.view.first_child();
+        while let Some(widget) = child {
+            let row = widget.first_child().and_downcast::<ThreadRow>();
+            if let Some(item) = row.and_then(|row| row.item())
+                && changed.contains(&item.position())
+            {
+                (self.draw)(item.upcast_ref());
+            }
+            child = widget.next_sibling();
+        }
     }
 
     /// Adds a page of older rows at the end, leaving the selection alone.
@@ -955,6 +987,12 @@ fn merge_changed(
     rows
 }
 
+/// Whether `fresh` holds the threads of `old`, each in its old place, so
+/// the rows can be drawn again where they are.
+fn same_threads(old: &[Row], fresh: &[Row]) -> bool {
+    old.len() == fresh.len() && old.iter().zip(fresh).all(|(old, fresh)| key(old) == key(fresh))
+}
+
 /// Where a row sorts in the list: newest first, ties broken as the store
 /// breaks them, by account and then id ascending.
 fn order(row: &ThreadSummary) -> (i64, i64, Reverse<&str>) {
@@ -975,6 +1013,25 @@ mod tests {
             id: id.into(),
             ..ThreadSummary::default()
         })
+    }
+
+    #[test]
+    fn rows_are_drawn_in_place_only_when_the_same_threads_keep_their_places() {
+        let old: Vec<Row> = ["a", "b"].into_iter().map(row).collect();
+        let read: Vec<Row> = ["a", "b"]
+            .into_iter()
+            .map(|id| {
+                Rc::new(ThreadSummary {
+                    unread: false,
+                    snippet: "seen".into(),
+                    ..(*row(id)).clone()
+                })
+            })
+            .collect();
+        assert!(same_threads(&old, &read));
+        assert!(!same_threads(&old, &[row("b"), row("a")]));
+        assert!(!same_threads(&old, &[row("a")]));
+        assert!(!same_threads(&old[..1], &[row("c")]));
     }
 
     #[test]
