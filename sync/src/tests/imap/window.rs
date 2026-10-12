@@ -18,6 +18,19 @@ async fn the_window_holds_the_inbox_and_recent_mail_under_the_locations_it_was_m
 }
 
 #[tokio::test]
+async fn the_window_holds_recent_junk_and_trash() {
+    let h = imap_harness().await;
+    h.imap.deliver_flagged("Junk", &message("a", "Win big", ""), &[], days_ago(1));
+    h.imap.deliver_flagged("Trash", &message("b", "Old plans", ""), &["\\Seen"], days_ago(2));
+
+    h.bootstrap().await;
+
+    let ids = h.ids().await;
+    assert!(ids.iter().any(|id| id.starts_with("Junk/")), "{ids:?}");
+    assert!(ids.iter().any(|id| id.starts_with("Trash/")), "{ids:?}");
+}
+
+#[tokio::test]
 async fn a_long_inbox_loads_a_page_at_a_time_down_by_uid() {
     let h = imap_harness().await;
     for n in 0..150 {
