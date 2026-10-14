@@ -906,6 +906,7 @@ mod tests {
         crate::ui::calendar::popover::checks::run();
         crate::ui::calendar::attachments::checks::run();
         crate::ui::checks::run();
+        crate::tray::checks::run();
         crate::ui::copied::checks::run();
         crate::ui::add_account::checks::run();
         // The extraction script needs a real engine to run in, and this

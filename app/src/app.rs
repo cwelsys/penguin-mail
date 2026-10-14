@@ -334,6 +334,7 @@ impl App {
     fn apply_effects(self: &Rc<Self>, effects: &Effects) {
         if effects.has(Effect::Theme) {
             self.apply_style();
+            self.show_tray_penguin();
         }
         if effects.has(Effect::Calendar) {
             crate::locale_time::set_week_start_setting(self.settings.borrow().week_start);
@@ -1580,6 +1581,8 @@ impl App {
             can_update: self.updater.is_some(),
             update: None,
             icon_theme_path: crate::tray::installed_icons(),
+            pixmaps: crate::tray::pixmaps(),
+            penguin: self.settings.borrow().tray_penguin,
         };
         let slot = Arc::clone(&self.tray);
         // The icon comes up on the runtime, then takes the newest count and
@@ -1662,6 +1665,20 @@ impl App {
                 app.show_unread(counted);
             }
         }));
+    }
+
+    /// Shows the penguin or the envelope glyph in the tray, as the
+    /// preference says.
+    fn show_tray_penguin(&self) {
+        let Some(handle) = self.tray.lock().expect("tray slot poisoned").clone() else {
+            return;
+        };
+        let penguin = self.settings.borrow().tray_penguin;
+        self.core.spawn(async move {
+            handle
+                .update(move |tray: &mut MailTray| tray.penguin = penguin)
+                .await;
+        });
     }
 
     /// Puts a count on the tray and the Dock badge: All Inboxes, and each

@@ -28,6 +28,9 @@ pub struct Settings {
     /// Dark message mode: in a dark window, messages written for a white
     /// page lose those colors and follow the window.
     pub dark_message_mode: bool,
+    /// Show the app icon in the tray, with a dot for unread mail, rather
+    /// than the icon theme's envelope.
+    pub tray_penguin: bool,
     /// The locale the interface speaks, such as `pt_PT`. Empty follows the
     /// desktop. Read once at startup, since GTK reads its own locale then
     /// and never again.
@@ -456,6 +459,7 @@ impl Default for Settings {
             text_size: TextSize::Normal,
             color_scheme: ColorScheme::System,
             dark_message_mode: false,
+            tray_penguin: true,
             language: String::new(),
             notifications: true,
             notification_previews: true,

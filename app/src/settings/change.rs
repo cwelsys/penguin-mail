@@ -29,6 +29,7 @@ pub enum Change {
     StepTextSize(i32),
     ColorScheme(ColorScheme),
     DarkMessageMode(bool),
+    TrayPenguin(bool),
     /// The locale the interface speaks; empty follows the desktop.
     Language(String),
     Notifications(bool),
@@ -265,6 +266,7 @@ impl Change {
             }
             Change::ColorScheme(scheme) => settings.color_scheme = scheme,
             Change::DarkMessageMode(on) => settings.dark_message_mode = on,
+            Change::TrayPenguin(on) => settings.tray_penguin = on,
             Change::Language(code) => settings.language = code,
             Change::Notifications(on) => settings.notifications = on,
             Change::NotificationPreviews(on) => settings.notification_previews = on,
@@ -578,6 +580,7 @@ settable! {
         TextSize => text_size,
         ColorScheme => color_scheme,
         DarkMessageMode => dark_message_mode,
+        TrayPenguin => tray_penguin,
         Notifications => notifications,
         NotificationPreviews => notification_previews,
         NotifyVipsOnly => notify_vips_only,
@@ -809,6 +812,7 @@ impl Effects {
             text_size,
             color_scheme,
             dark_message_mode,
+            tray_penguin,
             language,
             notifications,
             notification_previews,
@@ -958,6 +962,7 @@ impl Effects {
                 Effect::Theme => {
                     *color_scheme != before.color_scheme
                         || *dark_message_mode != before.dark_message_mode
+                        || *tray_penguin != before.tray_penguin
                 }
                 Effect::Language => *language != before.language,
                 Effect::Calendar => *week_start != before.week_start,
