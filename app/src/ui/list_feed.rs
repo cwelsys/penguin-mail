@@ -1,20 +1,23 @@
 //! What the thread list loads next, and which answers still count.
 //!
-//! The window lists a mailbox a page at a time, re-reads the threads a
-//! change event names, and waits a moment so that a burst of events costs
+//! The listing run lists a mailbox a page at a time, re-reads the threads
+//! a change event names, and waits a moment so that a burst of events costs
 //! one refresh. Every one of those answers arrives after an `await`, and
 //! by then the reader may have moved to another mailbox. [`ListFeed`]
 //! holds the counters that sort this out: a generation that each first
 //! page starts, whether more rows follow, whether a page is on its way,
-//! and the threads waiting for the coalescing timer. The window feeds it
-//! events, carries out what it answers, and hands every answer back
-//! through it, so a stale one is dropped here and nowhere else.
+//! and the threads waiting for the coalescing timer. The run
+//! (`ui::window::listing`) feeds it events, carries out what it answers,
+//! and hands every answer back through it, so a stale one is dropped here
+//! and nowhere else.
 //!
-//! Nothing here touches GTK or a clock. The window owns the timer; the
-//! feed only says when to start it and what to do when it fires.
+//! Nothing here touches GTK or a clock. The run owns the timer; the feed
+//! only says when to start it and what to do when it fires.
 
-use mailrs_domain::AccountId;
-use mailrs_sync::Listing;
+use std::cmp::Reverse;
+
+use mailrs_domain::{AccountId, ThreadSummary};
+use mailrs_sync::{Listing, Loaded, PAGE};
 
 /// A thread a change event named.
 pub type Named = (AccountId, String);
@@ -212,11 +215,6 @@ impl<R> ListFeed<R> {
         true
     }
 
-    /// Whether the mailbox holds rows past the ones loaded.
-    pub fn more(&self) -> bool {
-        self.more
-    }
-
     /// The threads a splice re-read arrived. `fresh` is nothing when the
     /// mailbox cannot re-read threads on their own, and `prunes` says the
     /// mailbox is a folder, which can drop the rows that left it.
@@ -227,6 +225,34 @@ impl<R> ListFeed<R> {
             None if prunes => Splice::Prune,
             None => Splice::Reload,
         }
+    }
+
+    /// Which of the rows a splice re-read go into a list that holds
+    /// `held`. A row that sorts above the last one loaded always goes in.
+    /// One that sorts below it goes in while the list holds the whole
+    /// mailbox and has room for a page; otherwise it waits for the next
+    /// page, and the list learns there is one. Without that, a list first
+    /// listed while an account's first sync was still filling the store
+    /// said it held everything and never asked for the mail that came
+    /// after.
+    pub fn place(&mut self, fresh: Vec<ThreadSummary>, held: &Loaded) -> Vec<ThreadSummary> {
+        let mut room = match self.more {
+            true => 0,
+            false => PAGE.saturating_sub(held.count),
+        };
+        let mut kept = Vec::with_capacity(fresh.len());
+        for row in fresh {
+            let below = held.last.as_ref().is_none_or(|last| order(&row) < order(last));
+            if !below {
+                kept.push(row);
+            } else if room > 0 {
+                room -= 1;
+                kept.push(row);
+            } else {
+                self.more = true;
+            }
+        }
+        kept
     }
 
     /// Asks to select a thread once its rows are on screen. Hands it back
@@ -245,6 +271,16 @@ impl<R> ListFeed<R> {
     pub fn current(&self, ticket: Ticket) -> bool {
         ticket.0 == self.generation
     }
+}
+
+/// Where a row sorts in the list: newest first, ties broken as the store
+/// breaks them, by account and then id ascending.
+pub fn order(row: &ThreadSummary) -> (i64, i64, Reverse<&str>) {
+    (
+        row.last_message_at,
+        -row.account_id,
+        Reverse(row.id.as_str()),
+    )
 }
 
 #[cfg(test)]

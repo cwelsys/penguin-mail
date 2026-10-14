@@ -430,8 +430,9 @@ impl<A: Accounts> Tools<A> {
                 .await?;
             let parent = found.iter().rev().find(|m| !m.in_role(Role::Drafts));
             if let Some(parent) = parent {
-                let mine =
-                    compose::reply_addresses(&self.desk.settings().senders(&account.email), parent);
+                let mail = self.modules.accounts.services(account.id).map(|s| s.mail);
+                let masked = |email: &str| mail.as_ref().is_some_and(|mail| mail.is_masked(email) == Some(true));
+                let mine = compose::reply_addresses(&self.desk.settings().senders(&account.email), parent, masked);
                 if let Some(from) = compose::reply_from(&mine, parent) {
                     draft.from = from.clone();
                 }
@@ -572,7 +573,7 @@ impl<A: Accounts> Tools<A> {
             files.push(OutgoingAttachment {
                 filename: found.filename,
                 mime_type: found.mime_type,
-                data,
+                data: data.into(),
                 content_id: None,
             });
         }
@@ -602,7 +603,7 @@ impl<A: Accounts> Tools<A> {
             files.push(OutgoingAttachment {
                 filename,
                 mime_type,
-                data,
+                data: data.into(),
                 content_id: None,
             });
         }
@@ -767,7 +768,7 @@ impl<A: Accounts> Tools<A> {
             let (s, id) = (Arc::clone(&sync), message_id.clone());
             let raw = self.call(async move { s.raw_message(&id).await }).await?;
             let blank = self.effects.new_draft(account.id)?;
-            let mut draft = self.effects.reopen_draft(raw, blank).await?;
+            let mut draft = self.effects.reopen_draft(raw.as_ref().clone(), blank).await?;
             draft.draft_id = Some(draft_id);
             draft.thread_id = (thread.len() > 1).then_some(stored.thread_id.clone());
             let missing = self.apply(&mut draft, edits).await?;

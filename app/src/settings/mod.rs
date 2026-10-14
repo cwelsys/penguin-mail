@@ -28,9 +28,6 @@ pub struct Settings {
     /// Dark message mode: in a dark window, messages written for a white
     /// page lose those colors and follow the window.
     pub dark_message_mode: bool,
-    /// Show the app icon in the tray, with a dot for unread mail, rather
-    /// than the icon theme's envelope.
-    pub tray_penguin: bool,
     /// The locale the interface speaks, such as `pt_PT`. Empty follows the
     /// desktop. Read once at startup, since GTK reads its own locale then
     /// and never again.
@@ -100,6 +97,10 @@ pub struct Settings {
     /// The send-as address each account last sent from, so the composer
     /// opens where the writer left it.
     pub last_sender: BTreeMap<String, String>,
+    /// The storage banners the person took down, by the account's address:
+    /// whether the account was full then. One stays down until the
+    /// account's level changes.
+    pub storage_dismissed: BTreeMap<String, bool>,
     /// Send-as addresses keyed by the account's own address. Gmail refreshes
     /// its list in the background; SMTP accounts keep the owner's choices.
     pub send_as: BTreeMap<String, Vec<crate::compose::SendAsAddress>>,
@@ -111,6 +112,9 @@ pub struct Settings {
     pub compose_format: ComposeFormat,
     /// Ask before sending a message that promises a file and carries none.
     pub check_attachments: bool,
+    /// Whether a message that asks for a read receipt shows the card that
+    /// offers to send one. Never ask leaves every such request unanswered.
+    pub read_receipts: ReadReceipts,
     /// Open the composer with Sign on. It does nothing without a gpg.
     pub sign_by_default: bool,
     /// Turn Encrypt on as soon as gpg holds a key for every recipient.
@@ -452,7 +456,6 @@ impl Default for Settings {
             text_size: TextSize::Normal,
             color_scheme: ColorScheme::System,
             dark_message_mode: false,
-            tray_penguin: true,
             language: String::new(),
             notifications: true,
             notification_previews: true,
@@ -481,10 +484,12 @@ impl Default for Settings {
             spell_languages: BTreeMap::new(),
             spell_words: Vec::new(),
             last_sender: BTreeMap::new(),
+            storage_dismissed: BTreeMap::new(),
             send_as: BTreeMap::new(),
             send_as_checked: BTreeMap::new(),
             compose_format: ComposeFormat::Rich,
             check_attachments: true,
+            read_receipts: ReadReceipts::Ask,
             sign_by_default: false,
             encrypt_when_possible: false,
             contacts: false,
@@ -597,6 +602,24 @@ impl Choice for RemoteImages {
         match self {
             RemoteImages::Ask => gettext("Ask each time"),
             RemoteImages::Always => gettext("Always load"),
+        }
+    }
+}
+
+/// Whether to offer the read receipts senders ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReadReceipts {
+    Ask,
+    Never,
+}
+
+impl Choice for ReadReceipts {
+    const ALL: &'static [Self] = &[ReadReceipts::Ask, ReadReceipts::Never];
+    fn label(self) -> String {
+        match self {
+            ReadReceipts::Ask => gettext("Ask each time"),
+            ReadReceipts::Never => gettext("Never ask"),
         }
     }
 }
@@ -749,14 +772,40 @@ pub fn poll_choices() -> Vec<(i64, String)> {
     ]
 }
 
-/// How many days of mail stay on this computer.
+/// How many days of mail stay on this computer, the last choice all of it.
 pub fn window_choices() -> Vec<(i64, String)> {
     vec![
         (14, gettext("2 weeks")),
         (30, gettext("30 days")),
         (90, gettext("90 days")),
         (365, gettext("1 year")),
+        (730, gettext("2 years")),
+        (1825, gettext("5 years")),
+        (mailrs_sync::ALL_MAIL, gettext("All mail")),
     ]
+}
+
+/// The index of the window choice closest to `days`. All mail reaches
+/// further than any count of days, so a short count is not taken for it.
+pub fn nearest_window(choices: &[(i64, String)], days: i64) -> u32 {
+    let reach = |days: i64| mailrs_sync::window_reach(days).unwrap_or(i64::MAX);
+    let wanted = reach(days);
+    choices
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, (choice, _))| reach(*choice).abs_diff(wanted))
+        .map_or(0, |(i, _)| i as u32)
+}
+
+/// The line under the window row: what all mail costs, or what any other
+/// window keeps besides the days it names.
+pub fn window_note(days: i64) -> String {
+    match mailrs_sync::window_reach(days) {
+        None => gettext(
+            "Every message stays on this computer. A large account takes a lot of disk space and memory, and its older mail downloads in the background.",
+        ),
+        Some(_) => gettext("Everything in your inbox stays too, and older mail remains searchable"),
+    }
 }
 
 /// Body cache limit in megabytes.
@@ -1403,6 +1452,35 @@ mod tests {
         assert_eq!(MarkRead::from_index(99), MarkRead::Immediately);
         assert_eq!(nearest(&poll_choices(), 45), 0);
         assert_eq!(nearest(&window_choices(), 100), 2);
+    }
+
+    #[test]
+    fn the_window_reaches_two_years_five_years_and_all_mail() {
+        let days: Vec<i64> = window_choices().iter().map(|(days, _)| *days).collect();
+        assert_eq!(days, [14, 30, 90, 365, 730, 1825, mailrs_sync::ALL_MAIL]);
+        assert_eq!(window_choices()[6].1, "All mail");
+    }
+
+    #[test]
+    fn a_window_value_picks_its_row_and_all_mail_is_furthest() {
+        let choices = window_choices();
+        assert_eq!(nearest_window(&choices, 0), 6);
+        assert_eq!(nearest_window(&choices, -1), 6, "any count below one day is all mail");
+        assert_eq!(nearest_window(&choices, 5), 0, "five days is near two weeks, not all mail");
+        assert_eq!(nearest_window(&choices, 800), 4);
+        assert_eq!(nearest_window(&choices, 100_000), 5);
+    }
+
+    #[test]
+    fn all_mail_says_what_it_costs() {
+        assert_eq!(
+            window_note(mailrs_sync::ALL_MAIL),
+            "Every message stays on this computer. A large account takes a lot of disk space and memory, and its older mail downloads in the background."
+        );
+        assert_eq!(
+            window_note(30),
+            "Everything in your inbox stays too, and older mail remains searchable"
+        );
     }
 
     #[test]

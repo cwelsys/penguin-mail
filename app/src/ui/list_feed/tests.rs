@@ -224,3 +224,15 @@ fn a_splice_rereads_only_the_open_conversations_the_events_named() {
     feed.everything();
     assert!(feed.fire().names(2, "anything"), "a reload covers them all");
 }
+
+#[test]
+fn rows_with_the_same_date_sort_by_id_as_the_store_does() {
+    let dated = |id: &str| mailrs_domain::ThreadSummary {
+        account_id: 1,
+        id: id.into(),
+        last_message_at: 1,
+        ..Default::default()
+    };
+    let (a, b) = (dated("a"), dated("b"));
+    assert!(super::order(&a) > super::order(&b), "a sorts above b");
+}

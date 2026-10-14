@@ -6,7 +6,7 @@
 //! remote ref. This adapter never opens the store.
 
 mod api;
-mod bodies;
+pub(in crate::services) mod bodies;
 mod cadence;
 mod feed;
 mod keywords;
@@ -14,12 +14,13 @@ mod mailboxes;
 mod outgoing;
 mod search;
 mod state;
+mod storage;
 mod syntax;
 mod window;
 mod writes;
 
 pub use api::{ImapApi, Submit};
-pub(crate) use outgoing::submit_over;
+pub(crate) use outgoing::{envelope_of, submit_over, without_bcc};
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -35,7 +36,7 @@ use tokio::time::Instant;
 
 use super::{
     Backfill, Changes, Found, IdentityService, KeywordsPage, MailBackend, MailCapabilities,
-    RawMessage, Relocated, RemoteRef, SearchQuery, SendAsAddress, SyncState, Unapplied, Want,
+    RawMessage, Relocated, RemoteRef, SearchQuery, SendAsAddress, Storage, SyncState, Unapplied, Want,
 };
 use crate::api::{DraftRef, SavedDraft};
 use crate::{BackendError, MailOp};
@@ -317,6 +318,10 @@ impl From<ImapError> for BackendError {
 }
 
 impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
+    async fn storage(&self) -> Result<Option<Storage>, BackendError> {
+        self.space().await
+    }
+
     fn capabilities(&self) -> MailCapabilities {
         MailCapabilities {
             labels: false,

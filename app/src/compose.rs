@@ -57,6 +57,17 @@ pub struct Identity {
     pub signature: String,
     /// The account's default, used when nothing else points at an address.
     pub default: bool,
+    /// The account makes masked addresses, so the composer offers one.
+    pub masks: bool,
+}
+
+/// The identity a message goes out as: `identity`, from the masked
+/// address made for this message when there is one.
+pub fn sender_with_mask(identity: &Identity, masked: Option<&Address>) -> Identity {
+    match masked {
+        Some(address) => Identity { address: address.clone(), ..identity.clone() },
+        None => identity.clone(),
+    }
 }
 
 /// The address a reply to `original` comes from: whichever of `mine` the
@@ -75,6 +86,31 @@ pub fn reply_from<'a>(mine: &'a [Address], original: &MessageMeta) -> Option<&'a
                 .as_ref()
                 .and_then(|from| mine.iter().find(|a| same_address(a, from)))
         })
+}
+
+/// The site a masked address is made for: the first recipient's domain,
+/// since a person writes to the site they sign up with. Empty when no
+/// recipient is a whole address yet.
+pub fn masked_site(to: &[Address]) -> String {
+    to.iter()
+        .filter(|a| is_address(&a.email))
+        .find_map(|a| a.email.rsplit_once('@'))
+        .map(|(_, domain)| domain.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// The masked address a saved draft or a reply goes out from, so opening
+/// it does not put the account's own address back in its place: the
+/// draft's sender, when the chosen identity's account makes masked
+/// addresses, the sender is none of the addresses the From row lists, and
+/// `masked`, the account's own list, does not say it is someone else's.
+/// `masked` is `None` before the account has listed its masked addresses.
+pub fn kept_mask(identities: &[Identity], chosen: &Identity, from: &Address, masked: Option<bool>) -> Option<Address> {
+    let listed = identities.iter().any(|i| {
+        i.address.email.eq_ignore_ascii_case(&from.email)
+            || i.suffixes.suffix(&i.address.email, &from.email).is_some()
+    });
+    (chosen.masks && is_address(&from.email) && !listed && masked != Some(false)).then(|| from.clone())
 }
 
 /// Which row the From dropdown starts on. The draft's own address wins,
@@ -120,13 +156,47 @@ mod attachment_bytes {
     use base64::engine::general_purpose::STANDARD;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(data: &[u8], out: S) -> Result<S::Ok, S::Error> {
-        out.serialize_str(&STANDARD.encode(data))
+    use super::FileBytes;
+
+    pub fn serialize<S: Serializer>(data: &FileBytes, out: S) -> Result<S::Ok, S::Error> {
+        out.serialize_str(&STANDARD.encode(&data[..]))
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<Vec<u8>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<FileBytes, D::Error> {
         let text = String::deserialize(input)?;
-        STANDARD.decode(text).map_err(serde::de::Error::custom)
+        STANDARD.decode(text).map(FileBytes::from).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A file's bytes, shared rather than copied as the draft goes from the
+/// composer to the builder, Undo Send and the outbox. A 25 MB file was
+/// held three times over while it was sent.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FileBytes(gtk::glib::Bytes);
+
+impl std::ops::Deref for FileBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<Vec<u8>> for FileBytes {
+    fn from(data: Vec<u8>) -> Self {
+        FileBytes(gtk::glib::Bytes::from_owned(data))
+    }
+}
+
+impl From<gtk::glib::Bytes> for FileBytes {
+    fn from(data: gtk::glib::Bytes) -> Self {
+        FileBytes(data)
+    }
+}
+
+impl std::fmt::Debug for FileBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} bytes", self.len())
     }
 }
 
@@ -135,7 +205,7 @@ pub struct OutgoingAttachment {
     pub filename: String,
     pub mime_type: String,
     #[serde(with = "attachment_bytes")]
-    pub data: Vec<u8>,
+    pub data: FileBytes,
     /// Set for images shown in the text, which refers to them as `cid:`.
     pub content_id: Option<String>,
 }
@@ -444,7 +514,7 @@ pub fn forwarded_file(
             .filter(|cid| forwarded_html.is_some_and(|html| refers_to_cid(html, cid))),
         filename: found.filename,
         mime_type: found.mime_type,
-        data,
+        data: data.into(),
     }
 }
 
@@ -525,6 +595,10 @@ pub struct Draft {
     /// is the one that asked both engines what they hold; a draft that is
     /// neither signed nor encrypted never uses this.
     pub standard: Standard,
+    /// Ask the recipients' mail programs for a read receipt. Off unless
+    /// the writer turns it on for this message.
+    #[serde(default)]
+    pub receipt: bool,
 }
 
 /// When the composer hands a message over for sending.
@@ -558,6 +632,7 @@ impl Draft {
             sign: false,
             encrypt: false,
             standard: Standard::default(),
+            receipt: false,
         }
     }
 
@@ -1250,6 +1325,28 @@ pub fn build(draft: &Draft, date_secs: i64, message_id: &str) -> Result<Built, S
     }
 }
 
+/// What `work` gives, run on a thread of its own. Building a message
+/// base64-encodes every file, which held the window still for seconds
+/// over a large one, so every build the GTK thread waits for goes here.
+/// `gio::spawn_blocking` would answer only through a running GLib main
+/// loop, which the tests and the tokio runtime do not have.
+///
+/// A panic in `work` comes back as an error rather than going on: raised
+/// again on the GTK thread it would take the app down, and the composer
+/// and its unsent draft with it.
+pub async fn off_thread<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    let (done, answer) = futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)));
+    });
+    match answer.await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(_)) | Err(_) => Err(gettext("Penguin Mail could not put the message together.")),
+    }
+}
+
 /// The RFC 822 bytes for `draft`.
 pub fn build_mime(draft: &Draft, date_secs: i64, message_id: &str) -> Result<Vec<u8>, String> {
     let (text, html) = written(draft, Purpose::Send);
@@ -1469,6 +1566,9 @@ fn envelope<'a>(draft: &'a Draft, date_secs: i64, message_id: &str) -> MessageBu
                 .collect::<Vec<_>>(),
         );
     }
+    if draft.receipt {
+        builder = builder.header("Disposition-Notification-To", mime_address(&draft.from));
+    }
     builder
 }
 
@@ -1529,7 +1629,7 @@ fn inline_part(attachment: &OutgoingAttachment) -> MimePart<'_> {
     let name = attachment.filename.clone();
     MimePart::new(
         ContentType::new(attachment.mime_type.clone()).attribute("name", name.clone()),
-        attachment.data.clone(),
+        &attachment.data[..],
     )
     .header(
         "Content-Disposition",
@@ -1543,7 +1643,7 @@ fn file_part(attachment: &OutgoingAttachment) -> MimePart<'_> {
     MimePart::new(
         ContentType::new(attachment.mime_type.clone())
             .attribute("name", attachment.filename.clone()),
-        attachment.data.clone(),
+        &attachment.data[..],
     )
     .attachment(attachment.filename.clone())
 }
@@ -1563,6 +1663,39 @@ mod tests {
 
     fn me() -> Address {
         addr(Some("Dana Reyes"), "dana@example.com")
+    }
+
+    /// A build that panics comes back as an error on the waiting side, so
+    /// the composer reopens with its draft instead of the app going down.
+    #[test]
+    fn a_worker_that_panics_answers_with_an_error() {
+        let answer = futures::executor::block_on(off_thread(|| -> u8 { panic!("broken part") }));
+        assert!(answer.is_err());
+        let fine = futures::executor::block_on(off_thread(|| 7));
+        assert_eq!(fine, Ok(7));
+    }
+
+    #[test]
+    fn a_draft_that_asks_for_a_receipt_names_its_sender() {
+        let mut draft = Draft::new(1, addr(Some("Dana"), "dana@fastmail.example"));
+        draft.to = parse_recipients("ines@allotment.example");
+        draft.subject = "Rota".into();
+        let plain = String::from_utf8(build_mime(&draft, 0, "a@fastmail.example").unwrap()).unwrap();
+        assert!(!plain.contains("Disposition-Notification-To"), "off unless asked");
+        draft.receipt = true;
+        let asked = String::from_utf8(build_mime(&draft, 0, "a@fastmail.example").unwrap()).unwrap();
+        assert!(
+            asked.contains("Disposition-Notification-To: \"Dana\" <dana@fastmail.example>"),
+            "{asked}"
+        );
+    }
+
+    #[test]
+    fn a_draft_saved_before_receipts_reads_back_without_one() {
+        let mut stored = serde_json::to_value(Draft::new(1, addr(None, "a@x.example"))).unwrap();
+        stored.as_object_mut().unwrap().remove("receipt");
+        let draft: Draft = serde_json::from_value(stored).unwrap();
+        assert!(!draft.receipt);
     }
 
     /// A forwarded newsletter as it might arrive: a tracking pixel, a
@@ -1724,7 +1857,91 @@ mod tests {
             address: addr(None, email),
             signature: signature.to_string(),
             default,
+            masks: false,
         }
+    }
+
+    #[test]
+    fn the_site_is_the_first_recipients_domain() {
+        let to = [addr(None, "hello@Allotment-Supplies.example"), addr(None, "x@other.example")];
+        assert_eq!(masked_site(&to), "allotment-supplies.example");
+    }
+
+    #[test]
+    fn no_recipient_gives_no_site() {
+        assert_eq!(masked_site(&[addr(None, "half typed")]), "");
+    }
+
+    #[test]
+    fn a_draft_from_a_masked_address_keeps_it() {
+        let mut fastmail = identity(1, "dana@fastmail.example", "", true);
+        fastmail.masks = true;
+        let from = addr(Some("Dana"), "tern.quill@fastmail.example");
+        let kept = kept_mask(std::slice::from_ref(&fastmail), &fastmail, &from, None);
+        assert_eq!(kept.map(|a| a.email), Some("tern.quill@fastmail.example".to_string()));
+    }
+
+    #[test]
+    fn a_draft_from_one_of_the_accounts_addresses_has_no_mask() {
+        let mut fastmail = identity(1, "dana@fastmail.example", "", true);
+        fastmail.masks = true;
+        let mut alias = identity(1, "dana@home.example", "", false);
+        alias.masks = true;
+        // The From row opened on the alias, the address this account last
+        // sent from, while the new draft still names the account's own.
+        let from = addr(None, "Dana@Fastmail.example");
+        assert_eq!(kept_mask(&[fastmail, alias.clone()], &alias, &from, None), None);
+    }
+
+    #[test]
+    fn an_account_without_masks_keeps_no_mask() {
+        let plain = identity(1, "dana@example.com", "", true);
+        let from = addr(None, "someone.else@example.com");
+        assert_eq!(kept_mask(std::slice::from_ref(&plain), &plain, &from, None), None);
+    }
+
+    #[test]
+    fn a_masked_address_becomes_the_sender() {
+        let mut identity = identity(1, "me@fastmail.com", "", true);
+        identity.masks = true;
+        let masked = Address { name: Some("Me".into()), email: "kite.fern@fastmail.com".into() };
+        let sending = sender_with_mask(&identity, Some(&masked));
+        assert_eq!(sending.address.email, "kite.fern@fastmail.com");
+        assert_eq!(sending.account_id, 1);
+        let plain = sender_with_mask(&identity, None);
+        assert_eq!(plain.address.email, "me@fastmail.com");
+    }
+
+    #[test]
+    fn a_reply_to_a_masked_address_comes_from_it() {
+        let senders = vec![SendAsAddress {
+            email: "dana@fastmail.example".into(),
+            name: Some("Dana".into()),
+            default: true,
+            ..Default::default()
+        }];
+        let original = message(
+            "m1",
+            addr(None, "orders@kites.example"),
+            vec![addr(None, "Tern.Quill@fastmail.example")],
+            vec![addr(None, "cy@example.com")],
+        );
+        let masked = |email: &str| email.eq_ignore_ascii_case("tern.quill@fastmail.example");
+        let mine = reply_addresses(&senders, &original, masked);
+        let draft = respond(ReplyKind::ReplyAll, 1, &mine, &original, "", None, &[]);
+        assert_eq!(draft.from, addr(Some("Dana"), "Tern.Quill@fastmail.example"));
+        assert_eq!(draft.to, vec![addr(None, "orders@kites.example")]);
+        assert_eq!(draft.cc, vec![addr(None, "cy@example.com")]);
+    }
+
+    #[test]
+    fn a_draft_from_an_address_the_masked_list_lacks_keeps_no_mask() {
+        let mut fastmail = identity(1, "dana@fastmail.example", "", true);
+        fastmail.masks = true;
+        let from = addr(None, "someone.else@example.com");
+        assert_eq!(kept_mask(std::slice::from_ref(&fastmail), &fastmail, &from, Some(false)), None);
+        let listed = kept_mask(std::slice::from_ref(&fastmail), &fastmail, &from, Some(true));
+        assert_eq!(listed.map(|a| a.email), Some("someone.else@example.com".to_string()));
     }
 
     #[test]
@@ -1806,7 +2023,7 @@ mod tests {
                     addr(None, "cy@example.com"),
                 ],
             );
-            let mine = reply_addresses(&senders, &original);
+            let mine = reply_addresses(&senders, &original, |_| false);
             let draft = respond(ReplyKind::ReplyAll, 1, &mine, &original, "hello", None, &[]);
             assert_eq!(draft.from, addr(Some("Our Name"), &email));
             assert_eq!(draft.to, vec![addr(None, "ann@example.com")]);
@@ -1854,7 +2071,7 @@ mod tests {
                 addr(None, "user.shop@example.com"),
             ],
         );
-        let mine = reply_addresses(&senders, &original);
+        let mine = reply_addresses(&senders, &original, |_| false);
         let draft = respond(ReplyKind::ReplyAll, 1, &mine, &original, "", None, &[]);
         assert_eq!(draft.from.email, "user+shop@example.com");
         assert!(
@@ -2267,7 +2484,7 @@ mod tests {
             content_id: None,
             filename: "menu.pdf".into(),
             mime_type: "application/pdf".into(),
-            data: b"%PDF-1.7".to_vec(),
+            data: b"%PDF-1.7".to_vec().into(),
         }];
         let raw = build_mime(&draft, 1_757_000_000, "<new@example.com>").unwrap();
         let parsed = MessageParser::default().parse(&raw).unwrap();
@@ -2377,7 +2594,7 @@ mod tests {
         let image = |cid: &str| OutgoingAttachment {
             filename: format!("{cid}.png"),
             mime_type: "image/png".into(),
-            data: vec![137, 80, 78, 71],
+            data: vec![137, 80, 78, 71].into(),
             content_id: Some(cid.into()),
         };
         draft.attachments = vec![image("map1@mailrs"), image("gone@mailrs")];
@@ -2486,7 +2703,7 @@ mod tests {
         let image = |cid: &str| OutgoingAttachment {
             filename: format!("{cid}.png"),
             mime_type: "image/png".into(),
-            data: vec![137, 80, 78, 71],
+            data: vec![137, 80, 78, 71].into(),
             content_id: Some(cid.into()),
         };
         draft.attachments = vec![image("map1@mailrs"), image("gone@mailrs")];
@@ -2522,7 +2739,7 @@ mod tests {
         draft.attachments = vec![OutgoingAttachment {
             filename: "map.png".into(),
             mime_type: "image/png".into(),
-            data: vec![137, 80, 78, 71],
+            data: vec![137, 80, 78, 71].into(),
             content_id: Some("map1@mailrs".into()),
         }];
         let raw = build_mime(&draft, 0, "id@example.com").unwrap();
@@ -2552,13 +2769,13 @@ mod tests {
             OutgoingAttachment {
                 filename: "map.png".into(),
                 mime_type: "image/png".into(),
-                data: vec![137, 80, 78, 71],
+                data: vec![137, 80, 78, 71].into(),
                 content_id: Some("map1@mailrs".into()),
             },
             OutgoingAttachment {
                 filename: "notes.pdf".into(),
                 mime_type: "application/pdf".into(),
-                data: b"%PDF-1.4".to_vec(),
+                data: b"%PDF-1.4".to_vec().into(),
                 content_id: None,
             },
         ];
@@ -2803,7 +3020,7 @@ mod tests {
         draft.attachments.push(OutgoingAttachment {
             filename: "menu.pdf".into(),
             mime_type: "application/pdf".into(),
-            data: b"%PDF".to_vec(),
+            data: b"%PDF".to_vec().into(),
             content_id: None,
         });
         assert_eq!(
@@ -2819,7 +3036,7 @@ mod tests {
         draft.attachments.push(OutgoingAttachment {
             filename: "photo.png".into(),
             mime_type: "image/png".into(),
-            data: vec![0x89],
+            data: vec![0x89].into(),
             content_id: Some("photo@mailrs".into()),
         });
         assert_eq!(
@@ -3070,5 +3287,66 @@ mod tests {
         assert_eq!(trailing_quote_at("Hi\n> my own quote\nbye"), None);
         let text = "Hi\n> mine\n\nOn Monday, Ann wrote:\n> hi\n>\n> there";
         assert_eq!(trailing_quote_at(text), text.find("On Monday"));
+    }
+
+    #[test]
+    fn a_copy_of_a_draft_shares_its_files() {
+        let mut draft = Draft::new(1, me());
+        draft.attachments = vec![OutgoingAttachment {
+            filename: "film.mov".into(),
+            mime_type: "video/quicktime".into(),
+            data: vec![7; 1024].into(),
+            content_id: None,
+        }];
+        let copy = draft.clone();
+        assert_eq!(
+            copy.attachments[0].data.as_ptr(),
+            draft.attachments[0].data.as_ptr(),
+            "Send, Send Later and Save Draft each copy the draft"
+        );
+    }
+
+    /// The process's peak resident memory in KiB since the last reset.
+    fn peak_kib() -> u64 {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let line = status.lines().find(|l| l.starts_with("VmHWM:")).unwrap();
+        line.split_whitespace().nth(1).unwrap().parse().unwrap()
+    }
+
+    /// Sends a 25 MB file the way the composer does and prints what it
+    /// costs: the time the GTK thread spends, and the peak memory over
+    /// the file's own size. Linux only; run alone, since other tests
+    /// share the process: `cargo test -p mailrs --bin penguin-mail
+    /// measure_sending_a_large_attachment -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement, run on its own"]
+    fn measure_sending_a_large_attachment() {
+        const SIZE: usize = 25 * 1024 * 1024;
+        let payload: Vec<u8> = (0..SIZE).map(|i| (i * 7919 % 251) as u8).collect();
+        // The composer's list of files.
+        let held = vec![OutgoingAttachment {
+            filename: "film.mov".into(),
+            mime_type: "video/quicktime".into(),
+            data: payload.into(),
+            content_id: None,
+        }];
+        std::fs::write("/proc/self/clear_refs", "5").unwrap();
+        let before = peak_kib();
+        let started = std::time::Instant::now();
+        // What Send does on the GTK thread: collect, then hand the build
+        // to a worker thread and wait without blocking.
+        let mut draft = Draft::new(1, me());
+        draft.to = parse_recipients("ines@allotment.example");
+        draft.attachments = held.clone();
+        let building = off_thread(move || build(&draft, 0, "a@example.com"));
+        let stall = started.elapsed();
+        let built = futures::executor::block_on(building).unwrap().unwrap();
+        let peak = peak_kib() - before;
+        let Built::Message(raw) = built else { panic!("a plain draft builds whole") };
+        eprintln!(
+            "GTK thread {stall:?}, peak {} MiB over the file held, message {} MiB",
+            peak / 1024,
+            raw.len() / (1024 * 1024)
+        );
     }
 }
