@@ -475,28 +475,45 @@ fn header_of(text: &str, name: &str) -> String {
         .to_string()
 }
 
-/// Whether `html` points at the inline image `cid` from one of its tags,
-/// such as an image's `src` or a cell's `background`. The whole id has to
-/// match, because `cid:logo` and `cid:logo2` name two different images.
-/// Text that mentions the id, and a comment, point at nothing.
+/// Whether `html` points at the inline image `cid` from one of its tags.
 pub fn refers_to_cid(html: &str, cid: &str) -> bool {
-    let needle = format!("cid:{cid}");
-    let names = |value: &str| {
-        value.match_indices(&needle).any(|(at, _)| {
-            value[at + needle.len()..].chars().next().is_none_or(|c| {
-                !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_' | '.' | '@' | '+')
+    CidRefs::of(html).names(cid)
+}
+
+/// The values of an HTML document's tags that mention `cid:`, such as an
+/// image's `src` or a cell's `background`. A reply quotes the signature
+/// images of every message before it, so a long thread's messages hold
+/// dozens of them; one walk answers for all.
+pub struct CidRefs(Vec<String>);
+
+impl CidRefs {
+    pub fn of(html: &str) -> CidRefs {
+        let mut values = Vec::new();
+        mailrs_mime::html::walk(html, |piece| {
+            if let mailrs_mime::html::Piece::Tag(tag) = piece {
+                values.extend(
+                    tag.values()
+                        .filter(|value| value.contains("cid:"))
+                        .map(str::to_string),
+                );
+            }
+        });
+        CidRefs(values)
+    }
+
+    /// Whether a tag points at the inline image `cid`. The whole id has to
+    /// match, because `cid:logo` and `cid:logo2` name two different images.
+    /// Text that mentions the id, and a comment, point at nothing.
+    pub fn names(&self, cid: &str) -> bool {
+        let needle = format!("cid:{cid}");
+        self.0.iter().any(|value| {
+            value.match_indices(&needle).any(|(at, _)| {
+                value[at + needle.len()..].chars().next().is_none_or(|c| {
+                    !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_' | '.' | '@' | '+')
+                })
             })
         })
-    };
-    let mut found = false;
-    mailrs_mime::html::walk(html, |piece| {
-        if let mailrs_mime::html::Piece::Tag(tag) = piece
-            && !found
-        {
-            found = tag.values().any(names);
-        }
-    });
-    found
+    }
 }
 
 /// A file of the message a forward carries, with the bytes fetched for it.
@@ -2665,6 +2682,19 @@ mod tests {
         // Words about the image, and markup nobody will render, are not it.
         assert!(!refers_to_cid("<p>see cid:logo above</p>", "logo"));
         assert!(!refers_to_cid(r#"<!-- <img src="cid:logo"> -->"#, "logo"));
+    }
+
+    #[test]
+    fn one_walk_answers_for_every_inline_image() {
+        let refs = CidRefs::of(
+            r#"<img src="cid:logo"><td background="cid:bg@x.com"><!-- <img src="cid:old"> --><p>cid:text</p>"#,
+        );
+        assert!(refs.names("logo"));
+        assert!(refs.names("bg@x.com"));
+        assert!(!refs.names("bg"));
+        assert!(!refs.names("old"));
+        assert!(!refs.names("text"));
+        assert!(!refs.names("missing"));
     }
 
     #[test]

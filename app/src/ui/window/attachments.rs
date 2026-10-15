@@ -79,12 +79,13 @@ impl MainWindow {
             // A file that came out of an encrypted message has no
             // attachment id and does not need one; its bytes are in `held`
             // at the same index.
+            let shown = crate::render::ShownInBody::new(body);
             let files: Vec<(usize, Attachment)> = body
                 .attachments
                 .iter()
                 .enumerate()
                 .filter(|(index, a)| a.attachment_id.is_some() || held.len() > *index)
-                .filter(|(_, a)| !crate::render::shown_in_body(a, body))
+                .filter(|(_, a)| !shown.shows(a))
                 .map(|(index, a)| (index, a.clone()))
                 .collect();
             Some((open.account_id, files, held))

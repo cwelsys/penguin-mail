@@ -2,6 +2,7 @@
 //! JavaScript: expanding a message or saving an attachment is a `mailrs:`
 //! link that the app intercepts.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -10,6 +11,7 @@ use std::rc::Rc;
 
 use mailrs_domain::{Address, MessageBody, MessageMeta, Provenance, ReadReport};
 
+use crate::compose::CidRefs;
 use crate::format::{avatar_hue, full_date, header_date, human_size, initials};
 use crate::quoted;
 use mailrs_domain::translate::{fill, fill_plural, gettext};
@@ -546,11 +548,12 @@ fn render_attachments(
     body: &MessageBody,
     thumbnails: &HashMap<String, String>,
 ) {
+    let shown = ShownInBody::new(body);
     let listed: Vec<(usize, &mailrs_domain::Attachment)> = body
         .attachments
         .iter()
         .enumerate()
-        .filter(|(_, a)| !shown_in_body(a, body))
+        .filter(|(_, a)| !shown.shows(a))
         .collect();
     if listed.is_empty() {
         return;
@@ -655,22 +658,37 @@ fn language_tag(asked: impl IntoIterator<Item = String>) -> String {
     String::new()
 }
 
-/// Whether the message already shows this attachment where the reader is
-/// looking, so a row for it would be a second copy. Only an image the HTML
-/// points at by `cid:` counts. A `Content-ID` on its own does not: Apple
-/// Mail and Outlook put one on files they mean you to save, and treating
-/// that as shown is what made an attached photo vanish from the message it
-/// arrived in.
-pub fn shown_in_body(attachment: &mailrs_domain::Attachment, body: &MessageBody) -> bool {
-    let Some(cid) = attachment.content_id.as_deref() else {
-        return false;
-    };
-    if !attachment.mime_type.starts_with("image/") {
-        return false;
+/// Which attachments a message already shows where the reader is looking,
+/// so a row for one would be a second copy. Only an image the HTML points
+/// at by `cid:` counts. A `Content-ID` on its own does not: Apple Mail and
+/// Outlook put one on files they mean you to save, and treating that as
+/// shown is what made an attached photo vanish from the message it arrived
+/// in. The HTML is parsed on the first question and once per message.
+pub struct ShownInBody<'a> {
+    body: &'a MessageBody,
+    refs: OnceCell<CidRefs>,
+}
+
+impl<'a> ShownInBody<'a> {
+    pub fn new(body: &'a MessageBody) -> ShownInBody<'a> {
+        ShownInBody {
+            body,
+            refs: OnceCell::new(),
+        }
     }
-    body.html
-        .as_deref()
-        .is_some_and(|html| crate::compose::refers_to_cid(html, cid))
+
+    pub fn shows(&self, attachment: &mailrs_domain::Attachment) -> bool {
+        let Some(cid) = attachment.content_id.as_deref() else {
+            return false;
+        };
+        if !attachment.mime_type.starts_with("image/") {
+            return false;
+        }
+        let Some(html) = self.body.html.as_deref() else {
+            return false;
+        };
+        self.refs.get_or_init(|| CidRefs::of(html)).names(cid)
+    }
 }
 
 /// "me, Bob Smith, and 2 others".
