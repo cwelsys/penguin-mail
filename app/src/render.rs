@@ -939,7 +939,7 @@ font-size:13px;font-weight:700;text-decoration:none;transition:background-color 
 .message.collapsed:hover{{background:var(--hover)}}\
 .header{{display:grid;grid-template-columns:40px minmax(0,1fr) auto auto;\
 column-gap:12px;align-items:center;color:inherit}}\
-.chev{{grid-column:3;grid-row:1;width:16px;height:16px;margin-right:-6px;background:var(--dim);opacity:0;\
+.chev{{grid-column:3;grid-row:1;width:16px;height:16px;margin-right:-6px;background:var(--dim);opacity:0;pointer-events:none;\
 -webkit-mask:url(\"{CHEV}\") center/14px no-repeat;\
 transition:transform 200ms cubic-bezier(0.23,1,0.32,1),opacity 120ms ease}}\
 .message:hover .chev,.toggle:focus-visible~.chev{{opacity:.7}}\
@@ -952,7 +952,7 @@ a:focus-visible,summary:focus-visible,.event-slot:focus-visible{{outline:2px sol
 .fold{{position:relative}}\
 .avatar{{position:relative;grid-row:span 2;align-self:start;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;\
 justify-content:center;overflow:hidden;color:#fff;font-weight:700;font-size:15px;letter-spacing:0.02em;text-decoration:none}}\
-.who{{position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\
+.who{{position:relative;justify-self:start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\
 .name{{font-weight:800;color:inherit;text-decoration:none}}\
 .name:hover{{text-decoration:underline}}\
 .address{{color:var(--dim);font-size:12.5px;font-weight:500;margin-left:8px}}\
