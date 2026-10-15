@@ -589,7 +589,12 @@ impl DavApi for DavClient {
     }
 
     async fn find_uid(&self, collection: &str, uid: &str) -> Result<Option<Fetched>, DavError> {
-        let found = self.multistatus("REPORT", collection, "1", body::uid_query(uid)).await?;
+        // iCloud answers any filter on the UID with 412, so the calendar is
+        // read whole there and the UID matched below.
+        let found = match self.multistatus("REPORT", collection, "1", body::uid_query(uid)).await {
+            Err(DavError::Changed) => self.multistatus("REPORT", collection, "1", body::all_events()).await?,
+            found => found?,
+        };
         let asked = self.url(collection)?;
         // A CalDAV text-match finds the UID as a substring (RFC 4791
         // section 9.7.5), so "12345" also matches "order-12345@shop".
