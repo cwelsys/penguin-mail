@@ -1506,6 +1506,7 @@ mod tests {
             calendar: "primary".to_string(),
             id: "design".to_string(),
             start: 1_718_010_000_000,
+            outdated: None,
         });
         assert_eq!(calendar_button(&showing), CalendarButton::Show);
     }

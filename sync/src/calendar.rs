@@ -201,6 +201,7 @@ impl<A: Accounts> Calendar<A> {
                 calendar: event.calendar.clone(),
                 id: event.id.clone(),
                 start: event.start,
+                outdated: None,
             })
             .collect();
         Ok(Permitted::Done(Added { calendar: target.name, spots, skipped }))
