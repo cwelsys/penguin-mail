@@ -250,6 +250,15 @@ pub mod body {
         )
     }
 
+    /// Every event of a calendar with its data, for a server that refuses
+    /// [`uid_query`]'s filter.
+    pub fn all_events() -> String {
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/><C:calendar-data/></D:prop>
+<C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT"/></C:comp-filter></C:filter></C:calendar-query>"#
+            .to_string()
+    }
+
     pub fn calendar_multiget(hrefs: &[String]) -> String {
         multiget("C:calendar-multiget", r#"xmlns:C="urn:ietf:params:xml:ns:caldav""#, "<C:calendar-data/>", hrefs)
     }

@@ -252,6 +252,22 @@ async fn find_uid_finds_nothing_when_only_a_longer_uid_matched() {
     assert!(client(&server).find_uid("/cal/work/", "12345").await.unwrap().is_none());
 }
 
+#[tokio::test]
+async fn find_uid_reads_the_whole_calendar_where_a_uid_filter_is_refused() {
+    let server = MockServer::start().await;
+    Mock::given(method("REPORT")).and(body_string_contains("prop-filter"))
+        .respond_with(ResponseTemplate::new(412))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("REPORT")).and(path("/cal/work/"))
+        .respond_with(multistatus(uid_answer(&[("/cal/work/other.ics", "other"), ("/cal/work/t.ics", "1056184448")])))
+        .mount(&server)
+        .await;
+    let found = client(&server).find_uid("/cal/work/", "1056184448").await.unwrap().unwrap();
+    assert_eq!(found.href, format!("{}/cal/work/t.ics", server.uri()));
+}
+
 fn one_event_answer(href: &str) -> String {
     format!(
         r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response><d:href>{href}</d:href>
