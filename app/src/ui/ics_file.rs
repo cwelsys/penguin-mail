@@ -148,6 +148,9 @@ fn show_events(
                         }
                     });
                 }
+                // The window never looks for the event on a calendar, so
+                // the card never offers to update it.
+                Action::UpdateCalendar => {}
                 Action::Answer(..) | Action::Propose(_) | Action::GrantAccess => {
                     toast(&gettext("A file has nobody to answer to"));
                 }

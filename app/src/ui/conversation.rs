@@ -1224,6 +1224,12 @@ impl ConversationView {
         self.card.set_added(uid, calendar, spots);
     }
 
+    /// Says the event of the file on the card moved to the file's time on
+    /// `calendar`, where it now sits at `spot`.
+    pub fn event_updated(&self, uid: &str, calendar: &str, spot: mailrs_sync::Spot) {
+        self.card.set_updated(uid, calendar, spot);
+    }
+
     /// How the series behind the invitation `uid` runs, in words.
     pub fn series_known(&self, uid: &str, line: String) {
         self.card.set_series(uid, line);

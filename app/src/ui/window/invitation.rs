@@ -48,6 +48,7 @@ impl MainWindow {
             Action::Propose(proposal) => self.propose_time(view, proposal),
             Action::AddToCalendar => self.add_to_calendar(view),
             Action::Import(events, target) => self.import_events(view, events, target),
+            Action::UpdateCalendar => self.update_calendar(view),
             Action::ShowInCalendar => self.show_in_calendar(view),
             Action::GrantAccess => self.grant_calendar_access(view),
         }
@@ -310,6 +311,41 @@ impl MainWindow {
                     this.ask_permission(account_id, Permission::Calendar, Occasion::Offer);
                 }
                 Err(err) => this.failed(&gettext("Could not add to your calendar: {reason}"), &err),
+            }
+        });
+    }
+
+    /// Adds the file's event again on the calendar that holds it, which
+    /// matches it on its UID and moves it to the file's time. The picker's
+    /// calendar is not asked: a provider looks for the UID on the calendar
+    /// it is given, and another one would get a second copy.
+    fn update_calendar(self: &Rc<Self>, view: &Rc<ConversationView>) {
+        let found = view.with_invitation(|showing| {
+            showing.on_calendar.clone().map(|spot| (showing.invitation.clone(), spot))
+        });
+        let Some(Some((invitation, spot))) = found else {
+            return;
+        };
+        let uid = invitation.uid.clone();
+        let calendar = self.core.calendar();
+        let (this, view) = (Rc::clone(self), Rc::clone(view));
+        glib::spawn_future_local(async move {
+            let account_id = spot.account_id;
+            let done = this
+                .core
+                .call(async move { calendar.import(account_id, Some(&spot.calendar), &[invitation]).await })
+                .await;
+            match done {
+                Ok(mailrs_sync::Permitted::Done(added)) => {
+                    if let Some(spot) = added.spots.into_iter().next() {
+                        view.event_updated(&uid, &added.calendar, spot);
+                    }
+                    this.calendar.reload();
+                }
+                Ok(mailrs_sync::Permitted::NeedsPermission) => {
+                    this.ask_permission(account_id, Permission::Calendar, Occasion::Offer);
+                }
+                Err(err) => this.failed(&gettext("Could not update your calendar: {reason}"), &err),
             }
         });
     }
