@@ -130,6 +130,10 @@ pub struct Spot {
     pub calendar: String,
     pub id: String,
     pub start: EpochMillis,
+    /// The time the copy keeps the event at, when a file describing it
+    /// puts it at another and the copy's version is no newer than the
+    /// file's. Adding the file again brings the calendar up to date.
+    pub outdated: Option<When>,
 }
 
 /// One occurrence the account is a guest of, has not answered, and that
@@ -285,7 +289,8 @@ impl<A: Accounts> Invitations<A> {
     ///
     /// Reads the store and nothing else. `None` for a cancellation, for an
     /// account whose copy has never been read, and for an event on no
-    /// calendar the person shows.
+    /// calendar the person shows. A file that moved the event names the
+    /// time the copy still holds in the spot's `outdated`.
     pub async fn on_calendar(
         &self,
         account_id: AccountId,
@@ -308,6 +313,7 @@ impl<A: Accounts> Invitations<A> {
             calendar: o.event.calendar.clone(),
             id: o.event.id.clone(),
             start: o.start,
+            outdated: outdated(invitation, &o),
         }))
     }
 
@@ -819,6 +825,32 @@ fn pick(found: Vec<Occurrence>, occurrence: Option<EpochMillis>, from: EpochMill
         .into_iter()
         .min_by_key(|o| o.start)
         .or_else(|| ended.into_iter().max_by_key(|o| o.start))
+}
+
+/// The time `found` keeps the event at, when the file `invitation` came in
+/// puts it at another. Only a file that describes one event that does not
+/// repeat is compared: a request is the organizer's to put on the
+/// calendar, and a series has no single time to set against the file's. A
+/// copy whose version is newer than the file's is the one to keep.
+fn outdated(invitation: &Invitation, found: &Occurrence) -> Option<When> {
+    let event = &found.event;
+    if invitation.card() != invitation::Card::Add
+        || !invitation.rules.is_empty()
+        || invitation.occurrence.is_some()
+        || series::in_series(event)
+        || event.sequence > invitation.sequence
+    {
+        return None;
+    }
+    let held = invitation::from_occurrence(found, event.sequence).when?;
+    let moved = match (invitation.when?, held) {
+        // A file with no end leaves the length to the calendar.
+        (When::At { starts_at, ends_at }, When::At { starts_at: was, ends_at: was_end }) => {
+            starts_at != was || ends_at.is_some_and(|end| Some(end) != was_end)
+        }
+        (when, held) => when != held,
+    };
+    moved.then_some(held)
 }
 
 /// The organizer to write to, if the invitation names one worth writing

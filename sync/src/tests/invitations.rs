@@ -1077,7 +1077,7 @@ async fn send_queue(h: &Harness) {
 }
 
 fn spot(h: &Harness, id: &str, start: i64) -> Option<Spot> {
-    Some(Spot { account_id: h.account_id, calendar: "primary".into(), id: id.into(), start })
+    Some(Spot { account_id: h.account_id, calendar: "primary".into(), id: id.into(), start, outdated: None })
 }
 
 /// An invitation to the one occurrence of the fixture series on 10 March.
@@ -1173,6 +1173,83 @@ async fn a_cancellation_has_no_spot() {
         .await
         .unwrap();
     assert_eq!(found, None);
+}
+
+/// The fixture meeting as a file that only describes it, as a booking
+/// system sends one, an hour long from `start`.
+fn published(sequence: i64, start: &str, end: &str) -> Invitation {
+    read(
+        &[
+            "BEGIN:VCALENDAR",
+            "BEGIN:VEVENT",
+            &format!("UID:{UID}"),
+            &format!("SEQUENCE:{sequence}"),
+            "SUMMARY:Design review",
+            &format!("DTSTART:{start}"),
+            &format!("DTEND:{end}"),
+            "END:VEVENT",
+            "END:VCALENDAR",
+            "",
+        ]
+        .join("\r\n"),
+    )
+}
+
+#[tokio::test]
+async fn a_file_that_moved_the_event_names_the_time_the_copy_keeps() {
+    let h = harness().await;
+    read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
+    let file = published(0, "20300312T090000Z", "20300312T100000Z");
+    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap().unwrap();
+    assert_eq!((found.id.as_str(), found.start), ("ev1", TENTH));
+    assert_eq!(found.outdated, Some(When::At { starts_at: TENTH, ends_at: Some(TENTH + HOUR) }));
+}
+
+#[tokio::test]
+async fn a_file_that_only_changes_the_end_is_a_move_too() {
+    let h = harness().await;
+    read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
+    let file = published(0, "20300310T090000Z", "20300310T110000Z");
+    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap().unwrap();
+    assert!(found.outdated.is_some());
+}
+
+#[tokio::test]
+async fn a_file_at_the_time_the_copy_keeps_is_in_step() {
+    let h = harness().await;
+    read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
+    let file = published(0, "20300310T090000Z", "20300310T100000Z");
+    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap();
+    assert_eq!(found, spot(&h, "ev1", TENTH));
+}
+
+#[tokio::test]
+async fn a_copy_newer_than_the_file_is_kept() {
+    let h = harness().await;
+    read_copy(&h, vec![Ev { sequence: 2, ..on_copy("ev1", TENTH) }]).await;
+    let file = published(1, "20300312T090000Z", "20300312T100000Z");
+    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap();
+    assert_eq!(found, spot(&h, "ev1", TENTH));
+}
+
+#[tokio::test]
+async fn a_request_that_moved_the_event_is_left_to_the_organizer() {
+    let h = harness().await;
+    read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &read(&invite(1, "20300312T090000Z")), MARCH)
+        .await
+        .unwrap();
+    assert_eq!(found, spot(&h, "ev1", TENTH));
+}
+
+#[tokio::test]
+async fn a_file_is_not_set_against_a_series() {
+    let h = harness().await;
+    read_copy(&h, vec![weekly(TENTH - WEEK)]).await;
+    let file = published(0, "20300312T090000Z", "20300312T100000Z");
+    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap().unwrap();
+    assert_eq!(found.outdated, None);
 }
 
 // -- "Waiting for your answer" (ruling R2) ----------------------------

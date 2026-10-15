@@ -37,6 +37,9 @@ pub enum Action {
     AddToCalendar,
     /// Add these events of the file to a calendar of the account.
     Import(Vec<Invitation>, AddTo),
+    /// Add the file's event again on the calendar that holds it at
+    /// another time, which moves it to the file's.
+    UpdateCalendar,
     /// Switch the main window to the calendar, on the event's day, with
     /// its popover open.
     ShowInCalendar,
@@ -187,6 +190,9 @@ pub struct EventCard {
     /// Show in Calendar. It takes Add to Calendar's place once the event
     /// is known to be on a calendar the app shows.
     show_in_calendar: gtk::Button,
+    /// Update in Calendar. It takes Show in Calendar's place while the
+    /// calendar holds the event at another time than the file.
+    update: gtk::Button,
     /// The menu beside No: Add a Note, and the other times to ask the
     /// organizer for. The approved card shows only Yes, Maybe and No, so
     /// the rest waits one step deeper.
@@ -432,6 +438,17 @@ impl EventCard {
             .visible(false)
             .build();
         name(&show_in_calendar, &gettext("Show in Calendar"));
+        let update = gtk::Button::builder()
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name("penguin-mail-calendar-symbolic")
+                    .label(gettext("Update in Calendar"))
+                    .build(),
+            )
+            .css_classes(["invitation-pill"])
+            .visible(false)
+            .build();
+        name(&update, &gettext("Update in Calendar"));
         // The answers keep the left edge and the rest keep the right, on
         // one line while the card has room. In a narrow reading pane the
         // right group moves under the answers, and wraps again inside
@@ -445,6 +462,7 @@ impl EventCard {
             .build();
         right.append(&picker);
         right.append(&show_in_calendar);
+        right.append(&update);
         right.append(&add);
         let actions = adw::WrapBox::builder()
             .child_spacing(8)
@@ -570,6 +588,7 @@ impl EventCard {
             events,
             picks: RefCell::new(Vec::new()),
             show_in_calendar,
+            update,
             more,
             propose,
             proposals,
@@ -627,6 +646,9 @@ impl EventCard {
         let act = Rc::clone(&on_action);
         card.show_in_calendar
             .connect_clicked(move |_| act(Action::ShowInCalendar));
+        let act = Rc::clone(&on_action);
+        card.update
+            .connect_clicked(move |_| act(Action::UpdateCalendar));
         let weak = Rc::downgrade(&card);
         card.add.connect_clicked(move |_| {
             if let Some(card) = weak.upgrade() {
@@ -804,12 +826,14 @@ impl EventCard {
             showing.on_calendar = Some(spot);
             showing.clone()
         };
+        set_line(&self.news, news(&updated, Local::now()));
         self.place_calendar_button(&updated);
     }
 
     fn place_calendar_button(&self, showing: &Showing) {
         let button = calendar_button(showing);
         self.show_in_calendar.set_visible(button == CalendarButton::Show);
+        self.update.set_visible(button == CalendarButton::Update);
         self.add.set_visible(button == CalendarButton::Add && !self.no_add.get());
         // Where the events go is asked only while Add to Calendar is the
         // button on offer, for a card that adds them.
@@ -912,6 +936,21 @@ impl EventCard {
         };
         set_line(&self.went, Some(line));
         self.set_on_calendar(uid, first.clone());
+    }
+
+    /// Says the event on `calendar` moved to the file's time and turns
+    /// Update in Calendar into Show in Calendar. `calendar` is empty when
+    /// the account never named it.
+    pub fn set_updated(&self, uid: &str, calendar: &str, spot: Spot) {
+        if !self.shows(uid) {
+            return;
+        }
+        let line = match calendar.is_empty() {
+            true => gettext("Updated in your calendar"),
+            false => fill(&gettext("Updated in {calendar}"), &[("calendar", calendar)]),
+        };
+        set_line(&self.went, Some(line));
+        self.set_on_calendar(uid, spot);
     }
 
     /// Add to Calendar: into the calendar the picker names when the card
@@ -1159,12 +1198,15 @@ fn any_checked(events: &gtk::Box) -> bool {
 enum CalendarButton {
     /// Show in Calendar: the event is on a calendar the app shows.
     Show,
+    /// Update in Calendar: the calendar holds the event at another time.
+    Update,
     /// Add to Calendar, which hands the `.ics` to the desktop.
     Add,
 }
 
 fn calendar_button(showing: &Showing) -> CalendarButton {
-    match showing.on_calendar {
+    match &showing.on_calendar {
+        Some(spot) if spot.outdated.is_some() => CalendarButton::Update,
         Some(_) => CalendarButton::Show,
         None => CalendarButton::Add,
     }
@@ -1377,6 +1419,13 @@ fn guest_summary(guests: &[Attending]) -> String {
 /// The line above the card: what this message does to an event the user
 /// already has, or that the organizer called it off.
 fn news(showing: &Showing, now: chrono::DateTime<Local>) -> Option<String> {
+    if let Some(held) = showing.on_calendar.as_ref().and_then(|spot| spot.outdated) {
+        let was = held.starts_at()?;
+        return Some(fill(
+            &gettext("Your calendar has a different time: {when}"),
+            &[("when", &event_moved_from(was, held.all_day(), now))],
+        ));
+    }
     match showing.change {
         Some(Change::Moved { was, all_day }) => Some(fill(
             &gettext("This meeting moved from {when}"),
@@ -1506,8 +1555,27 @@ mod tests {
             calendar: "primary".to_string(),
             id: "design".to_string(),
             start: 1_718_010_000_000,
+            outdated: None,
         });
         assert_eq!(calendar_button(&showing), CalendarButton::Show);
+    }
+
+    #[test]
+    fn an_event_the_calendar_holds_at_another_time_offers_update() {
+        let mut showing = showing("PUBLISH", &[]);
+        let held = When::At { starts_at: 1_717_924_800_000, ends_at: None };
+        showing.on_calendar = Some(Spot {
+            account_id: 1,
+            calendar: "primary".to_string(),
+            id: "design".to_string(),
+            start: 1_717_924_800_000,
+            outdated: Some(held),
+        });
+        assert_eq!(calendar_button(&showing), CalendarButton::Update);
+        assert!(
+            news(&showing, Local::now())
+                .is_some_and(|line| line.starts_with("Your calendar has a different time: "))
+        );
     }
 
     #[test]

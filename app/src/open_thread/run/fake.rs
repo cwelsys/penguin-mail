@@ -316,6 +316,7 @@ pub fn spot() -> Spot {
         calendar: "primary".to_string(),
         id: "kites".to_string(),
         start: 1_899_363_600_000,
+        outdated: None,
     }
 }
 
