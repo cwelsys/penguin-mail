@@ -103,13 +103,14 @@ pub(super) fn inline_wanted(bodies: &[(String, Arc<MessageBody>)]) -> Vec<Pictur
 pub(super) fn thumbnails_wanted(bodies: &[(String, Arc<MessageBody>)]) -> Vec<Picture> {
     let mut wanted: Vec<Picture> = Vec::new();
     for (message_id, body) in bodies {
+        let shown = crate::render::ShownInBody::new(body);
         for attachment in &body.attachments {
             let Some(attachment_id) = &attachment.attachment_id else {
                 continue;
             };
             if !attachment.mime_type.starts_with("image/")
                 || attachment.size > THUMBNAIL_LIMIT
-                || crate::render::shown_in_body(attachment, body)
+                || shown.shows(attachment)
                 || wanted.iter().any(|w| &w.attachment_id == attachment_id)
             {
                 continue;

@@ -523,12 +523,13 @@ impl OpenThread {
             .iter()
             .filter_map(|(id, body)| Some((id, body.as_ref().ok()?)))
             .filter(|(_, body)| {
+                let shown = crate::render::ShownInBody::new(body);
                 body.attachments.iter().any(|a| {
                     a.attachment_id
                         .as_deref()
                         .is_some_and(|id| !self.thumbnails.contains_key(id))
                         && a.mime_type.starts_with("image/")
-                        && !crate::render::shown_in_body(a, body)
+                        && !shown.shows(a)
                 })
             })
             .map(|(id, body)| (id.clone(), Arc::clone(body)))
