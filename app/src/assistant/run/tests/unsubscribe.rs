@@ -359,7 +359,10 @@ async fn a_request_goes_from_the_alias_the_list_writes_to() {
     );
 
     let answer = h
-        .ok("unsubscribe", json!({"conversations": [conversation("tn3")]}))
+        .ok(
+            "unsubscribe",
+            json!({"conversations": [conversation("tn3")]}),
+        )
         .await;
 
     assert_eq!(outcomes(&answer)[0].1, "done");
@@ -383,7 +386,10 @@ async fn a_mail_request_to_several_addresses_is_no_way_out() {
     let h = Harness::with(vec![forum]).await;
 
     let answer = h
-        .ok("unsubscribe", json!({"conversations": [conversation("tn3")]}))
+        .ok(
+            "unsubscribe",
+            json!({"conversations": [conversation("tn3")]}),
+        )
         .await;
 
     assert_eq!(outcomes(&answer)[0].1, "failed");
@@ -397,7 +403,10 @@ async fn a_request_waiting_in_the_outbox_is_not_reported_as_done() {
     h.effects.asked.borrow_mut().request_answer = Some(Ok(RequestSent::Waiting));
 
     let answer = h
-        .ok("unsubscribe", json!({"conversations": [conversation("tn3")]}))
+        .ok(
+            "unsubscribe",
+            json!({"conversations": [conversation("tn3")]}),
+        )
         .await;
 
     assert_eq!(outcomes(&answer)[0].1, "waiting");
@@ -409,7 +418,10 @@ async fn a_request_that_would_not_go_out_fails() {
     h.effects.asked.borrow_mut().request_answer = Some(Err("Gmail refused it".to_string()));
 
     let answer = h
-        .ok("unsubscribe", json!({"conversations": [conversation("tn3")]}))
+        .ok(
+            "unsubscribe",
+            json!({"conversations": [conversation("tn3")]}),
+        )
         .await;
 
     assert_eq!(outcomes(&answer)[0].1, "failed");

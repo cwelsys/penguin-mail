@@ -27,6 +27,8 @@ assistant on the right. Ask it about your mail in plain words:
 - "Always load images from Trail Notes."
 - "Save this thread as an mbox in my Documents folder."
 
+Choose the assistant's default account under **Preferences > Accounts > Defaults by Task**. New drafts follow **Assistant Actions**, replies follow **Replies**, forwards follow **Forwards**, and new events follow **Calendar Events**. Naming an account in your request takes precedence. Existing drafts and events keep their accounts.
+
 It reads mail with the same tools you use: it lists mailboxes, searches
 each account's server, and reads conversations. On an account from
 another provider it files mail in folders, and when you ask for
@@ -92,18 +94,19 @@ A message it drafts opens in a composer for you to finish. One it sends
 waits for you to allow it, and the question names every recipient, the
 blind copies, the files, and whether it goes out signed or encrypted.
 Replies use a configured sender address matching the original To or Cc,
-including suffixes enabled in the account's group under Preferences > Writing.
+including suffixes enabled under Preferences > Accounts > Addresses You Send From.
 
 Signing and encrypting follow your settings under Preferences unless you
 ask otherwise. It encrypts only when it has a key or certificate for
 every recipient, and when one is missing it tells you whose; a Bcc stays
 hidden inside an OpenPGP message.
 
-It attaches a file from a message you have, or a file on this computer
-that you name by its path. Before it reads a file from this computer it
-shows you the whole path and waits for you to allow it. It will not
-attach anything from a hidden folder, such as `~/.ssh` or `~/.gnupg`,
-from the system folders, or from Penguin Mail's own data. It does not
+It attaches a file from a message you have, a file you pick with Attach,
+or a file on this computer that you name by its path. Before it reads a file
+from this computer it shows you the whole path and waits for you to allow it.
+Paths named by the model cannot access hidden folders, system folders, or
+Penguin Mail's own data. Picking a file with Attach allows that specific file
+for the request, including files shared through Flatpak's file chooser. It does not
 forward an encrypted message or its files; forward those yourself from
 the conversation.
 
@@ -149,6 +152,19 @@ calendar sidebar's Grant Access button asks Google again. If the Google Cloud
 project Penguin Mail signs in with has the Calendar API switched off, a
 dialog says so and opens the page that turns it on.
 
+## Reasoning
+
+Preferences → AI has separate reasoning switches for assistant chats and
+email translations. Chats allow reasoning by default; translations request
+faster answers without it. Changes apply to the next request and keep the
+chat history. Show Details Expanded controls how reasoning and tool rows
+are displayed, independently of whether reasoning is requested.
+
+OpenAI-compatible servers are asked to skip reasoning when it is off.
+A server that rejects the control falls back to its default. Anthropic
+models use their supported thinking controls; models that always reason
+use lower effort instead. Claude Code follows its own settings.
+
 ## What it did
 
 Under your question, the assistant's answer shows what the model did, in
@@ -164,6 +180,18 @@ the order it happened:
 Each row folds to one line. Click it, or press Space on it, to see the
 thinking, or the tool's input and the result the model read. While the
 model works, a line at the bottom says what it is doing now.
+Screen readers also hear whether the "What it did" row is running, done, or failed.
+
+The Skills and MCP switches in Tools apply to the next question and keep the
+conversation. Instructions and callable tools update together. Turning Skills
+off also prevents its scripts from running; turning it back on keeps its
+scratch files. A turn in progress finishes with the setup it started with.
+Changing the model keeps the conversation, including after a quota error.
+Switching providers carries questions, replies, and past tool results into the
+new connection. It does not repeat past actions. Model and tool changes apply
+to the next question. New Chat starts over when you choose it.
+The model menu keeps the current connection's list for five minutes and
+refreshes it when the connection or its credentials change.
 
 ## Choose the AI language
 
@@ -443,6 +471,11 @@ installed (`sudo apt install bubblewrap`). Inside the sandbox, the command:
 - is stopped after 60 seconds, and the assistant reads at most 1 MB of
   what it prints.
 
+The Nix package supplies Bash, Python 3, curl, jq, and common command-line
+tools for scripts. Its sandbox reads programs and libraries from
+`/nix/store` and hides Nix profiles. It does not inherit the tools or
+environment from your shell. See [the Nix guide](nix.md) to add other tools.
+
 The assistant can also feed a command text on standard input, such as a
 message it read. A script sees only what the assistant hands it.
 
@@ -471,3 +504,23 @@ network.
 The assistant treats mail as data. Its instructions tell it never to follow
 instructions written inside an email, and the approval cards stop a message
 that tries to make it send mail.
+
+## The assistant pane
+
+The question box's model menu lists models from the provider selected in
+Preferences. It marks the current model and lets you search the list. Manage
+in Preferences opens the AI page to change a connection or enter a model by
+hand. Changing the model keeps the conversation and uses your new choice for
+the next question.
+
+New Chat and Tools sit at the start of the header. Tools has MCP Servers and
+Skills switches for this pane. They preserve each server's and skill's switch
+in Preferences. You can change these switches during a turn; the new settings
+apply to the next question. Tool approval and Always Allow follow the same
+rules described above.
+
+Attach adds removable file chips to the question. The assistant receives their paths, not their contents. When it puts a file into a draft or sends it, Penguin Mail shows the existing approval question and the full paths before reading the files. The question box grows to four lines and scrolls after that. Enter sends; Shift+Enter starts a line.
+
+Each question has You above it. What it did folds the turn's thoughts and tool calls into one row; open a tool to read its input, result and identifier. Show Details Expanded in Preferences opens the outer row. The five starting suggestions sit under This conversation and Your mail.
+
+Detach sits before the window controls and moves the same chat into its own window. The main window controls appear above the assistant while it is docked and open, and above the message or calendar when the assistant is closed or detached. Dock returns it to the mail window, preserving your question, file chips and pending approval. Closing the detached window docks the chat and hides it. Ctrl+J in the mail window presents a detached chat. Stop declines a pending approval and stops the turn.

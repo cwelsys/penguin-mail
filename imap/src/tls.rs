@@ -154,15 +154,15 @@ impl fmt::Debug for PinnedLocalCert {
 }
 
 impl PinnedLocalCert {
-    fn new(cert: CertificateDer<'static>, provider: Arc<CryptoProvider>) -> Result<Self, rustls::Error> {
+    fn new(
+        cert: CertificateDer<'static>,
+        provider: Arc<CryptoProvider>,
+    ) -> Result<Self, rustls::Error> {
         let fallback = Arc::new(rustls_platform_verifier::Verifier::new(provider)?);
         Ok(Self::with_fallback(cert, fallback))
     }
 
-    fn with_fallback(
-        cert: CertificateDer<'static>,
-        fallback: Arc<dyn ServerCertVerifier>,
-    ) -> Self {
+    fn with_fallback(cert: CertificateDer<'static>, fallback: Arc<dyn ServerCertVerifier>) -> Self {
         Self { cert, fallback }
     }
 }
@@ -181,13 +181,8 @@ impl ServerCertVerifier for PinnedLocalCert {
         {
             return Ok(ServerCertVerified::assertion());
         }
-        self.fallback.verify_server_cert(
-            end_entity,
-            intermediates,
-            server_name,
-            ocsp_response,
-            now,
-        )
+        self.fallback
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
     }
 
     fn verify_tls12_signature(
@@ -366,10 +361,7 @@ mod tests {
         let fallback = rustls::client::WebPkiServerVerifier::builder(std::sync::Arc::new(roots))
             .build()
             .unwrap();
-        let verifier = super::PinnedLocalCert::with_fallback(
-            pin,
-            fallback,
-        );
+        let verifier = super::PinnedLocalCert::with_fallback(pin, fallback);
         let name = ServerName::try_from("localhost").unwrap();
         assert!(
             verifier

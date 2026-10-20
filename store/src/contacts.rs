@@ -148,11 +148,17 @@ pub fn list_correspondents(conn: &Connection) -> Result<Vec<Correspondent>> {
     let (stale, counted_row) = marks(conn)?;
     let mut tally = Tally::default();
     if !stale {
-        let mut stmt = conn.prepare_cached("SELECT key, email, name, score, last_seen FROM correspondents")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT key, email, name, score, last_seen FROM correspondents")?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                Correspondent { email: row.get(1)?, name: row.get(2)?, score: row.get(3)?, last_seen: row.get(4)? },
+                Correspondent {
+                    email: row.get(1)?,
+                    name: row.get(2)?,
+                    score: row.get(3)?,
+                    last_seen: row.get(4)?,
+                },
             ))
         })?;
         tally.found = rows.collect::<rusqlite::Result<_>>()?;
@@ -197,7 +203,9 @@ pub fn catch_up_step(conn: &Connection, limit: i64) -> Result<bool> {
     // The last row of this step; the step ends there, so a message filed
     // in two Sent folders is never split across two steps.
     let upto: Option<i64> = conn
-        .prepare_cached("SELECT rowid FROM messages WHERE rowid > ?1 ORDER BY rowid LIMIT 1 OFFSET ?2")?
+        .prepare_cached(
+            "SELECT rowid FROM messages WHERE rowid > ?1 ORDER BY rowid LIMIT 1 OFFSET ?2",
+        )?
         .query_row(rusqlite::params![last, limit - 1], |row| row.get(0))
         .optional()?;
     let mut upsert = conn.prepare_cached(
@@ -208,19 +216,25 @@ pub fn catch_up_step(conn: &Connection, limit: i64) -> Result<bool> {
          last_seen = CASE WHEN excluded.last_seen >= last_seen OR name IS NULL \
              THEN max(last_seen, excluded.last_seen) ELSE last_seen END",
     )?;
-    let counted = each_address(conn, last, upto.unwrap_or(i64::MAX), |address, weight, date| {
-        if let Some((key, email, name)) = counted(address) {
-            upsert.execute(rusqlite::params![key, email, name, weight, date])?;
-        }
-        Ok(())
-    })?;
+    let counted = each_address(
+        conn,
+        last,
+        upto.unwrap_or(i64::MAX),
+        |address, weight, date| {
+            if let Some((key, email, name)) = counted(address) {
+                upsert.execute(rusqlite::params![key, email, name, weight, date])?;
+            }
+            Ok(())
+        },
+    )?;
     let done = upto.is_none();
     if stale {
         let row = counted.unwrap_or(last);
         conn.prepare_cached("UPDATE contact_marks SET stale = ?1, counted_row = ?2")?
             .execute(rusqlite::params![!done, row])?;
     } else if let Some(row) = counted {
-        conn.prepare_cached("UPDATE contact_marks SET counted_row = ?1")?.execute([row])?;
+        conn.prepare_cached("UPDATE contact_marks SET counted_row = ?1")?
+            .execute([row])?;
     }
     Ok(!done)
 }
@@ -240,9 +254,13 @@ struct Gone {
 impl Gone {
     fn spread(&self, mut note: impl FnMut(Address, i64, EpochMillis) -> Result<()>) -> Result<()> {
         let times = self.filings.max(1);
-        spread(self.from_name.clone(), self.from_addr.clone(), self.to_cc.clone(), self.date, |address, weight, date| {
-            note(address, weight * times, date)
-        })
+        spread(
+            self.from_name.clone(),
+            self.from_addr.clone(),
+            self.to_cc.clone(),
+            self.date,
+            |address, weight, date| note(address, weight * times, date),
+        )
     }
 }
 
@@ -282,11 +300,18 @@ fn take_off_deleted(conn: &Connection) -> Result<bool> {
         })?;
     }
     let mut found = HashMap::new();
-    let mut load = conn.prepare_cached("SELECT email, name, score, last_seen FROM correspondents WHERE key = ?1")?;
+    let mut load = conn.prepare_cached(
+        "SELECT email, name, score, last_seen FROM correspondents WHERE key = ?1",
+    )?;
     for key in named {
         let person = load
             .query_row([&key], |row| {
-                Ok(Correspondent { email: row.get(0)?, name: row.get(1)?, score: row.get(2)?, last_seen: row.get(3)? })
+                Ok(Correspondent {
+                    email: row.get(0)?,
+                    name: row.get(1)?,
+                    score: row.get(2)?,
+                    last_seen: row.get(3)?,
+                })
             })
             .optional()?;
         if let Some(person) = person {
@@ -304,10 +329,13 @@ fn take_off_deleted(conn: &Connection) -> Result<bool> {
             Some(person) => conn
                 .prepare_cached("UPDATE correspondents SET score = ?2 WHERE key = ?1")?
                 .execute(rusqlite::params![key, person.score])?,
-            None => conn.prepare_cached("DELETE FROM correspondents WHERE key = ?1")?.execute([&key])?,
+            None => conn
+                .prepare_cached("DELETE FROM correspondents WHERE key = ?1")?
+                .execute([&key])?,
         };
     }
-    conn.prepare_cached("DELETE FROM contact_gone WHERE seq <= ?1")?.execute([newest])?;
+    conn.prepare_cached("DELETE FROM contact_gone WHERE seq <= ?1")?
+        .execute([newest])?;
     Ok(true)
 }
 
@@ -333,7 +361,9 @@ fn take_off(found: &mut HashMap<String, Correspondent>, gone: &[Gone]) -> bool {
                 Some(entry)
                     if entry.score > weight
                         && date < entry.last_seen
-                        && name.as_ref().is_some_and(|n| entry.name.as_ref() != Some(n)) =>
+                        && name
+                            .as_ref()
+                            .is_some_and(|n| entry.name.as_ref() != Some(n)) =>
                 {
                     entry.score -= weight;
                 }
@@ -375,7 +405,14 @@ fn spread(
         }
         None => {
             if let Some(email) = from_addr {
-                note(Address { name: from_name, email }, 1, date)?;
+                note(
+                    Address {
+                        name: from_name,
+                        email,
+                    },
+                    1,
+                    date,
+                )?;
             }
         }
     }
@@ -405,7 +442,10 @@ fn each_address(
     let mut rows = stmt.query([after, upto])?;
     let mut last = None;
     while let Some(row) = rows.next()? {
-        let to_cc = match (row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?) {
+        let to_cc = match (
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ) {
             (Some(to), Some(cc)) => Some((to, cc)),
             _ => None,
         };
@@ -414,7 +454,6 @@ fn each_address(
     }
     Ok(last)
 }
-
 
 /// The tally's key, address and name for `address`, or `None` for one not
 /// worth suggesting.
@@ -568,37 +607,104 @@ mod tests {
         let id = accounts::insert_account(&conn, "dana@example.com", 0).unwrap();
         list_gmail_roles(&conn, id);
         let put = |meta: MessageMeta| {
-            let upsert = messages::Change::Upsert { meta: Box::new(meta), generation: 1 };
+            let upsert = messages::Change::Upsert {
+                meta: Box::new(meta),
+                generation: 1,
+            };
             messages::apply(&conn, id, &[upsert]).unwrap();
         };
         let same = |step: &str| {
-            assert_eq!(list_correspondents(&conn).unwrap(), whole_read(&conn).unwrap(), "after {step}");
+            assert_eq!(
+                list_correspondents(&conn).unwrap(),
+                whole_read(&conn).unwrap(),
+                "after {step}"
+            );
             catch_up(&conn).unwrap();
-            assert_eq!(list_correspondents(&conn).unwrap(), whole_read(&conn).unwrap(), "caught up after {step}");
+            assert_eq!(
+                list_correspondents(&conn).unwrap(),
+                whole_read(&conn).unwrap(),
+                "caught up after {step}"
+            );
         };
         let dated = |mut meta: MessageMeta, date: i64| {
             meta.date = date;
             meta
         };
-        put(message(id, "m1", ("Theo Lang", "theo@example.org"), &[("Dana", "dana@example.com")], gmail::INBOX));
-        put(dated(message(id, "m2", ("Dana", "dana@example.com"), &[("Mara", "mara@example.org")], gmail::SENT), 2_000));
+        put(message(
+            id,
+            "m1",
+            ("Theo Lang", "theo@example.org"),
+            &[("Dana", "dana@example.com")],
+            gmail::INBOX,
+        ));
+        put(dated(
+            message(
+                id,
+                "m2",
+                ("Dana", "dana@example.com"),
+                &[("Mara", "mara@example.org")],
+                gmail::SENT,
+            ),
+            2_000,
+        ));
         same("the first read");
-        put(dated(message(id, "m3", ("Theo L.", "theo@example.org"), &[("Dana", "dana@example.com")], gmail::INBOX), 3_000));
+        put(dated(
+            message(
+                id,
+                "m3",
+                ("Theo L.", "theo@example.org"),
+                &[("Dana", "dana@example.com")],
+                gmail::INBOX,
+            ),
+            3_000,
+        ));
         same("new mail");
         same("nothing new");
-        put(dated(message(id, "m4", ("Dana", "dana@example.com"), &[("Ana", "ana@example.org")], gmail::SENT), 500));
+        put(dated(
+            message(
+                id,
+                "m4",
+                ("Dana", "dana@example.com"),
+                &[("Ana", "ana@example.org")],
+                gmail::SENT,
+            ),
+            500,
+        ));
         same("new sent mail");
-        put(dated(message(id, "m4", ("Dana", "dana@example.com"), &[("Ana", "ana@example.org")], gmail::SENT), 500));
+        put(dated(
+            message(
+                id,
+                "m4",
+                ("Dana", "dana@example.com"),
+                &[("Ana", "ana@example.org")],
+                gmail::SENT,
+            ),
+            500,
+        ));
         same("sent mail read again");
-        messages::apply(&conn, id, &[messages::Change::Erase { message_id: "m2".into() }]).unwrap();
+        messages::apply(
+            &conn,
+            id,
+            &[messages::Change::Erase {
+                message_id: "m2".into(),
+            }],
+        )
+        .unwrap();
         same("a deletion");
         let into_sent = messages::Change::of("m1", Membership::Mailbox(gmail::SENT.into()), true);
         messages::apply(&conn, id, &[into_sent]).unwrap();
         same("a message filed in Sent");
-        let out_of_sent = messages::Change::of("m1", Membership::Mailbox(gmail::SENT.into()), false);
+        let out_of_sent =
+            messages::Change::of("m1", Membership::Mailbox(gmail::SENT.into()), false);
         messages::apply(&conn, id, &[out_of_sent]).unwrap();
         same("a message taken out of Sent");
-        put(message(id, "m6", ("Dana", "dana@example.com"), &[("Cy", "cy@example.org")], gmail::INBOX));
+        put(message(
+            id,
+            "m6",
+            ("Dana", "dana@example.com"),
+            &[("Cy", "cy@example.org")],
+            gmail::INBOX,
+        ));
         same("mail to Cy in the Inbox");
         // Switching an account to JMAP moves filings in place.
         conn.execute(
@@ -608,9 +714,22 @@ mod tests {
         )
         .unwrap();
         same("a filing moved to Sent");
-        messages::apply(&conn, id, &[messages::Change::Erase { message_id: "m1".into() }]).unwrap();
+        messages::apply(
+            &conn,
+            id,
+            &[messages::Change::Erase {
+                message_id: "m1".into(),
+            }],
+        )
+        .unwrap();
         same("a deletion outside Sent");
-        put(message(id, "m5", ("Dana", "dana@example.com"), &[("Bo", "bo@example.org")], "Label_1"));
+        put(message(
+            id,
+            "m5",
+            ("Dana", "dana@example.com"),
+            &[("Bo", "bo@example.org")],
+            "Label_1",
+        ));
         same("mail in a plain label");
         let sent_folder = RemoteMailbox {
             id: "Label_1".into(),
@@ -624,14 +743,29 @@ mod tests {
         same("a label taking the Sent role");
         crate::mailboxes::delete(&conn, id, "Label_1").unwrap();
         same("a Sent label deleted");
-        put(dated(message(id, "m3", ("Theodore", "theo@example.org"), &[("Dana", "dana@example.com")], gmail::INBOX), 4_000));
+        put(dated(
+            message(
+                id,
+                "m3",
+                ("Theodore", "theo@example.org"),
+                &[("Dana", "dana@example.com")],
+                gmail::INBOX,
+            ),
+            4_000,
+        ));
         same("a message read again with new headers");
         accounts::insert_account(&conn, "theo@example.org", 0).unwrap();
         same("an account for a correspondent's address");
         let other = accounts::insert_account(&conn, "eve@example.net", 0).unwrap();
         list_gmail_roles(&conn, other);
         let upsert = messages::Change::Upsert {
-            meta: Box::new(message(other, "o1", ("Kai", "kai@example.org"), &[("Eve", "eve@example.net")], gmail::INBOX)),
+            meta: Box::new(message(
+                other,
+                "o1",
+                ("Kai", "kai@example.org"),
+                &[("Eve", "eve@example.net")],
+                gmail::INBOX,
+            )),
             generation: 1,
         };
         messages::apply(&conn, other, &[upsert]).unwrap();
@@ -648,16 +782,33 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let id = accounts::insert_account(&conn, "dana@example.com", 0).unwrap();
         list_gmail_roles(&conn, id);
-        let sent = message(id, "m1", ("Dana", "dana@example.com"), &[("Mara", "mara@example.org")], gmail::SENT);
+        let sent = message(
+            id,
+            "m1",
+            ("Dana", "dana@example.com"),
+            &[("Mara", "mara@example.org")],
+            gmail::SENT,
+        );
         let put = |meta: &MessageMeta| {
-            let upsert = messages::Change::Upsert { meta: Box::new(meta.clone()), generation: 1 };
+            let upsert = messages::Change::Upsert {
+                meta: Box::new(meta.clone()),
+                generation: 1,
+            };
             messages::apply(&conn, id, &[upsert]).unwrap();
         };
         put(&sent);
         catch_up(&conn).unwrap();
         put(&sent);
-        put(&message(id, "m2", ("Dana", "dana@example.com"), &[("Bo", "bo@example.org")], gmail::SENT));
-        let stale: bool = conn.query_row("SELECT stale FROM contact_marks", [], |row| row.get(0)).unwrap();
+        put(&message(
+            id,
+            "m2",
+            ("Dana", "dana@example.com"),
+            &[("Bo", "bo@example.org")],
+            gmail::SENT,
+        ));
+        let stale: bool = conn
+            .query_row("SELECT stale FROM contact_marks", [], |row| row.get(0))
+            .unwrap();
         assert!(!stale);
     }
 
@@ -877,18 +1028,35 @@ mod tests {
         };
         crate::mailboxes::upsert(&conn, id, &second_sent).unwrap();
         let to_mara = |n: &str, name: &str| {
-            message(id, n, ("Dana", "dana@example.com"), &[(name, "mara@example.org")], gmail::SENT)
+            message(
+                id,
+                n,
+                ("Dana", "dana@example.com"),
+                &[(name, "mara@example.org")],
+                gmail::SENT,
+            )
         };
         put_at(&conn, id, to_mara("m1", "Mara A"), 500);
         put_at(&conn, id, to_mara("m2", "Mara O"), 3_000);
         let twice = messages::Change::of("m1", Membership::Mailbox("Label_1".into()), true);
         messages::apply(&conn, id, &[twice]).unwrap();
         catch_up(&conn).unwrap();
-        assert_eq!(list_correspondents(&conn).unwrap(), whole_read(&conn).unwrap());
+        assert_eq!(
+            list_correspondents(&conn).unwrap(),
+            whole_read(&conn).unwrap()
+        );
         erase(&conn, id, "m1");
-        assert_eq!(list_correspondents(&conn).unwrap(), whole_read(&conn).unwrap(), "read after");
+        assert_eq!(
+            list_correspondents(&conn).unwrap(),
+            whole_read(&conn).unwrap(),
+            "read after"
+        );
         catch_up(&conn).unwrap();
-        assert_eq!(list_correspondents(&conn).unwrap(), whole_read(&conn).unwrap(), "caught up after");
+        assert_eq!(
+            list_correspondents(&conn).unwrap(),
+            whole_read(&conn).unwrap(),
+            "caught up after"
+        );
     }
 
     /// A delete while a recount runs only touches the rows the recount
@@ -899,26 +1067,52 @@ mod tests {
         let id = accounts::insert_account(&conn, "dana@example.com", 0).unwrap();
         list_gmail_roles(&conn, id);
         let from = |n: &str, name: &str, who: &str| {
-            message(id, n, (name, who), &[("Dana", "dana@example.com")], gmail::INBOX)
+            message(
+                id,
+                n,
+                (name, who),
+                &[("Dana", "dana@example.com")],
+                gmail::INBOX,
+            )
         };
-        put_at(&conn, id, from("m0", "Theo Lang", "theo@example.org"), 1_000);
+        put_at(
+            &conn,
+            id,
+            from("m0", "Theo Lang", "theo@example.org"),
+            1_000,
+        );
         put_at(&conn, id, from("m1", "Theo L.", "theo@example.org"), 3_000);
         for n in 2..9 {
-            put_at(&conn, id, from(&format!("m{n}"), "P", &format!("p{n}@example.org")), 1_000 + n);
+            put_at(
+                &conn,
+                id,
+                from(&format!("m{n}"), "P", &format!("p{n}@example.org")),
+                1_000 + n,
+            );
         }
         assert!(catch_up_step(&conn, 3).unwrap());
         assert!(stale(&conn));
         let counted = |conn: &Connection| -> i64 {
-            conn.query_row("SELECT counted_row FROM contact_marks", [], |row| row.get(0)).unwrap()
+            conn.query_row("SELECT counted_row FROM contact_marks", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
         };
         let passed = counted(&conn);
         assert!(passed > 0);
         erase(&conn, id, "m0");
         erase(&conn, id, "m8");
-        assert_eq!(counted(&conn), passed, "the recount went on from where it was");
+        assert_eq!(
+            counted(&conn),
+            passed,
+            "the recount went on from where it was"
+        );
         catch_up(&conn).unwrap();
         assert!(!stale(&conn));
-        assert_eq!(list_correspondents(&conn).unwrap(), whole_read(&conn).unwrap());
+        assert_eq!(
+            list_correspondents(&conn).unwrap(),
+            whole_read(&conn).unwrap()
+        );
     }
 
     /// With nothing new and nothing stale, the idle catch-up writes nothing.
@@ -1067,12 +1261,24 @@ mod tests {
 
         let all = suggestions(&conn).unwrap();
         let accounts_of = |email: &str| -> Vec<mailrs_domain::AccountId> {
-            all.iter().find(|s| s.email.eq_ignore_ascii_case(email)).unwrap().accounts.clone()
+            all.iter()
+                .find(|s| s.email.eq_ignore_ascii_case(email))
+                .unwrap()
+                .accounts
+                .clone()
         };
         assert_eq!(accounts_of("mara@example.org"), [home, work]);
         assert_eq!(accounts_of("ana@work.example"), [work]);
-        assert!(accounts_of("theo@example.org").is_empty(), "Theo is known only from mail");
-        assert!(!all.iter().find(|s| s.email == "theo@example.org").unwrap().known());
+        assert!(
+            accounts_of("theo@example.org").is_empty(),
+            "Theo is known only from mail"
+        );
+        assert!(
+            !all.iter()
+                .find(|s| s.email == "theo@example.org")
+                .unwrap()
+                .known()
+        );
     }
 
     #[test]

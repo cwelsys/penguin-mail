@@ -122,7 +122,9 @@ fn a_report_box_is_never_ticked_even_when_it_comes_first() {
 #[test]
 fn a_form_whose_only_reasons_are_reports_ticks_nothing() {
     let mut page = page(REASONS);
-    page.forms[0].fields.retain(|field| field.id != 2 && field.id != 3);
+    page.forms[0]
+        .fields
+        .retain(|field| field.id != 2 && field.id != 3);
     assert_eq!(plan_of(&page).tick, Vec::<usize>::new());
     assert_eq!(plan_of(&page).press, 6);
 }
@@ -369,7 +371,11 @@ async fn a_page_that_answers_a_moment_after_the_press_is_read_again() {
     });
     let prepared = prepare(&browser, None, URL, ME).await;
     assert_eq!(finish(&browser, &prepared).await, Outcome::Done);
-    assert_eq!(browser.submissions().len(), 1, "read again, not pressed again");
+    assert_eq!(
+        browser.submissions().len(),
+        1,
+        "read again, not pressed again"
+    );
 }
 
 #[tokio::test]
@@ -598,7 +604,10 @@ fn unsubscribed_inside_a_sentence_does_not_read_as_done() {
 
 #[test]
 fn unsubscribed_as_the_name_of_a_choice_does_not_read_as_done() {
-    let mut page = saying("Email preferences", "Weekly deals\nSubscribed\nUnsubscribed");
+    let mut page = saying(
+        "Email preferences",
+        "Weekly deals\nSubscribed\nUnsubscribed",
+    );
     page.forms.push(super::Form {
         id: 0,
         fields: vec![Field {

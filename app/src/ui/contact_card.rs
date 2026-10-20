@@ -60,10 +60,14 @@ pub fn present(parent: &impl IsA<gtk::Widget>, person: Person, chose: impl Fn(Ch
         .halign(gtk::Align::Center)
         .build();
     super::thread_row::set_avatar_hue(&avatar, &person.name, &person.email);
-    let photo = person.photo.as_ref().and_then(|path| std::fs::read(path).ok());
+    let photo = person
+        .photo
+        .as_ref()
+        .and_then(|path| std::fs::read(path).ok());
     // A photo GDK reads in this process is decoded only when its header
     // says it is a sane size.
-    let photo = photo.filter(|bytes| !super::texture::decoded_in_process(bytes) || crate::photos::fits(bytes));
+    let photo = photo
+        .filter(|bytes| !super::texture::decoded_in_process(bytes) || crate::photos::fits(bytes));
     if let Some(bytes) = photo {
         let bytes = glib::Bytes::from_owned(bytes);
         match super::texture::here(&bytes) {
@@ -104,7 +108,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, person: Person, chose: impl Fn(Ch
 
     let details = adw::PreferencesGroup::new();
     for address in &person.addresses {
-        let row = adw::ActionRow::builder().use_markup(false)
+        let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(address)
             .subtitle(if address == &person.email {
                 gettext("Email")
@@ -127,7 +132,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, person: Person, chose: impl Fn(Ch
         details.add(&row);
     }
     if let Some(phone) = person.phone.as_deref() {
-        let row = adw::ActionRow::builder().use_markup(false)
+        let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(phone)
             .subtitle(gettext("Phone"))
             .build();

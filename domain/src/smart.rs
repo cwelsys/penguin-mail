@@ -194,7 +194,10 @@ mod tests {
             mailbox(true, conditions).query(),
             Some(Query::Term(Term::MailboxNamed("Work/Clients".into())))
         );
-        assert_eq!(mailbox(true, vec![cond(Field::Words, "\"()")]).query(), None);
+        assert_eq!(
+            mailbox(true, vec![cond(Field::Words, "\"()")]).query(),
+            None
+        );
         assert_eq!(mailbox(true, vec![cond(Field::Label, "()")]).query(), None);
         assert_eq!(mailbox(true, vec![]).query(), None);
     }

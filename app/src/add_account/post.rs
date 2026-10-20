@@ -560,7 +560,15 @@ mod tests {
         let names: Vec<&str> = Band::ALL.into_iter().map(Band::name).collect();
         assert_eq!(
             names,
-            ["idle", "stamped", "browser", "lookup", "error", "unreachable", "success"]
+            [
+                "idle",
+                "stamped",
+                "browser",
+                "lookup",
+                "error",
+                "unreachable",
+                "success"
+            ]
         );
     }
 
@@ -579,14 +587,23 @@ mod tests {
 
     #[test]
     fn the_picker_offers_microsoft_when_the_build_can_sign_in_to_it() {
-        let titles = |microsoft| -> Vec<String> {
-            tiles(microsoft).into_iter().map(Tile::title).collect()
-        };
+        let titles =
+            |microsoft| -> Vec<String> { tiles(microsoft).into_iter().map(Tile::title).collect() };
         assert_eq!(
             titles(true),
-            ["Google", "Microsoft", "iCloud", "Fastmail", "Yahoo", "Other"]
+            [
+                "Google",
+                "Microsoft",
+                "iCloud",
+                "Fastmail",
+                "Yahoo",
+                "Other"
+            ]
         );
-        assert_eq!(titles(false), ["Google", "iCloud", "Fastmail", "Yahoo", "Other"]);
+        assert_eq!(
+            titles(false),
+            ["Google", "iCloud", "Fastmail", "Yahoo", "Other"]
+        );
         assert_eq!(Tile::Microsoft.subtitle(), "Outlook, 365");
         assert_eq!(Tile::Microsoft.provider(), Some("Microsoft"));
         assert_eq!(Tile::Microsoft.stamp(), stamp_for("Microsoft"));
@@ -655,8 +672,7 @@ mod tests {
         for tile in tiles(true) {
             if let Some(name) = tile.provider() {
                 assert!(
-                    mailrs_discover::provider_named(name).is_some()
-                        || tile.in_browser(),
+                    mailrs_discover::provider_named(name).is_some() || tile.in_browser(),
                     "{name}"
                 );
             }
@@ -833,8 +849,14 @@ mod tests {
 
     #[test]
     fn every_password_provider_in_the_list_asks_for_an_app_password() {
-        assert_eq!(advice("posteo.de", true).map(|a| a.kind), Some(AdviceKind::AppPassword));
-        assert_eq!(advice("web.de", true).map(|a| a.kind), Some(AdviceKind::AppPassword));
+        assert_eq!(
+            advice("posteo.de", true).map(|a| a.kind),
+            Some(AdviceKind::AppPassword)
+        );
+        assert_eq!(
+            advice("web.de", true).map(|a| a.kind),
+            Some(AdviceKind::AppPassword)
+        );
     }
 
     #[test]

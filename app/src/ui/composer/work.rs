@@ -73,7 +73,10 @@ mod tests {
     fn a_save_cannot_start_while_a_send_builds() {
         let work = Work::default();
         let _send = work.begin().unwrap();
-        assert!(work.begin().is_none(), "a second job would leave an orphan draft");
+        assert!(
+            work.begin().is_none(),
+            "a second job would leave an orphan draft"
+        );
     }
 
     #[test]

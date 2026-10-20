@@ -29,16 +29,17 @@ use std::time::Duration;
 use mailrs_domain::mailbox::keyword::{FLAGGED, SEEN};
 use mailrs_domain::{MailSet, RemoteMailbox, Role};
 use mailrs_gmail::LabelColor;
-use mailrs_mime::Parts;
 use mailrs_graph::Granted;
+use mailrs_mime::Parts;
 use tokio::time::Instant;
 
 pub use api::GraphApi;
 pub(crate) use errors::backend;
 
 use super::{
-    Backfill, Changes, Found, IdentityService, KeywordsPage, MailBackend, MailCapabilities, RawMessage, Refused,
-    Relocated, RemoteRef, SearchQuery, SendAsAddress, SyncState, Unapplied, Want, Withheld,
+    Backfill, Changes, Found, IdentityService, KeywordsPage, MailBackend, MailCapabilities,
+    RawMessage, Refused, Relocated, RemoteRef, SearchQuery, SendAsAddress, SyncState, Unapplied,
+    Want, Withheld,
 };
 use crate::api::{DraftRef, SavedDraft};
 use crate::{BackendError, MailOp};
@@ -53,6 +54,7 @@ const MICROSOFT: MailCapabilities = MailCapabilities {
     batch_limit: mailrs_graph::BATCH_LIMIT,
     keywords: &[SEEN, FLAGGED],
     native_search: false,
+    paged_mailboxes: false,
     renames: false,
     restates: true,
     tags: true,
@@ -147,7 +149,10 @@ impl Handles {
 
     fn get(&self, id: &str, path: &str) -> Option<String> {
         let (_, handles) = self.recent.iter().find(|(m, _)| m == id)?;
-        handles.iter().find(|(p, _)| p == path).map(|(_, h)| h.clone())
+        handles
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, h)| h.clone())
     }
 }
 
@@ -238,7 +243,11 @@ impl<G: GraphApi> Microsoft<G> {
     /// service turns off for the run and answers `Unsupported`, which
     /// Preferences explains. Without the scope it is a permission to ask
     /// for.
-    pub(super) fn service_error(&self, service: Service, err: mailrs_graph::GraphError) -> crate::BackendError {
+    pub(super) fn service_error(
+        &self,
+        service: Service,
+        err: mailrs_graph::GraphError,
+    ) -> crate::BackendError {
         let granted = self.graph.granted().is_none_or(|g| g.has(service.scope()));
         if matches!(err, mailrs_graph::GraphError::AccessDenied { .. }) && granted {
             let flag = match service {
@@ -255,11 +264,17 @@ impl<G: GraphApi> Microsoft<G> {
     }
 
     fn remember(&self, id: &str, handles: Vec<(String, String)>) {
-        self.handles.lock().unwrap_or_else(PoisonError::into_inner).remember(id, handles);
+        self.handles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remember(id, handles);
     }
 
     fn remembered(&self, id: &str, path: &str) -> Option<String> {
-        self.handles.lock().unwrap_or_else(PoisonError::into_inner).get(id, path)
+        self.handles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id, path)
     }
 }
 
@@ -326,12 +341,20 @@ impl<G: GraphApi> MailBackend for Microsoft<G> {
         self.remove_folder(id).await
     }
 
-    async fn set_mailbox_color(&self, id: &str, color: &LabelColor) -> Result<RemoteMailbox, BackendError> {
+    async fn set_mailbox_color(
+        &self,
+        id: &str,
+        color: &LabelColor,
+    ) -> Result<RemoteMailbox, BackendError> {
         self.color_tag(id, color).await
     }
 
     async fn mailbox_threads(&self, id: &str) -> Result<u64, BackendError> {
-        self.known().totals.get(id).copied().ok_or(BackendError::NotFound)
+        self.known()
+            .totals
+            .get(id)
+            .copied()
+            .ok_or(BackendError::NotFound)
     }
 
     fn follow(&self, mailbox: &str) -> bool {
@@ -356,7 +379,12 @@ impl<G: GraphApi> MailBackend for Microsoft<G> {
     }
 
     /// The feed names every flag change, so there is nothing to page.
-    async fn keywords_in(&self, _: &str, _: u32, _: RangeInclusive<u32>) -> Result<KeywordsPage, BackendError> {
+    async fn keywords_in(
+        &self,
+        _: &str,
+        _: u32,
+        _: RangeInclusive<u32>,
+    ) -> Result<KeywordsPage, BackendError> {
         Ok(KeywordsPage::default())
     }
 
@@ -372,7 +400,11 @@ impl<G: GraphApi> MailBackend for Microsoft<G> {
         self.backfill_page(days, cursor).await
     }
 
-    async fn window_ids(&self, days: i64, mailbox: Option<&str>) -> Result<Vec<RemoteRef>, BackendError> {
+    async fn window_ids(
+        &self,
+        days: i64,
+        mailbox: Option<&str>,
+    ) -> Result<Vec<RemoteRef>, BackendError> {
         self.ids_in(Some(days), mailbox.map(str::to_string)).await
     }
 
@@ -380,7 +412,11 @@ impl<G: GraphApi> MailBackend for Microsoft<G> {
         self.inbox_listing().await
     }
 
-    async fn search(&self, query: &SearchQuery, limit: usize) -> Result<Vec<RemoteRef>, BackendError> {
+    async fn search(
+        &self,
+        query: &SearchQuery,
+        limit: usize,
+    ) -> Result<Vec<RemoteRef>, BackendError> {
         self.find(query, limit).await
     }
 
@@ -418,14 +454,23 @@ impl<G: GraphApi> MailBackend for Microsoft<G> {
     }
 
     fn set_of(&self, id: &str) -> MailSet {
-        let role = self.known().roles.iter().find(|(_, folder)| *folder == id).map(|(r, _)| *r);
+        let role = self
+            .known()
+            .roles
+            .iter()
+            .find(|(_, folder)| *folder == id)
+            .map(|(r, _)| *r);
         match role {
             Some(role) => MailSet::Role(role),
             None => MailSet::Mailbox(id.to_string()),
         }
     }
 
-    async fn apply(&self, messages: &[String], ops: &[MailOp]) -> Result<Vec<Relocated>, Unapplied> {
+    async fn apply(
+        &self,
+        messages: &[String],
+        ops: &[MailOp],
+    ) -> Result<Vec<Relocated>, Unapplied> {
         self.write(messages, ops).await
     }
 

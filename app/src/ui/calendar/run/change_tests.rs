@@ -14,18 +14,29 @@ const FAILED: &str = "Could not move the event: {reason}";
 
 /// The answer a question nobody needed to ask settles on.
 fn go_ahead() -> scope::Answer {
-    scope::Answer { scope: None, notify: Notify::Nobody, keep_time: false }
+    scope::Answer {
+        scope: None,
+        notify: Notify::Nobody,
+        keep_time: false,
+    }
 }
 
 /// A move of `o` an hour later, held for Undo.
 fn moving(o: &Occurrence) -> Changing {
-    let edited = Event { start: o.start + 3_600_000, end: o.end + 3_600_000, ..Event::clone(&o.event) };
+    let edited = Event {
+        start: o.start + 3_600_000,
+        end: o.end + 3_600_000,
+        ..Event::clone(&o.event)
+    };
     Changing {
         account_id: ACCOUNT,
         change: EventChange::Edit {
             occurrence: o.clone(),
             edited,
-            how: Edit { moves: true, ..Edit::default() },
+            how: Edit {
+                moves: true,
+                ..Edit::default()
+            },
         },
         kept_time: None,
         shown: Event::clone(&o.event),
@@ -52,7 +63,10 @@ async fn a_held_move_reloads_and_offers_undo() {
     assert_eq!(view.undos, vec![("Moved “Standup”".to_string(), 7)]);
     assert_eq!(view.sidebars.len(), 1, "the calendars are read again");
     assert_eq!(view.waiting_drawn.len(), 1, "and what waits for an answer");
-    assert!(view.pushed.is_empty(), "a held change goes out once its toast closes");
+    assert!(
+        view.pushed.is_empty(),
+        "a held change goes out once its toast closes"
+    );
 }
 
 #[tokio::test]
@@ -70,7 +84,12 @@ async fn a_save_with_no_undo_sends_the_change_at_once() {
     let window = FakeWindow::new();
     window.with(|v| v.written = Ok(Permitted::Done(None)));
     let run = window.run();
-    let outcome = run.change(Changing { undo: Undo::Skip, ..moving(&standup()) }).await;
+    let outcome = run
+        .change(Changing {
+            undo: Undo::Skip,
+            ..moving(&standup())
+        })
+        .await;
     assert_eq!(outcome, Outcome::Done);
     let view = window.view.borrow();
     assert_eq!(view.pushed, vec![ACCOUNT]);
@@ -80,15 +99,27 @@ async fn a_save_with_no_undo_sends_the_change_at_once() {
 #[tokio::test]
 async fn keep_old_time_writes_the_change_without_the_move() {
     let window = FakeWindow::new();
-    window.with(|v| v.chosen = Ok(Some(scope::Answer { keep_time: true, ..go_ahead() })));
+    window.with(|v| {
+        v.chosen = Ok(Some(scope::Answer {
+            keep_time: true,
+            ..go_ahead()
+        }))
+    });
     let o = standup();
     let kept = EventChange::Edit {
         occurrence: o.clone(),
-        edited: Event { title: "Standup, renamed".to_string(), ..Event::clone(&o.event) },
+        edited: Event {
+            title: "Standup, renamed".to_string(),
+            ..Event::clone(&o.event)
+        },
         how: Edit::default(),
     };
     let run = window.run();
-    run.change(Changing { kept_time: Some(kept), ..moving(&o) }).await;
+    run.change(Changing {
+        kept_time: Some(kept),
+        ..moving(&o)
+    })
+    .await;
     let written = window.view.borrow().writes.clone();
     assert_eq!(written, vec!["Standup, renamed".to_string()]);
 }

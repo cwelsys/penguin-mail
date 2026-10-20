@@ -54,7 +54,13 @@ impl Folder {
     /// Whether `message` still belongs in this folder. Archive leaves out
     /// what the account sent and its drafts, as the Gmail search does.
     pub fn holds(self, message: &MessageMeta) -> bool {
-        let placed = [Role::Inbox, Role::Sent, Role::Drafts, Role::Junk, Role::Trash];
+        let placed = [
+            Role::Inbox,
+            Role::Sent,
+            Role::Drafts,
+            Role::Junk,
+            Role::Trash,
+        ];
         match self {
             Folder::Archive => !placed.iter().any(|r| message.in_role(*r)),
             Folder::Junk => message.in_role(Role::Junk),
@@ -104,15 +110,24 @@ mod tests {
             ("TRASH", Role::Trash),
         ];
         for (place, role) in placed {
-            assert!(!Folder::Archive.holds(&message(&[place], &[role])), "{place}");
+            assert!(
+                !Folder::Archive.holds(&message(&[place], &[role])),
+                "{place}"
+            );
         }
     }
 
     #[test]
     fn each_folder_names_the_roles_it_holds_or_leaves_out() {
         let not = |role| Query::not_in(MailSet::Role(role));
-        assert_eq!(Folder::Junk.query(), Query::is_in(MailSet::Role(Role::Junk)));
-        assert_eq!(Folder::Trash.query(), Query::is_in(MailSet::Role(Role::Trash)));
+        assert_eq!(
+            Folder::Junk.query(),
+            Query::is_in(MailSet::Role(Role::Junk))
+        );
+        assert_eq!(
+            Folder::Trash.query(),
+            Query::is_in(MailSet::Role(Role::Trash))
+        );
         assert_eq!(
             Folder::AllMail.query(),
             Query::And(vec![not(Role::Junk), not(Role::Trash)])

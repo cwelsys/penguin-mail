@@ -106,7 +106,11 @@ pub fn describe(query: &Query) -> String {
 }
 
 fn descriptions(items: &[Query]) -> Vec<String> {
-    items.iter().map(describe).filter(|d| !d.is_empty()).collect()
+    items
+        .iter()
+        .map(describe)
+        .filter(|d| !d.is_empty())
+        .collect()
 }
 
 fn describe_term(term: &Term) -> String {

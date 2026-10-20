@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 
 use adw::prelude::*;
-use mailrs_domain::{AccountId, Provider};
 use mailrs_domain::translate::gettext;
+use mailrs_domain::{AccountId, Provider};
 
 use crate::permission::{Asked, Occasion, Permission};
 use crate::ui::confirm::{Tone, confirm};

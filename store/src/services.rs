@@ -68,7 +68,10 @@ pub fn save(conn: &Connection, account_id: AccountId, found: &FoundService) -> R
         confirmed: found.confirmed,
         source: found.source.clone(),
     })
-    .map_err(|err| StoreError::Corrupt { column: "account_services.extra", value: err.to_string() })?;
+    .map_err(|err| StoreError::Corrupt {
+        column: "account_services.extra",
+        value: err.to_string(),
+    })?;
     conn.execute(
         "INSERT INTO account_services (account_id, service, url, extra) VALUES (?1, ?2, ?3, ?4) \
          ON CONFLICT (account_id, service) DO UPDATE SET url = excluded.url, extra = excluded.extra",
@@ -82,15 +85,23 @@ pub fn load(conn: &Connection, account_id: AccountId) -> Result<Vec<FoundService
     let mut stmt =
         conn.prepare("SELECT service, url, extra FROM account_services WHERE account_id = ?1")?;
     let rows = stmt.query_map([account_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     let mut found = Vec::new();
     for row in rows {
         let (service, url, extra) = row?;
-        let kind = ServiceKind::parse(&service)
-            .ok_or_else(|| StoreError::Corrupt { column: "account_services.service", value: service.clone() })?;
-        let extra: Extra = serde_json::from_str(&extra)
-            .map_err(|_| StoreError::Corrupt { column: "account_services.extra", value: extra.clone() })?;
+        let kind = ServiceKind::parse(&service).ok_or_else(|| StoreError::Corrupt {
+            column: "account_services.service",
+            value: service.clone(),
+        })?;
+        let extra: Extra = serde_json::from_str(&extra).map_err(|_| StoreError::Corrupt {
+            column: "account_services.extra",
+            value: extra.clone(),
+        })?;
         found.push(FoundService {
             kind,
             url,
@@ -138,7 +149,12 @@ impl Miss {
 
 /// Keeps why the server of `kind` was not found, or with `None` forgets
 /// it once one is.
-pub fn save_miss(conn: &Connection, account_id: AccountId, kind: ServiceKind, miss: Option<Miss>) -> Result<()> {
+pub fn save_miss(
+    conn: &Connection,
+    account_id: AccountId,
+    kind: ServiceKind,
+    miss: Option<Miss>,
+) -> Result<()> {
     match miss {
         Some(miss) => conn.execute(
             "INSERT INTO service_misses (account_id, service, reason) VALUES (?1, ?2, ?3) \
@@ -155,17 +171,27 @@ pub fn save_miss(conn: &Connection, account_id: AccountId, kind: ServiceKind, mi
 
 /// Every kept miss, by account and then CalDAV before CardDAV.
 pub fn all_misses(conn: &Connection) -> Result<Vec<(AccountId, ServiceKind, Miss)>> {
-    let mut stmt = conn.prepare("SELECT account_id, service, reason FROM service_misses ORDER BY account_id, service")?;
+    let mut stmt = conn.prepare(
+        "SELECT account_id, service, reason FROM service_misses ORDER BY account_id, service",
+    )?;
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, AccountId>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, AccountId>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     let mut misses = Vec::new();
     for row in rows {
         let (account_id, service, reason) = row?;
-        let kind = ServiceKind::parse(&service)
-            .ok_or_else(|| StoreError::Corrupt { column: "service_misses.service", value: service.clone() })?;
-        let miss = Miss::parse(&reason)
-            .ok_or_else(|| StoreError::Corrupt { column: "service_misses.reason", value: reason.clone() })?;
+        let kind = ServiceKind::parse(&service).ok_or_else(|| StoreError::Corrupt {
+            column: "service_misses.service",
+            value: service.clone(),
+        })?;
+        let miss = Miss::parse(&reason).ok_or_else(|| StoreError::Corrupt {
+            column: "service_misses.reason",
+            value: reason.clone(),
+        })?;
         misses.push((account_id, kind, miss));
     }
     Ok(misses)

@@ -314,6 +314,95 @@ async fn the_sandbox_sees_the_system_and_the_skill_but_not_the_home_folder() {
     assert!(!dirs.skill.join("x").exists());
 }
 
+#[test]
+fn a_nix_sandbox_runs_its_packaged_shell_and_python() {
+    let Some(_) = option_env!("PENGUIN_MAIL_SKILL_RUNTIME") else {
+        eprintln!("skipping the Nix runtime test: this build has no packaged skill runtime");
+        return;
+    };
+    let bwrap = sandbox::find_bwrap().expect("the Nix environment supplies bubblewrap");
+    let dirs = sandbox_dirs();
+    write(
+        &dirs.skill.join("runtime.py"),
+        r#"#!/usr/bin/env python3
+import os, pathlib, ssl, sys
+assert sys.executable.startswith('/nix/store/')
+assert os.environ['HOME'] == '/work'
+for key in ['DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'PENGUIN_MAIL_TEST_SECRET']:
+    assert key not in os.environ, key
+for path in ['/home', '/run/user', '/usr/lib', '/nix/var']:
+    assert not pathlib.Path(path).exists(), path
+for path in ['/', '/skill', '/nix/store']:
+    assert os.statvfs(path).f_flag & os.ST_RDONLY, path
+network = sys.argv[1] == 'on'
+host = pathlib.Path('/skill/network').read_text()
+assert (os.readlink('/proc/self/ns/net') == host) == network
+if network:
+    assert os.environ['SSL_CERT_FILE'].startswith('/nix/store/')
+    assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
+else:
+    assert 'SSL_CERT_FILE' not in os.environ
+pathlib.Path('/work/result').write_text('python ran')
+print('python ran')
+"#,
+    );
+    std::fs::set_permissions(
+        dirs.skill.join("runtime.py"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    write(
+        &dirs.skill.join("network"),
+        std::fs::read_link("/proc/self/ns/net")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+    );
+    let mut jail = Jail {
+        bwrap: &bwrap,
+        skill: &dirs.skill,
+        work: &dirs.work,
+        network: false,
+    };
+    for network in [false, true] {
+        jail.network = network;
+        let mut args = sandbox::arguments(&jail);
+        // A rootless store has a different backing path. Change only the
+        // source of this mount; its destination and isolation stay the same.
+        if let Some(store) = std::env::var_os("PENGUIN_MAIL_TEST_NIX_STORE") {
+            let mount = args
+                .windows(3)
+                .position(|parts| parts == ["--ro-bind", "/nix/store", "/nix/store"])
+                .expect("the sandbox must expose the Nix store read-only");
+            args[mount + 1] = store;
+        }
+        let command = format!(
+            "set -e; readlink /proc/$$/exe; /bin/true; /bin/sh -c '/skill/runtime.py {}'",
+            if network { "on" } else { "off" }
+        );
+        let run = std::process::Command::new(&bwrap)
+            .args(args)
+            .args(["--", "/bin/bash", "-c", &command])
+            .env("DISPLAY", ":99")
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/private-bus")
+            .env("PENGUIN_MAIL_TEST_SECRET", "must stay outside")
+            .output()
+            .unwrap();
+        let output = String::from_utf8_lossy(&run.stdout);
+        assert!(
+            run.status.success(),
+            "{output}{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert!(output.starts_with("/nix/store/"), "{output}");
+        assert!(output.ends_with("python ran\n"), "{output}");
+        assert_eq!(
+            std::fs::read_to_string(dirs.work.join("result")).unwrap(),
+            "python ran"
+        );
+    }
+}
+
 #[tokio::test]
 async fn the_work_folder_lasts_across_calls_in_one_chat() {
     let Some(bwrap) = bwrap() else { return };

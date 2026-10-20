@@ -189,7 +189,9 @@ mod imp {
                 let Some(room) = room.upgrade() else { return };
                 let imp = room.imp();
                 imp.queued.set(false);
-                let Some(arranged) = imp.arranged.get() else { return };
+                let Some(arranged) = imp.arranged.get() else {
+                    return;
+                };
                 // Applying can close the panel, which asks for a decision
                 // of its own; no borrow may be held across it.
                 let apply = imp.apply.take();
@@ -346,7 +348,11 @@ mod tests {
         for width in (360..2400).step_by(7) {
             for open in [false, true] {
                 let arranged = arrange(width, open, MAIL);
-                let mut used = if arranged.columns_fold { STACKED } else { MAIL.space };
+                let mut used = if arranged.columns_fold {
+                    STACKED
+                } else {
+                    MAIL.space
+                };
                 if !arranged.mailboxes_fold {
                     used += MAIL.mailboxes;
                 }

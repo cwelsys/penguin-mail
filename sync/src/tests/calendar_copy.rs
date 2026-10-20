@@ -10,7 +10,9 @@ use mailrs_store::calendar as store;
 
 use super::{Connected, Harness, harness, imap_harness};
 use crate::calendar_copy::event_change::{Changed, Choice, EventChange, Undo};
-use crate::calendar_copy::{CalendarCopy, LIST_EVERY, READ_EVERY_OPEN, READ_EVERY_TRAY, new_event_id};
+use crate::calendar_copy::{
+    CalendarCopy, LIST_EVERY, READ_EVERY_OPEN, READ_EVERY_TRAY, new_event_id,
+};
 use crate::settings::Permitted;
 
 const NOW: i64 = 1_790_000_000_000;
@@ -36,7 +38,10 @@ fn calendar(id: &str, primary: bool) -> Calendar {
 }
 
 fn hidden(id: &str) -> Calendar {
-    Calendar { shown: false, ..calendar(id, false) }
+    Calendar {
+        shown: false,
+        ..calendar(id, false)
+    }
 }
 
 fn event(calendar: &str, id: &str) -> Event {
@@ -54,7 +59,9 @@ fn event(calendar: &str, id: &str) -> Event {
 
 async fn stored(h: &Harness, calendar: &str, id: &str) -> Option<Event> {
     let (account, calendar, id) = (h.account_id, calendar.to_string(), id.to_string());
-    h.db.read(move |c| store::event(c, account, &calendar, &id)).await.unwrap()
+    h.db.read(move |c| store::event(c, account, &calendar, &id))
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -77,14 +84,20 @@ async fn the_first_refresh_reads_every_calendar_whole() {
 #[tokio::test]
 async fn a_later_refresh_takes_only_the_changes() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    h.fake.put_calendar_event(Event { title: "Moved".into(), ..event("primary", "a") });
+    h.fake.put_calendar_event(Event {
+        title: "Moved".into(),
+        ..event("primary", "a")
+    });
     h.fake.drop_calendar_event("primary", "a");
     h.fake.put_calendar_event(event("primary", "b"));
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(stored(&h, "primary", "a").await.is_none());
     assert!(stored(&h, "primary", "b").await.is_some());
 }
@@ -92,7 +105,8 @@ async fn a_later_refresh_takes_only_the_changes() {
 #[tokio::test]
 async fn an_expired_token_reads_the_calendar_again_and_drops_what_went() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -102,7 +116,9 @@ async fn an_expired_token_reads_the_calendar_again_and_drops_what_went() {
         s.calendar_events.clear();
     });
     h.fake.put_calendar_event(event("primary", "b"));
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(stored(&h, "primary", "a").await.is_none());
     assert!(stored(&h, "primary", "b").await.is_some());
 }
@@ -110,11 +126,13 @@ async fn an_expired_token_reads_the_calendar_again_and_drops_what_went() {
 #[tokio::test]
 async fn a_calendar_that_left_the_list_leaves_the_store() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
     h.fake.put_calendar_event(event("team", "c"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     copy.refresh(h.account_id, NOW + LIST_EVERY).await.unwrap();
     assert!(stored(&h, "team", "c").await.is_none());
 }
@@ -129,7 +147,10 @@ async fn without_the_list_permission_the_primary_calendar_still_fills() {
     h.fake.withhold(mailrs_gmail::CALENDAR_LIST_SCOPE);
     h.fake.put_calendar_event(event("me@example.com", "a"));
     let done = copy(&h).refresh(h.account_id, NOW).await.unwrap();
-    assert!(matches!(done, Permitted::Done(ref r) if r.events == 1), "{done:?}");
+    assert!(
+        matches!(done, Permitted::Done(ref r) if r.events == 1),
+        "{done:?}"
+    );
     assert!(stored(&h, "me@example.com", "a").await.is_some());
 }
 
@@ -163,7 +184,10 @@ async fn an_account_that_withheld_the_list_reads_its_primary_without_listing() {
     h.fake.withhold(mailrs_gmail::CALENDAR_LIST_SCOPE);
     h.fake.put_calendar_event(event("me@example.com", "a"));
     let done = copy(&h).refresh(h.account_id, NOW).await.unwrap();
-    assert!(matches!(done, Permitted::Done(ref r) if r.events == 1), "{done:?}");
+    assert!(
+        matches!(done, Permitted::Done(ref r) if r.events == 1),
+        "{done:?}"
+    );
     assert_eq!(h.fake.usage().calls_to("calendar.calendarList.list"), 0);
     assert!(stored(&h, "me@example.com", "a").await.is_some());
 }
@@ -175,24 +199,42 @@ async fn an_account_that_withheld_the_list_reads_its_primary_without_listing() {
 #[tokio::test]
 async fn without_any_calendar_permission_the_account_is_left_alone() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.withhold(mailrs_gmail::CALENDAR_SCOPE);
     let copy = copy(&h);
     let accounts = [h.account_id];
     let first = copy.refresh_due(&accounts, NOW, true).await.unwrap();
     assert_eq!(first.needs_permission, vec![h.account_id]);
-    let calls = || h.fake.usage().calls_to("calendar.events.list") + h.fake.usage().calls_to("calendar.calendarList.list");
+    let calls = || {
+        h.fake.usage().calls_to("calendar.events.list")
+            + h.fake.usage().calls_to("calendar.calendarList.list")
+    };
     let before = calls();
-    let again = copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN, true).await.unwrap();
+    let again = copy
+        .refresh_due(&accounts, NOW + READ_EVERY_OPEN, true)
+        .await
+        .unwrap();
     assert_eq!(calls(), before, "no call a minute later");
     assert!(again.needs_permission.is_empty(), "nothing new to say");
     let account = h.account_id;
-    assert!(h.db.read(move |c| store::calendars(c, account)).await.unwrap().is_empty(), "no fallback calendar");
+    assert!(
+        h.db.read(move |c| store::calendars(c, account))
+            .await
+            .unwrap()
+            .is_empty(),
+        "no fallback calendar"
+    );
 
     h.fake.grant(mailrs_gmail::CALENDAR_SCOPE);
     copy.permission_changed(h.account_id);
-    copy.refresh_due(&accounts, NOW + 2 * READ_EVERY_OPEN, true).await.unwrap();
-    assert!(h.db.read(move |c| store::synced(c, account)).await.unwrap(), "a grant reads at once");
+    copy.refresh_due(&accounts, NOW + 2 * READ_EVERY_OPEN, true)
+        .await
+        .unwrap();
+    assert!(
+        h.db.read(move |c| store::synced(c, account)).await.unwrap(),
+        "a grant reads at once"
+    );
 }
 
 /// A withheld list scope is known from the store already, so every
@@ -204,7 +246,9 @@ async fn a_withheld_list_permission_never_costs_a_call() {
     h.fake.withhold(mailrs_gmail::CALENDAR_LIST_SCOPE);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     copy.refresh(h.account_id, NOW + LIST_EVERY).await.unwrap();
     assert_eq!(h.fake.usage().calls_to("calendar.calendarList.list"), 0);
 }
@@ -215,36 +259,56 @@ async fn a_withheld_list_permission_never_costs_a_call() {
 #[tokio::test]
 async fn a_hidden_calendar_is_read_only_every_five_minutes() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), hidden("team")]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true), hidden("team")]);
     h.fake.put_calendar_event(event("team", "c"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    assert!(stored(&h, "team", "c").await.is_some(), "the first read covers every calendar");
+    assert!(
+        stored(&h, "team", "c").await.is_some(),
+        "the first read covers every calendar"
+    );
 
     h.fake.put_calendar_event(event("team", "d"));
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert!(stored(&h, "team", "d").await.is_none(), "a minute is too soon for a hidden calendar");
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
+    assert!(
+        stored(&h, "team", "d").await.is_none(),
+        "a minute is too soon for a hidden calendar"
+    );
 
-    copy.refresh(h.account_id, NOW + READ_EVERY_TRAY).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_TRAY)
+        .await
+        .unwrap();
     assert!(stored(&h, "team", "d").await.is_some());
 }
 
 #[tokio::test]
 async fn the_cadence_is_a_minute_open_and_five_in_the_tray() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     let accounts = [h.account_id];
     copy.refresh_due(&accounts, NOW, true).await.unwrap();
     let calls = || h.fake.usage().calls_to("calendar.events.list");
     let before = calls();
-    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN - 1, true).await.unwrap();
+    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN - 1, true)
+        .await
+        .unwrap();
     assert_eq!(calls(), before);
-    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN, true).await.unwrap();
+    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN, true)
+        .await
+        .unwrap();
     assert_eq!(calls(), before + 1);
-    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN + READ_EVERY_OPEN, false).await.unwrap();
+    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN + READ_EVERY_OPEN, false)
+        .await
+        .unwrap();
     assert_eq!(calls(), before + 1, "the tray waits five minutes");
-    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN + READ_EVERY_TRAY, false).await.unwrap();
+    copy.refresh_due(&accounts, NOW + READ_EVERY_OPEN + READ_EVERY_TRAY, false)
+        .await
+        .unwrap();
     assert_eq!(calls(), before + 2);
 }
 
@@ -258,7 +322,12 @@ async fn an_account_without_a_calendar_is_skipped_quietly() {
     let done = copy.refresh(h.account_id, NOW).await.unwrap();
     assert!(matches!(done, Permitted::Done(ref r) if r.events == 0));
     let account = h.account_id;
-    assert!(h.db.read(move |c| store::calendars(c, account)).await.unwrap().is_empty());
+    assert!(
+        h.db.read(move |c| store::calendars(c, account))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(!h.db.read(move |c| store::synced(c, account)).await.unwrap());
 }
 
@@ -268,13 +337,20 @@ async fn an_account_without_a_calendar_is_skipped_quietly() {
 #[tokio::test]
 async fn an_account_that_is_not_running_leaves_the_rest_to_be_read() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let connected = HashMap::from([(h.account_id, Arc::clone(&h.sync))]);
     let copy = CalendarCopy::new(Arc::new(Connected(connected)), h.db.clone());
     let missing = h.account_id + 1;
-    let refreshed = copy.refresh_due(&[missing, h.account_id], NOW, true).await.unwrap();
-    assert_eq!(refreshed.events, 1, "the account after the missing one is still read");
+    let refreshed = copy
+        .refresh_due(&[missing, h.account_id], NOW, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        refreshed.events, 1,
+        "the account after the missing one is still read"
+    );
     assert!(stored(&h, "primary", "a").await.is_some());
 }
 
@@ -287,17 +363,17 @@ async fn an_account_that_is_not_running_leaves_the_rest_to_be_read() {
 #[tokio::test]
 async fn a_refresh_already_running_leaves_a_second_one_alone() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
 
     let fake2 = Arc::new(crate::fake::FakeGmail::new());
     fake2.with(|s| s.calendars = vec![calendar("primary", true)]);
     fake2.put_calendar_event(event("primary", "z"));
-    let account2 = h
-        .db
-        .write(|c| mailrs_store::accounts::insert_account(c, "second@example.com", 0))
-        .await
-        .unwrap();
+    let account2 =
+        h.db.write(|c| mailrs_store::accounts::insert_account(c, "second@example.com", 0))
+            .await
+            .unwrap();
     let (sender2, _events2) = async_channel::unbounded();
     let sync2 = Arc::new(crate::AccountSync::new(
         account2,
@@ -319,29 +395,40 @@ async fn a_refresh_already_running_leaves_a_second_one_alone() {
         held.release();
     };
     let (first, ()) = tokio::join!(first, second);
-    assert_eq!(first.unwrap().events, 2, "both accounts are read once the first pass finishes");
+    assert_eq!(
+        first.unwrap().events,
+        2,
+        "both accounts are read once the first pass finishes"
+    );
 }
 
 #[tokio::test]
 async fn a_saved_event_shows_at_once_and_goes_out_on_send() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    copy.save(h.account_id, event("primary", &id)).await.unwrap();
+    copy.save(h.account_id, event("primary", &id))
+        .await
+        .unwrap();
     assert!(stored(&h, "primary", &id).await.unwrap().pending);
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     let held = stored(&h, "primary", &id).await.unwrap();
     assert!(!held.pending);
     assert_eq!(held.etag, "\"1\"");
-    assert!(h.fake.with(|s| s.calendar_events.iter().any(|e| e.id == id)));
+    assert!(
+        h.fake
+            .with(|s| s.calendar_events.iter().any(|e| e.id == id))
+    );
 }
 
 #[tokio::test]
 async fn an_edit_that_meets_a_newer_version_keeps_googles() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -349,36 +436,59 @@ async fn an_edit_that_meets_a_newer_version_keeps_googles() {
     mine.title = "Mine".into();
     copy.save(h.account_id, mine).await.unwrap();
     // Someone changes it on their phone before the queue sends.
-    h.fake.put_calendar_event(Event { title: "Theirs".into(), ..event("primary", "a") });
+    h.fake.put_calendar_event(Event {
+        title: "Theirs".into(),
+        ..event("primary", "a")
+    });
     let turned_down = copy.send(h.account_id).await.unwrap();
     assert_eq!(turned_down.len(), 1);
     assert_eq!(turned_down[0].reason, None);
     assert_eq!(stored(&h, "primary", "a").await.unwrap().title, "Theirs");
     let account = h.account_id;
-    assert!(h.db.read(move |c| store::queued(c, account)).await.unwrap().is_empty());
+    assert!(
+        h.db.read(move |c| store::queued(c, account))
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 async fn a_network_failure_keeps_the_rest_of_the_queue_in_order() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, event("primary", "one")).await.unwrap();
-    copy.save(h.account_id, event("primary", "two")).await.unwrap();
-    h.fake.fail_next(mailrs_gmail::GmailError::Network("gone".into()));
+    copy.save(h.account_id, event("primary", "one"))
+        .await
+        .unwrap();
+    copy.save(h.account_id, event("primary", "two"))
+        .await
+        .unwrap();
+    h.fake
+        .fail_next(mailrs_gmail::GmailError::Network("gone".into()));
     assert!(copy.send(h.account_id).await.is_err());
     let account = h.account_id;
     let held = h.db.read(move |c| store::queued(c, account)).await.unwrap();
-    assert_eq!(held.iter().map(|q| q.event.as_str()).collect::<Vec<_>>(), vec!["one", "two"]);
+    assert_eq!(
+        held.iter().map(|q| q.event.as_str()).collect::<Vec<_>>(),
+        vec!["one", "two"]
+    );
     copy.send(h.account_id).await.unwrap();
-    assert!(h.db.read(move |c| store::queued(c, account)).await.unwrap().is_empty());
+    assert!(
+        h.db.read(move |c| store::queued(c, account))
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 async fn a_removed_event_leaves_at_once_and_on_google_after_send() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -391,7 +501,8 @@ async fn a_removed_event_leaves_at_once_and_on_google_after_send() {
 #[tokio::test]
 async fn a_queued_change_survives_a_refresh_that_runs_before_it_is_sent() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -399,7 +510,9 @@ async fn a_queued_change_survives_a_refresh_that_runs_before_it_is_sent() {
     mine.title = "Mine".into();
     copy.save(h.account_id, mine).await.unwrap();
     h.fake.with(|s| s.expire_calendar_tokens = true);
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert_eq!(stored(&h, "primary", "a").await.unwrap().title, "Mine");
 }
 
@@ -407,7 +520,10 @@ async fn a_queued_change_survives_a_refresh_that_runs_before_it_is_sent() {
 fn a_new_id_is_one_google_accepts() {
     let id = new_event_id();
     assert_eq!(id.len(), 32);
-    assert!(id.chars().all(|c| c.is_ascii_digit() || ('a'..='v').contains(&c)));
+    assert!(
+        id.chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='v').contains(&c))
+    );
 }
 
 /// Google saw the create; only the answer
@@ -416,17 +532,25 @@ fn a_new_id_is_one_google_accepts() {
 #[tokio::test]
 async fn a_create_whose_answer_was_lost_is_not_sent_twice() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    copy.save(h.account_id, event("primary", &id)).await.unwrap();
+    copy.save(h.account_id, event("primary", &id))
+        .await
+        .unwrap();
     // The create reached Google, but this computer never heard back.
     h.fake.put_calendar_event(event("primary", &id));
     let turned_down = copy.send(h.account_id).await.unwrap();
     assert!(turned_down.is_empty());
     let account = h.account_id;
-    assert!(h.db.read(move |c| store::queued(c, account)).await.unwrap().is_empty());
+    assert!(
+        h.db.read(move |c| store::queued(c, account))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(stored(&h, "primary", &id).await.is_some());
 }
 
@@ -437,21 +561,36 @@ async fn a_create_whose_answer_was_lost_is_not_sent_twice() {
 async fn a_create_answered_with_another_id_takes_that_id() {
     use mailrs_domain::calendar::Guest;
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.assign_event_ids(true);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
     let first = Event {
-        guests: vec![Guest { email: "ann@example.com".into(), ..Guest::default() }],
+        guests: vec![Guest {
+            email: "ann@example.com".into(),
+            ..Guest::default()
+        }],
         ..event("primary", &id)
     };
     copy.save(h.account_id, first.clone()).await.unwrap();
     // A second edit before the send folds into the same create.
-    copy.save(h.account_id, Event { title: "Dentist, moved".into(), ..first.clone() }).await.unwrap();
+    copy.save(
+        h.account_id,
+        Event {
+            title: "Dentist, moved".into(),
+            ..first.clone()
+        },
+    )
+    .await
+    .unwrap();
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
 
-    assert!(stored(&h, "primary", &id).await.is_none(), "the local id is gone");
+    assert!(
+        stored(&h, "primary", &id).await.is_none(),
+        "the local id is gone"
+    );
     let kept = h.fake.with(|s| s.calendar_events.clone());
     assert_eq!(kept.len(), 1, "one event, created once");
     assert!(kept[0].id.starts_with("fake-"));
@@ -462,7 +601,15 @@ async fn a_create_answered_with_another_id_takes_that_id() {
     assert!(queue(&h).await.is_empty());
 
     // The next change goes to the id Graph gave.
-    copy.save(h.account_id, Event { title: "Dentist, again".into(), ..theirs }).await.unwrap();
+    copy.save(
+        h.account_id,
+        Event {
+            title: "Dentist, again".into(),
+            ..theirs
+        },
+    )
+    .await
+    .unwrap();
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     let kept = h.fake.with(|s| s.calendar_events.clone());
     assert_eq!(kept.len(), 1);
@@ -478,14 +625,17 @@ async fn a_create_answered_with_another_id_takes_that_id() {
 #[tokio::test]
 async fn a_queued_save_with_no_etag_is_not_sent_as_a_create() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let mut edited = event("primary", "a");
     edited.title = "Edited".into();
     let account_id = h.account_id;
-    h.db.write(move |c| store::enqueue(c, account_id, store::ChangeKind::Save, &edited)).await.unwrap();
+    h.db.write(move |c| store::enqueue(c, account_id, store::ChangeKind::Save, &edited))
+        .await
+        .unwrap();
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     assert_eq!(h.fake.usage().calls_to("calendar.events.insert"), 0);
     assert_eq!(h.fake.usage().calls_to("calendar.events.patch"), 1);
@@ -497,7 +647,8 @@ async fn a_queued_save_with_no_etag_is_not_sent_as_a_create() {
 #[tokio::test]
 async fn an_edit_to_an_event_deleted_elsewhere_leaves_the_queue() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     h.fake.put_calendar_event(event("primary", "b"));
     let copy = copy(&h);
@@ -517,7 +668,12 @@ async fn an_edit_to_an_event_deleted_elsewhere_leaves_the_queue() {
     // The change behind it in the queue still went out.
     assert_eq!(stored(&h, "primary", "b").await.unwrap().title, "Second");
     let account = h.account_id;
-    assert!(h.db.read(move |c| store::queued(c, account)).await.unwrap().is_empty());
+    assert!(
+        h.db.read(move |c| store::queued(c, account))
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// An edit that lands while the first is
@@ -526,7 +682,8 @@ async fn an_edit_to_an_event_deleted_elsewhere_leaves_the_queue() {
 #[tokio::test]
 async fn an_edit_during_a_send_goes_out_against_the_new_version() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -549,13 +706,33 @@ async fn an_edit_during_a_send_goes_out_against_the_new_version() {
 
     let account = h.account_id;
     let queued = h.db.read(move |c| store::queued(c, account)).await.unwrap();
-    assert_eq!(queued.len(), 1, "the edit that landed mid-send is still queued, not lost");
-    assert_eq!(queued[0].body.as_ref().map(|e| e.title.as_str()), Some("Mine again"));
-    let on_google = h.fake.with(|s| s.calendar_events.iter().find(|e| e.id == "a").cloned()).unwrap();
-    assert_eq!(queued[0].etag.as_deref(), Some(on_google.etag.as_str()), "targets the version just written");
+    assert_eq!(
+        queued.len(),
+        1,
+        "the edit that landed mid-send is still queued, not lost"
+    );
+    assert_eq!(
+        queued[0].body.as_ref().map(|e| e.title.as_str()),
+        Some("Mine again")
+    );
+    let on_google = h
+        .fake
+        .with(|s| s.calendar_events.iter().find(|e| e.id == "a").cloned())
+        .unwrap();
+    assert_eq!(
+        queued[0].etag.as_deref(),
+        Some(on_google.etag.as_str()),
+        "targets the version just written"
+    );
 
-    assert!(copy.send(h.account_id).await.unwrap().is_empty(), "the merged edit goes out with no conflict");
-    assert_eq!(stored(&h, "primary", "a").await.unwrap().title, "Mine again");
+    assert!(
+        copy.send(h.account_id).await.unwrap().is_empty(),
+        "the merged edit goes out with no conflict"
+    );
+    assert_eq!(
+        stored(&h, "primary", "a").await.unwrap().title,
+        "Mine again"
+    );
 }
 
 async fn queue(h: &Harness) -> Vec<store::QueuedChange> {
@@ -589,7 +766,10 @@ async fn a_delete_google_answers_with_gone_completes_and_the_queue_moves_on() {
 
     assert!(turned_down.is_empty(), "{turned_down:?}");
     assert!(queue(&h).await.is_empty());
-    let on_google = h.fake.with(|s| s.calendar_events.iter().find(|e| e.id == "b").cloned()).unwrap();
+    let on_google = h
+        .fake
+        .with(|s| s.calendar_events.iter().find(|e| e.id == "b").cloned())
+        .unwrap();
     assert_eq!(on_google.title, "Second");
 }
 
@@ -624,7 +804,8 @@ async fn an_edit_google_answers_with_gone_leaves_the_queue_and_the_copy() {
 #[tokio::test]
 async fn a_new_event_on_a_calendar_that_is_gone_leaves_the_queue() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
     h.fake.put_calendar_event(event("primary", "b"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -652,7 +833,8 @@ async fn a_new_event_on_a_calendar_that_is_gone_leaves_the_queue() {
 #[tokio::test]
 async fn a_change_google_cannot_take_for_any_other_reason_leaves_the_queue() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     h.fake.put_calendar_event(event("primary", "b"));
     let copy = copy(&h);
@@ -663,14 +845,19 @@ async fn a_change_google_cannot_take_for_any_other_reason_leaves_the_queue() {
     let mut second = stored(&h, "primary", "b").await.unwrap();
     second.title = "Second".into();
     copy.save(h.account_id, second).await.unwrap();
-    h.fake.fail_next(mailrs_gmail::GmailError::Decode("not JSON".into()));
+    h.fake
+        .fail_next(mailrs_gmail::GmailError::Decode("not JSON".into()));
 
     let turned_down = copy.send(h.account_id).await.unwrap();
 
     assert_eq!(turned_down.len(), 1);
     assert!(turned_down[0].reason.is_some());
     assert!(queue(&h).await.is_empty());
-    assert_eq!(stored(&h, "primary", "a").await.unwrap().title, "a", "Google's version is back");
+    assert_eq!(
+        stored(&h, "primary", "a").await.unwrap().title,
+        "a",
+        "Google's version is back"
+    );
     assert_eq!(stored(&h, "primary", "b").await.unwrap().title, "Second");
 }
 
@@ -680,11 +867,14 @@ async fn a_change_google_cannot_take_for_any_other_reason_leaves_the_queue() {
 #[tokio::test]
 async fn an_edit_after_a_create_whose_answer_was_lost_still_goes_out() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    copy.save(h.account_id, event("primary", &id)).await.unwrap();
+    copy.save(h.account_id, event("primary", &id))
+        .await
+        .unwrap();
     // The create reached Google, but this computer never heard back.
     h.fake.put_calendar_event(event("primary", &id));
     let mut edited = stored(&h, "primary", &id).await.unwrap();
@@ -695,7 +885,10 @@ async fn an_edit_after_a_create_whose_answer_was_lost_still_goes_out() {
 
     assert!(turned_down.is_empty(), "{turned_down:?}");
     assert!(queue(&h).await.is_empty());
-    let on_google = h.fake.with(|s| s.calendar_events.iter().find(|e| e.id == id).cloned()).unwrap();
+    let on_google = h
+        .fake
+        .with(|s| s.calendar_events.iter().find(|e| e.id == id).cloned())
+        .unwrap();
     assert_eq!(on_google.title, "Edited");
     let held = stored(&h, "primary", &id).await.unwrap();
     assert_eq!((held.title.as_str(), held.pending), ("Edited", false));
@@ -707,11 +900,14 @@ async fn an_edit_after_a_create_whose_answer_was_lost_still_goes_out() {
 #[tokio::test]
 async fn a_delete_made_while_the_create_is_in_flight_wins() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    copy.save(h.account_id, event("primary", &id)).await.unwrap();
+    copy.save(h.account_id, event("primary", &id))
+        .await
+        .unwrap();
 
     let mut held = h.fake.hold("calendar.events.insert");
     let account_id = h.account_id;
@@ -724,8 +920,15 @@ async fn a_delete_made_while_the_create_is_in_flight_wins() {
     let (result, ()) = tokio::join!(send, race);
     assert!(result.unwrap().is_empty());
 
-    assert!(stored(&h, "primary", &id).await.is_none(), "the answer does not bring it back");
-    assert!(h.fake.with(|s| s.calendar_events.iter().all(|e| e.id != id)), "the delete reached Google");
+    assert!(
+        stored(&h, "primary", &id).await.is_none(),
+        "the answer does not bring it back"
+    );
+    assert!(
+        h.fake
+            .with(|s| s.calendar_events.iter().all(|e| e.id != id)),
+        "the delete reached Google"
+    );
     assert!(queue(&h).await.is_empty());
 }
 
@@ -735,7 +938,13 @@ async fn a_delete_made_while_the_create_is_in_flight_wins() {
 #[tokio::test]
 async fn a_calendar_that_fails_to_read_leaves_the_rest_to_be_read() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), calendar("archive", false), calendar("team", false)]);
+    h.fake.with(|s| {
+        s.calendars = vec![
+            calendar("primary", true),
+            calendar("archive", false),
+            calendar("team", false),
+        ]
+    });
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     h.fake.with(|s| {
@@ -744,13 +953,26 @@ async fn a_calendar_that_fails_to_read_leaves_the_rest_to_be_read() {
     });
     h.fake.put_calendar_event(event("team", "c"));
 
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert!(stored(&h, "team", "c").await.is_some(), "the calendar after the failing one is read");
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
+    assert!(
+        stored(&h, "team", "c").await.is_some(),
+        "the calendar after the failing one is read"
+    );
 
-    copy.refresh(h.account_id, NOW + 2 * READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + 2 * READ_EVERY_OPEN)
+        .await
+        .unwrap();
     let account = h.account_id;
-    let left = h.db.read(move |c| store::calendars(c, account)).await.unwrap();
-    assert!(left.iter().all(|c| c.id != "archive"), "the list is read again at once");
+    let left =
+        h.db.read(move |c| store::calendars(c, account))
+            .await
+            .unwrap();
+    assert!(
+        left.iter().all(|c| c.id != "archive"),
+        "the list is read again at once"
+    );
 }
 
 /// What the code logs at warning level while `run` runs, on this thread.
@@ -784,11 +1006,14 @@ async fn warnings<F: std::future::Future>(run: F) -> String {
 #[tokio::test]
 async fn an_account_that_is_not_running_is_skipped_quietly() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     let missing = h.account_id + 1;
     let logged = warnings(async {
-        copy.refresh_due(&[missing, h.account_id], NOW, true).await.unwrap();
+        copy.refresh_due(&[missing, h.account_id], NOW, true)
+            .await
+            .unwrap();
     })
     .await;
     assert_eq!(logged, "");
@@ -808,22 +1033,38 @@ async fn a_whole_read_holds_one_page_at_a_time() {
         s.page_size = 250;
     });
     for n in 0..10_000 {
-        h.fake.put_calendar_event(event("primary", &format!("e{n}")));
+        h.fake
+            .put_calendar_event(event("primary", &format!("e{n}")));
     }
-    h.fake.fail_call("calendar.events.list", 3, mailrs_gmail::GmailError::Network("gone".into()));
+    h.fake.fail_call(
+        "calendar.events.list",
+        3,
+        mailrs_gmail::GmailError::Network("gone".into()),
+    );
 
     assert!(copy(&h).refresh(h.account_id, NOW).await.is_err());
 
     let account = h.account_id;
-    let held: i64 = h
-        .db
-        .read(move |c| {
-            Ok(c.query_row("SELECT COUNT(*) FROM events WHERE account_id = ?1", [account], |row| row.get(0))?)
+    let held: i64 =
+        h.db.read(move |c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM events WHERE account_id = ?1",
+                [account],
+                |row| row.get(0),
+            )?)
         })
         .await
         .unwrap();
-    assert_eq!(held, 750, "each page went to the store before the next was asked for");
-    assert_eq!(h.db.read(move |c| store::token(c, account, "primary")).await.unwrap(), None);
+    assert_eq!(
+        held, 750,
+        "each page went to the store before the next was asked for"
+    );
+    assert_eq!(
+        h.db.read(move |c| store::token(c, account, "primary"))
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 // Series edits, and changes held while their Undo toast is up.
@@ -832,11 +1073,15 @@ const HOUR: i64 = 3_600_000;
 const DAY: i64 = 24 * HOUR;
 
 fn standup() -> Event {
-    Event { rules: vec!["RRULE:FREQ=DAILY;COUNT=5".into()], ..event("primary", "standup") }
+    Event {
+        rules: vec!["RRULE:FREQ=DAILY;COUNT=5".into()],
+        ..event("primary", "standup")
+    }
 }
 
 async fn read_series(h: &Harness) -> CalendarCopy<Connected> {
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(standup());
     let copy = copy(h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -847,13 +1092,16 @@ async fn read_series(h: &Harness) -> CalendarCopy<Connected> {
 async fn on_day(h: &Harness, day: i64) -> Vec<Occurrence> {
     let account = h.account_id;
     let from = NOW + day * DAY;
-    h.db.read(move |c| store::occurrences(c, &[account], from, from + DAY, store::CalendarScope::Shown))
-        .await
-        .unwrap()
+    h.db.read(move |c| {
+        store::occurrences(c, &[account], from, from + DAY, store::CalendarScope::Shown)
+    })
+    .await
+    .unwrap()
 }
 
 fn on_google(h: &Harness, id: &str) -> Option<Event> {
-    h.fake.with(|s| s.calendar_events.iter().find(|e| e.id == id).cloned())
+    h.fake
+        .with(|s| s.calendar_events.iter().find(|e| e.id == id).cloned())
 }
 
 fn held<T>(answer: Permitted<T>) -> T {
@@ -865,17 +1113,32 @@ async fn moving_one_occurrence_goes_out_as_a_patch_of_that_occurrence() {
     let h = harness().await;
     let copy = read_series(&h).await;
     let tuesday = on_day(&h, 1).await.remove(0);
-    let edited = Event { start: tuesday.start + HOUR, end: tuesday.end + HOUR, ..Event::clone(&tuesday.event) };
-    let steps = copy.change_steps(h.account_id, &tuesday, edited, Some(RepeatScope::This)).await.unwrap();
+    let edited = Event {
+        start: tuesday.start + HOUR,
+        end: tuesday.end + HOUR,
+        ..Event::clone(&tuesday.event)
+    };
+    let steps = copy
+        .change_steps(h.account_id, &tuesday, edited, Some(RepeatScope::This))
+        .await
+        .unwrap();
     held(copy.apply(h.account_id, steps).await.unwrap());
     assert_eq!(on_day(&h, 1).await[0].start, NOW + DAY + HOUR);
-    assert_eq!(queue(&h).await[0].kind, store::ChangeKind::Save, "never a create");
+    assert_eq!(
+        queue(&h).await[0].kind,
+        store::ChangeKind::Save,
+        "never a create"
+    );
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     let id = occurrence_id(&standup(), NOW + DAY);
     let sent = on_google(&h, &id).unwrap();
     assert_eq!(sent.series.as_deref(), Some("standup"));
     assert_eq!(sent.start, NOW + DAY + HOUR);
-    assert_eq!(h.fake.with(|s| s.calendar_events.len()), 2, "no second series was made");
+    assert_eq!(
+        h.fake.with(|s| s.calendar_events.len()),
+        2,
+        "no second series was made"
+    );
     assert_eq!(on_google(&h, "standup").unwrap().rules, standup().rules);
 }
 
@@ -884,15 +1147,28 @@ async fn this_and_following_splits_the_series_on_google() {
     let h = harness().await;
     let copy = read_series(&h).await;
     let third = on_day(&h, 2).await.remove(0);
-    let edited = Event { title: "Longer stand-up".into(), ..Event::clone(&third.event) };
-    let edited = Event { start: third.start, end: third.end, ..edited };
-    let steps = copy.change_steps(h.account_id, &third, edited, Some(RepeatScope::Following)).await.unwrap();
+    let edited = Event {
+        title: "Longer stand-up".into(),
+        ..Event::clone(&third.event)
+    };
+    let edited = Event {
+        start: third.start,
+        end: third.end,
+        ..edited
+    };
+    let steps = copy
+        .change_steps(h.account_id, &third, edited, Some(RepeatScope::Following))
+        .await
+        .unwrap();
     held(copy.apply(h.account_id, steps).await.unwrap());
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     let events = h.fake.with(|s| s.calendar_events.clone());
     let old = events.iter().find(|e| e.id == "standup").unwrap();
     assert!(old.rules[0].contains("UNTIL="), "{:?}", old.rules);
-    let new = events.iter().find(|e| e.title == "Longer stand-up").unwrap();
+    let new = events
+        .iter()
+        .find(|e| e.title == "Longer stand-up")
+        .unwrap();
     assert_eq!(new.rules, vec!["RRULE:FREQ=DAILY;COUNT=3".to_string()]);
     assert_eq!(on_day(&h, 1).await[0].event.title, "standup");
     assert_eq!(on_day(&h, 3).await[0].event.title, "Longer stand-up");
@@ -919,11 +1195,30 @@ async fn a_split_whose_cut_is_turned_down_sends_nothing_after_it() {
     });
     let copy = read_series(&h).await;
     let third = on_day(&h, 2).await.remove(0);
-    let edited = Event { title: "Longer stand-up".into(), ..Event::clone(&third.event) };
-    let edited = Event { start: third.start, end: third.end, ..edited };
-    let steps = copy.change_steps(h.account_id, &third, edited, Some(RepeatScope::Following)).await.unwrap();
-    assert_eq!(steps.len(), 3, "the cut, the new half and the moved occurrence's removal: {steps:?}");
-    let new_id = steps.iter().map(Step::key).map(|(_, id)| id).find(|id| id != "standup" && id != &moved_id).unwrap();
+    let edited = Event {
+        title: "Longer stand-up".into(),
+        ..Event::clone(&third.event)
+    };
+    let edited = Event {
+        start: third.start,
+        end: third.end,
+        ..edited
+    };
+    let steps = copy
+        .change_steps(h.account_id, &third, edited, Some(RepeatScope::Following))
+        .await
+        .unwrap();
+    assert_eq!(
+        steps.len(),
+        3,
+        "the cut, the new half and the moved occurrence's removal: {steps:?}"
+    );
+    let new_id = steps
+        .iter()
+        .map(Step::key)
+        .map(|(_, id)| id)
+        .find(|id| id != "standup" && id != &moved_id)
+        .unwrap();
     held(copy.apply(h.account_id, steps).await.unwrap());
     // The guest's answer moves the series' etag on Google.
     h.fake.put_calendar_event(on_google(&h, "standup").unwrap());
@@ -931,14 +1226,32 @@ async fn a_split_whose_cut_is_turned_down_sends_nothing_after_it() {
     let turned_down = copy.send(h.account_id).await.unwrap();
 
     assert_eq!(turned_down.len(), 1, "{turned_down:?}");
-    assert!(on_google(&h, &new_id).is_none(), "the new half was never created");
-    assert_eq!(on_google(&h, &moved_id).unwrap().title, "Moved", "the moved occurrence stays");
+    assert!(
+        on_google(&h, &new_id).is_none(),
+        "the new half was never created"
+    );
+    assert_eq!(
+        on_google(&h, &moved_id).unwrap().title,
+        "Moved",
+        "the moved occurrence stays"
+    );
     assert_eq!(on_google(&h, "standup").unwrap().rules, standup().rules);
     assert!(queue(&h).await.is_empty());
-    assert!(stored(&h, "primary", &new_id).await.is_none(), "the copy drops the new half");
-    let day_three: Vec<String> = on_day(&h, 3).await.iter().map(|o| o.event.title.clone()).collect();
+    assert!(
+        stored(&h, "primary", &new_id).await.is_none(),
+        "the copy drops the new half"
+    );
+    let day_three: Vec<String> = on_day(&h, 3)
+        .await
+        .iter()
+        .map(|o| o.event.title.clone())
+        .collect();
     assert_eq!(day_three, vec!["Moved".to_string()]);
-    let day_two: Vec<String> = on_day(&h, 2).await.iter().map(|o| o.event.title.clone()).collect();
+    let day_two: Vec<String> = on_day(&h, 2)
+        .await
+        .iter()
+        .map(|o| o.event.title.clone())
+        .collect();
     assert_eq!(day_two, vec!["standup".to_string()]);
 }
 
@@ -967,11 +1280,25 @@ async fn a_removal_queued_ahead_of_its_cut_waits_for_it() {
         edited.title = "Moved again".into();
         copy.save(h.account_id, edited).await.unwrap();
         let third = on_day(&h, 2).await.remove(0);
-        let edited = Event { title: "Longer stand-up".into(), ..Event::clone(&third.event) };
-        let edited = Event { start: third.start, end: third.end, ..edited };
-        let steps = copy.change_steps(h.account_id, &third, edited, Some(RepeatScope::Following)).await.unwrap();
+        let edited = Event {
+            title: "Longer stand-up".into(),
+            ..Event::clone(&third.event)
+        };
+        let edited = Event {
+            start: third.start,
+            end: third.end,
+            ..edited
+        };
+        let steps = copy
+            .change_steps(h.account_id, &third, edited, Some(RepeatScope::Following))
+            .await
+            .unwrap();
         held(copy.apply(h.account_id, steps).await.unwrap());
-        assert_eq!(queue(&h).await[0].event, moved_id, "the removal kept the earlier row's place");
+        assert_eq!(
+            queue(&h).await[0].event,
+            moved_id,
+            "the removal kept the earlier row's place"
+        );
         if refused {
             h.fake.put_calendar_event(on_google(&h, "standup").unwrap());
         }
@@ -981,7 +1308,10 @@ async fn a_removal_queued_ahead_of_its_cut_waits_for_it() {
         if refused {
             // The removal folded into the edit's row, and the edit goes out.
             assert_eq!(on_google(&h, &moved_id).unwrap().title, "Moved again");
-            assert_eq!(stored(&h, "primary", &moved_id).await.unwrap().title, "Moved again");
+            assert_eq!(
+                stored(&h, "primary", &moved_id).await.unwrap().title,
+                "Moved again"
+            );
         } else {
             assert!(on_google(&h, &moved_id).is_none());
         }
@@ -996,10 +1326,25 @@ async fn a_removal_queued_ahead_of_its_cut_waits_for_it() {
 async fn split_with_new_half_refused(h: &Harness, copy: &CalendarCopy<Connected>, restart: bool) {
     let moved_id = occurrence_id(&standup(), NOW + 3 * DAY);
     let third = on_day(h, 2).await.remove(0);
-    let edited = Event { title: "Longer stand-up".into(), ..Event::clone(&third.event) };
-    let edited = Event { start: third.start, end: third.end, ..edited };
-    let steps = copy.change_steps(h.account_id, &third, edited, Some(RepeatScope::Following)).await.unwrap();
-    let new_id = steps.iter().map(Step::key).map(|(_, id)| id).find(|id| id != "standup" && id != &moved_id).unwrap();
+    let edited = Event {
+        title: "Longer stand-up".into(),
+        ..Event::clone(&third.event)
+    };
+    let edited = Event {
+        start: third.start,
+        end: third.end,
+        ..edited
+    };
+    let steps = copy
+        .change_steps(h.account_id, &third, edited, Some(RepeatScope::Following))
+        .await
+        .unwrap();
+    let new_id = steps
+        .iter()
+        .map(Step::key)
+        .map(|(_, id)| id)
+        .find(|id| id != "standup" && id != &moved_id)
+        .unwrap();
     h.fake.with(|s| s.refuse_new_events = true);
     let turned_down = if restart {
         held(copy.hold(h.account_id, steps).await.unwrap());
@@ -1012,14 +1357,32 @@ async fn split_with_new_half_refused(h: &Harness, copy: &CalendarCopy<Connected>
     };
 
     assert_eq!(turned_down.len(), 1, "{turned_down:?}");
-    assert!(turned_down[0].reason.as_deref().unwrap_or_default().contains("Invalid recurrence rule."));
+    assert!(
+        turned_down[0]
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Invalid recurrence rule.")
+    );
     assert!(on_google(h, &new_id).is_none());
-    assert_eq!(on_google(h, "standup").unwrap().rules, standup().rules, "the series repeats as before");
-    assert_eq!(on_google(h, &moved_id).unwrap().title, "Moved", "the moved occurrence stays");
+    assert_eq!(
+        on_google(h, "standup").unwrap().rules,
+        standup().rules,
+        "the series repeats as before"
+    );
+    assert_eq!(
+        on_google(h, &moved_id).unwrap().title,
+        "Moved",
+        "the moved occurrence stays"
+    );
     assert!(queue(h).await.is_empty());
     assert!(stored(h, "primary", &new_id).await.is_none());
     for (day, title) in [(2, "standup"), (3, "Moved"), (4, "standup")] {
-        let titles: Vec<String> = on_day(h, day).await.iter().map(|o| o.event.title.clone()).collect();
+        let titles: Vec<String> = on_day(h, day)
+            .await
+            .iter()
+            .map(|o| o.event.title.clone())
+            .collect();
         assert_eq!(titles, vec![title.to_string()], "day {day}");
     }
 }
@@ -1057,13 +1420,26 @@ async fn all_events_changes_the_series_itself() {
     let h = harness().await;
     let copy = read_series(&h).await;
     let third = on_day(&h, 2).await.remove(0);
-    let edited = Event { title: "Team stand-up".into(), ..Event::clone(&third.event) };
-    let edited = Event { start: third.start + HOUR, end: third.end + HOUR, ..edited };
-    let steps = copy.change_steps(h.account_id, &third, edited, Some(RepeatScope::All)).await.unwrap();
+    let edited = Event {
+        title: "Team stand-up".into(),
+        ..Event::clone(&third.event)
+    };
+    let edited = Event {
+        start: third.start + HOUR,
+        end: third.end + HOUR,
+        ..edited
+    };
+    let steps = copy
+        .change_steps(h.account_id, &third, edited, Some(RepeatScope::All))
+        .await
+        .unwrap();
     held(copy.apply(h.account_id, steps).await.unwrap());
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     let series = on_google(&h, "standup").unwrap();
-    assert_eq!((series.title.as_str(), series.start), ("Team stand-up", NOW + HOUR));
+    assert_eq!(
+        (series.title.as_str(), series.start),
+        ("Team stand-up", NOW + HOUR)
+    );
     assert_eq!(series.rules, standup().rules);
     assert_eq!(h.fake.with(|s| s.calendar_events.len()), 1);
     assert_eq!(on_day(&h, 0).await[0].start, NOW + HOUR);
@@ -1075,8 +1451,16 @@ fn attended_standup() -> Event {
     use mailrs_domain::calendar::Guest;
     Event {
         guests: vec![
-            Guest { email: "rita@example.com".into(), organizer: true, ..Guest::default() },
-            Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
+            Guest {
+                email: "rita@example.com".into(),
+                organizer: true,
+                ..Guest::default()
+            },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            },
         ],
         rules: vec![
             "RRULE:FREQ=DAILY;COUNT=5".into(),
@@ -1093,18 +1477,25 @@ fn attended_standup() -> Event {
 /// first day.
 async fn guest_saves_the_third_day(h: &Harness, scope: RepeatScope) {
     use mailrs_domain::calendar::{Reminder, ReminderMethod};
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(attended_standup());
     let copy = copy(h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let third = on_day(h, 2).await.remove(0);
     let edited = Event {
-        reminders: Some(vec![Reminder { minutes: 30, method: ReminderMethod::Notification }]),
+        reminders: Some(vec![Reminder {
+            minutes: 30,
+            method: ReminderMethod::Notification,
+        }]),
         color: Some("#f4511e".into()),
         busy: false,
         ..Event::clone(&third.event)
     };
-    let steps = copy.change_steps(h.account_id, &third, edited, Some(scope)).await.unwrap();
+    let steps = copy
+        .change_steps(h.account_id, &third, edited, Some(scope))
+        .await
+        .unwrap();
     held(copy.apply(h.account_id, steps).await.unwrap());
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     assert!(queue(h).await.is_empty());
@@ -1116,9 +1507,16 @@ async fn every_day_keeps_its_time(h: &Harness) {
     for day in [0, 1, 2, 4, 7] {
         let shown = on_day(h, day).await;
         assert_eq!(shown.len(), 1, "day {day}");
-        assert_eq!((shown[0].start, shown[0].end), (NOW + day * DAY, NOW + day * DAY + HOUR), "day {day}");
+        assert_eq!(
+            (shown[0].start, shown[0].end),
+            (NOW + day * DAY, NOW + day * DAY + HOUR),
+            "day {day}"
+        );
     }
-    assert!(on_day(h, 3).await.is_empty(), "the skipped day stays skipped");
+    assert!(
+        on_day(h, 3).await.is_empty(),
+        "the skipped day stays skipped"
+    );
 }
 
 #[tokio::test]
@@ -1126,7 +1524,10 @@ async fn a_guests_change_to_one_occurrence_moves_nothing() {
     let h = harness().await;
     guest_saves_the_third_day(&h, RepeatScope::This).await;
     let series = on_google(&h, "standup").unwrap();
-    assert_eq!((series.start, series.end, &series.rules), (NOW, NOW + HOUR, &attended_standup().rules));
+    assert_eq!(
+        (series.start, series.end, &series.rules),
+        (NOW, NOW + HOUR, &attended_standup().rules)
+    );
     let one = on_google(&h, &occurrence_id(&attended_standup(), NOW + 2 * DAY)).unwrap();
     assert_eq!((one.start, one.end), (NOW + 2 * DAY, NOW + 2 * DAY + HOUR));
     assert_eq!((one.color.as_deref(), one.busy), (Some("#f4511e"), false));
@@ -1139,9 +1540,19 @@ async fn a_guests_change_to_all_events_moves_nothing() {
     let h = harness().await;
     guest_saves_the_third_day(&h, RepeatScope::All).await;
     let series = on_google(&h, "standup").unwrap();
-    assert_eq!((series.start, series.end, &series.rules), (NOW, NOW + HOUR, &attended_standup().rules));
-    assert_eq!((series.color.as_deref(), series.busy), (Some("#f4511e"), false));
-    assert_eq!(h.fake.with(|s| s.calendar_events.len()), 1, "no occurrence or series was made");
+    assert_eq!(
+        (series.start, series.end, &series.rules),
+        (NOW, NOW + HOUR, &attended_standup().rules)
+    );
+    assert_eq!(
+        (series.color.as_deref(), series.busy),
+        (Some("#f4511e"), false)
+    );
+    assert_eq!(
+        h.fake.with(|s| s.calendar_events.len()),
+        1,
+        "no occurrence or series was made"
+    );
     every_day_keeps_its_time(&h).await;
     assert!(!on_day(&h, 0).await[0].event.busy);
 }
@@ -1151,17 +1562,25 @@ async fn cancelling_one_occurrence_leaves_a_gap_and_tells_google() {
     let h = harness().await;
     let copy = read_series(&h).await;
     let tuesday = on_day(&h, 1).await.remove(0);
-    let steps = copy.delete_steps(h.account_id, &tuesday, Some(RepeatScope::This)).await.unwrap();
+    let steps = copy
+        .delete_steps(h.account_id, &tuesday, Some(RepeatScope::This))
+        .await
+        .unwrap();
     assert!(matches!(steps.as_slice(), [Step::Cancel(_)]));
     held(copy.apply(h.account_id, steps).await.unwrap());
     assert!(on_day(&h, 1).await.is_empty());
     copy.send(h.account_id).await.unwrap();
     assert!(queue(&h).await.is_empty());
     let id = occurrence_id(&standup(), NOW + DAY);
-    assert!(!stored(&h, "primary", &id).await.unwrap().pending, "the row settles once the removal went out");
+    assert!(
+        !stored(&h, "primary", &id).await.unwrap().pending,
+        "the row settles once the removal went out"
+    );
     assert_eq!(on_google(&h, &id).unwrap().status, Status::Cancelled);
     // The next read brings Google's cancelled occurrence, and the gap stays.
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(on_day(&h, 1).await.is_empty());
 }
 
@@ -1170,8 +1589,16 @@ async fn a_new_event_held_then_committed_is_created_on_google() {
     let h = harness().await;
     let copy = read_series(&h).await;
     let id = new_event_id();
-    let lunch = Event { id: id.clone(), title: "Lunch".into(), ..event("primary", &id) };
-    let held_change = held(copy.hold(h.account_id, vec![Step::Save(lunch)]).await.unwrap());
+    let lunch = Event {
+        id: id.clone(),
+        title: "Lunch".into(),
+        ..event("primary", &id)
+    };
+    let held_change = held(
+        copy.hold(h.account_id, vec![Step::Save(lunch)])
+            .await
+            .unwrap(),
+    );
     copy.commit(held_change).await.unwrap();
     assert_eq!(queue(&h).await[0].kind, store::ChangeKind::Create);
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
@@ -1208,12 +1635,21 @@ async fn a_held_change_waits_for_commit() {
     let h = harness().await;
     let copy = read_series(&h).await;
     let held_change = held(
-        copy.hold(h.account_id, vec![Step::Remove { calendar: "primary".into(), id: "standup".into() }])
-            .await
-            .unwrap(),
+        copy.hold(
+            h.account_id,
+            vec![Step::Remove {
+                calendar: "primary".into(),
+                id: "standup".into(),
+            }],
+        )
+        .await
+        .unwrap(),
     );
     assert!(on_day(&h, 0).await.is_empty(), "it leaves the grid at once");
-    assert!(queue(&h).await.is_empty(), "and reaches the queue only on commit");
+    assert!(
+        queue(&h).await.is_empty(),
+        "and reaches the queue only on commit"
+    );
     copy.commit(held_change).await.unwrap();
     assert_eq!(queue(&h).await.len(), 1);
     copy.send(h.account_id).await.unwrap();
@@ -1238,13 +1674,21 @@ async fn deleting_a_series_cancels_its_changed_occurrences_on_google() {
     });
     let copy = read_series(&h).await;
     let tuesday = on_day(&h, 1).await.remove(0);
-    let steps = copy.delete_steps(h.account_id, &tuesday, Some(RepeatScope::All)).await.unwrap();
+    let steps = copy
+        .delete_steps(h.account_id, &tuesday, Some(RepeatScope::All))
+        .await
+        .unwrap();
     held(copy.apply(h.account_id, steps).await.unwrap());
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
 
     assert!(on_google(&h, "standup").is_none());
-    assert_eq!(on_google(&h, &tuesday_id).map(|e| e.status), Some(Status::Cancelled));
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    assert_eq!(
+        on_google(&h, &tuesday_id).map(|e| e.status),
+        Some(Status::Cancelled)
+    );
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(on_day(&h, 1).await.is_empty());
 }
 
@@ -1260,21 +1704,35 @@ async fn a_held_delete_can_be_taken_back() {
         original_start: Some(NOW + DAY),
         start: NOW + DAY + HOUR,
         end: NOW + DAY + 2 * HOUR,
-        guests: vec![mailrs_domain::calendar::Guest { email: "ann@example.com".into(), ..Default::default() }],
+        guests: vec![mailrs_domain::calendar::Guest {
+            email: "ann@example.com".into(),
+            ..Default::default()
+        }],
         ..standup()
     });
     let copy = read_series(&h).await;
     let tuesday_id = occurrence_id(&standup(), NOW + DAY);
-    let (series_before, tuesday_before) =
-        (stored(&h, "primary", "standup").await.unwrap(), stored(&h, "primary", &tuesday_id).await.unwrap());
+    let (series_before, tuesday_before) = (
+        stored(&h, "primary", "standup").await.unwrap(),
+        stored(&h, "primary", &tuesday_id).await.unwrap(),
+    );
     let tuesday = on_day(&h, 1).await.remove(0);
-    let steps = copy.delete_steps(h.account_id, &tuesday, Some(RepeatScope::All)).await.unwrap();
+    let steps = copy
+        .delete_steps(h.account_id, &tuesday, Some(RepeatScope::All))
+        .await
+        .unwrap();
     let held_change = held(copy.hold(h.account_id, steps).await.unwrap());
     assert!(stored(&h, "primary", "standup").await.is_none());
     assert!(stored(&h, "primary", &tuesday_id).await.is_none());
     copy.revert(held_change).await.unwrap();
-    assert_eq!(stored(&h, "primary", "standup").await.unwrap(), series_before);
-    assert_eq!(stored(&h, "primary", &tuesday_id).await.unwrap(), tuesday_before);
+    assert_eq!(
+        stored(&h, "primary", "standup").await.unwrap(),
+        series_before
+    );
+    assert_eq!(
+        stored(&h, "primary", &tuesday_id).await.unwrap(),
+        tuesday_before
+    );
     assert!(queue(&h).await.is_empty());
 }
 
@@ -1284,13 +1742,27 @@ async fn a_held_edit_can_be_taken_back() {
     let copy = read_series(&h).await;
     let before = stored(&h, "primary", "standup").await.unwrap();
     let third = on_day(&h, 2).await.remove(0);
-    let edited = Event { title: "Longer stand-up".into(), ..Event::clone(&third.event) };
-    let steps = copy.change_steps(h.account_id, &third, edited, Some(RepeatScope::Following)).await.unwrap();
-    let new_id = steps.iter().map(Step::key).map(|(_, id)| id).find(|id| id != "standup").unwrap();
+    let edited = Event {
+        title: "Longer stand-up".into(),
+        ..Event::clone(&third.event)
+    };
+    let steps = copy
+        .change_steps(h.account_id, &third, edited, Some(RepeatScope::Following))
+        .await
+        .unwrap();
+    let new_id = steps
+        .iter()
+        .map(Step::key)
+        .map(|(_, id)| id)
+        .find(|id| id != "standup")
+        .unwrap();
     let held_change = held(copy.hold(h.account_id, steps).await.unwrap());
     copy.revert(held_change).await.unwrap();
     assert_eq!(stored(&h, "primary", "standup").await.unwrap(), before);
-    assert!(stored(&h, "primary", &new_id).await.is_none(), "the new half goes");
+    assert!(
+        stored(&h, "primary", &new_id).await.is_none(),
+        "the new half goes"
+    );
     assert_eq!(on_day(&h, 3).await[0].event.title, "standup");
 }
 
@@ -1300,11 +1772,20 @@ async fn a_held_move_survives_a_refresh_before_the_toast_closes() {
     let copy = read_series(&h).await;
     let mut mine = stored(&h, "primary", "standup").await.unwrap();
     mine.title = "Mine".into();
-    let held_change = held(copy.hold(h.account_id, vec![Step::Save(mine)]).await.unwrap());
+    let held_change = held(
+        copy.hold(h.account_id, vec![Step::Save(mine)])
+            .await
+            .unwrap(),
+    );
     // Google forgot the token, so the refresh reads the calendar whole.
     h.fake.with(|s| s.expire_calendar_tokens = true);
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert_eq!(stored(&h, "primary", "standup").await.unwrap().title, "Mine");
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored(&h, "primary", "standup").await.unwrap().title,
+        "Mine"
+    );
     copy.commit(held_change).await.unwrap();
     h.fake.with(|s| s.expire_calendar_tokens = false);
     copy.send(h.account_id).await.unwrap();
@@ -1328,16 +1809,26 @@ async fn a_held_series_delete_keeps_its_changed_occurrences_off_the_grid() {
     });
     let copy = read_series(&h).await;
     let held_change = held(
-        copy.hold(h.account_id, vec![Step::Remove { calendar: "primary".into(), id: "standup".into() }])
-            .await
-            .unwrap(),
+        copy.hold(
+            h.account_id,
+            vec![Step::Remove {
+                calendar: "primary".into(),
+                id: "standup".into(),
+            }],
+        )
+        .await
+        .unwrap(),
     );
     h.fake.with(|s| s.expire_calendar_tokens = true);
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(on_day(&h, 1).await.is_empty(), "{:?}", on_day(&h, 1).await);
     // Committed and not yet sent, the removal still keeps them off.
     copy.commit(held_change).await.unwrap();
-    copy.refresh(h.account_id, NOW + 2 * READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + 2 * READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(on_day(&h, 1).await.is_empty());
 }
 
@@ -1346,17 +1837,33 @@ async fn a_held_series_delete_keeps_its_changed_occurrences_off_the_grid() {
 #[tokio::test]
 async fn a_new_held_change_commits_the_one_before() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     h.fake.put_calendar_event(event("primary", "b"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    let remove = |id: &str| vec![Step::Remove { calendar: "primary".into(), id: id.into() }];
+    let remove = |id: &str| {
+        vec![Step::Remove {
+            calendar: "primary".into(),
+            id: id.into(),
+        }]
+    };
     let first = held(copy.hold(h.account_id, remove("a")).await.unwrap());
     let second = held(copy.hold(h.account_id, remove("b")).await.unwrap());
-    assert_eq!(queue(&h).await.iter().map(|q| q.event.as_str()).collect::<Vec<_>>(), vec!["a"]);
+    assert_eq!(
+        queue(&h)
+            .await
+            .iter()
+            .map(|q| q.event.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a"]
+    );
     copy.revert(first.clone()).await.unwrap();
-    assert!(stored(&h, "primary", "a").await.is_none(), "too late to take it back");
+    assert!(
+        stored(&h, "primary", "a").await.is_none(),
+        "too late to take it back"
+    );
     copy.commit(first).await.unwrap();
     assert_eq!(queue(&h).await.len(), 1, "and it is not queued twice");
     copy.commit(second).await.unwrap();
@@ -1368,17 +1875,30 @@ async fn a_new_held_change_commits_the_one_before() {
 #[tokio::test]
 async fn a_hold_that_fails_leaves_reads_alone() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    let mine = Event { title: "Mine".into(), ..stored(&h, "primary", "a").await.unwrap() };
+    let mine = Event {
+        title: "Mine".into(),
+        ..stored(&h, "primary", "a").await.unwrap()
+    };
     // No calendar "gone" is stored, so its row breaks the foreign key.
     let steps = vec![Step::Save(mine), Step::Save(event("gone", "b"))];
     assert!(copy.hold(h.account_id, steps).await.is_err());
-    assert_eq!(stored(&h, "primary", "a").await.unwrap().title, "a", "nothing was written");
-    h.fake.put_calendar_event(Event { title: "Theirs".into(), ..event("primary", "a") });
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    assert_eq!(
+        stored(&h, "primary", "a").await.unwrap().title,
+        "a",
+        "nothing was written"
+    );
+    h.fake.put_calendar_event(Event {
+        title: "Theirs".into(),
+        ..event("primary", "a")
+    });
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert_eq!(stored(&h, "primary", "a").await.unwrap().title, "Theirs");
 }
 
@@ -1390,13 +1910,24 @@ async fn editing_one_occurrence_twice_offline_queues_one_change() {
     let copy = read_series(&h).await;
     for title in ["First", "Second"] {
         let tuesday = on_day(&h, 1).await.remove(0);
-        let edited = Event { title: title.into(), ..Event::clone(&tuesday.event) };
-        let edited = Event { start: tuesday.start, end: tuesday.end, ..edited };
-        let steps = copy.change_steps(h.account_id, &tuesday, edited, Some(RepeatScope::This)).await.unwrap();
+        let edited = Event {
+            title: title.into(),
+            ..Event::clone(&tuesday.event)
+        };
+        let edited = Event {
+            start: tuesday.start,
+            end: tuesday.end,
+            ..edited
+        };
+        let steps = copy
+            .change_steps(h.account_id, &tuesday, edited, Some(RepeatScope::This))
+            .await
+            .unwrap();
         held(copy.apply(h.account_id, steps).await.unwrap());
     }
     assert_eq!(queue(&h).await.len(), 1);
-    h.fake.fail_next(mailrs_gmail::GmailError::Network("gone".into()));
+    h.fake
+        .fail_next(mailrs_gmail::GmailError::Network("gone".into()));
     assert!(copy.send(h.account_id).await.is_err());
     assert_eq!(queue(&h).await.len(), 1);
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
@@ -1413,11 +1944,17 @@ async fn an_account_without_a_calendar_takes_no_edit() {
     let steps = vec![Step::Save(event("primary", "a"))];
     let answer = copy.hold(h.account_id, steps.clone()).await;
     assert!(
-        matches!(answer, Err(crate::SyncError::Backend(crate::BackendError::Unsupported))),
+        matches!(
+            answer,
+            Err(crate::SyncError::Backend(crate::BackendError::Unsupported))
+        ),
         "{answer:?}"
     );
     let answer = copy.apply(h.account_id, steps).await;
-    assert!(matches!(answer, Err(crate::SyncError::Backend(crate::BackendError::Unsupported))));
+    assert!(matches!(
+        answer,
+        Err(crate::SyncError::Backend(crate::BackendError::Unsupported))
+    ));
 }
 
 #[tokio::test]
@@ -1425,9 +1962,18 @@ async fn an_account_that_withheld_the_calendar_is_asked_for_it() {
     let h = harness().await;
     let copy = read_series(&h).await;
     h.fake.withhold(mailrs_gmail::CALENDAR_SCOPE);
-    let remove = vec![Step::Remove { calendar: "primary".into(), id: "standup".into() }];
-    assert!(matches!(copy.hold(h.account_id, remove.clone()).await.unwrap(), Permitted::NeedsPermission));
-    assert!(matches!(copy.apply(h.account_id, remove).await.unwrap(), Permitted::NeedsPermission));
+    let remove = vec![Step::Remove {
+        calendar: "primary".into(),
+        id: "standup".into(),
+    }];
+    assert!(matches!(
+        copy.hold(h.account_id, remove.clone()).await.unwrap(),
+        Permitted::NeedsPermission
+    ));
+    assert!(matches!(
+        copy.apply(h.account_id, remove).await.unwrap(),
+        Permitted::NeedsPermission
+    ));
     assert!(stored(&h, "primary", "standup").await.is_some());
     assert!(queue(&h).await.is_empty());
 }
@@ -1441,18 +1987,31 @@ async fn a_held_change_survives_a_crash_and_is_queued_at_the_next_start() {
     let first_run = read_series(&h).await;
     held(
         first_run
-            .hold(h.account_id, vec![Step::Remove { calendar: "primary".into(), id: "standup".into() }])
+            .hold(
+                h.account_id,
+                vec![Step::Remove {
+                    calendar: "primary".into(),
+                    id: "standup".into(),
+                }],
+            )
             .await
             .unwrap(),
     );
-    assert!(queue(&h).await.is_empty(), "not queued until committed or recovered");
+    assert!(
+        queue(&h).await.is_empty(),
+        "not queued until committed or recovered"
+    );
     // The run ends here with no clean shutdown, as a crash would: no
     // commit, no revert, only what `hold` already wrote to the store.
     drop(first_run);
 
     let next_run = copy(&h);
     next_run.recover_holds().await.unwrap();
-    assert_eq!(queue(&h).await.len(), 1, "the held change is queued at the next start");
+    assert_eq!(
+        queue(&h).await.len(),
+        1,
+        "the held change is queued at the next start"
+    );
     next_run.send(h.account_id).await.unwrap();
     assert!(on_google(&h, "standup").is_none());
 }
@@ -1465,7 +2024,13 @@ async fn recovering_holds_a_second_time_queues_nothing_more() {
     let first_run = read_series(&h).await;
     held(
         first_run
-            .hold(h.account_id, vec![Step::Remove { calendar: "primary".into(), id: "standup".into() }])
+            .hold(
+                h.account_id,
+                vec![Step::Remove {
+                    calendar: "primary".into(),
+                    id: "standup".into(),
+                }],
+            )
             .await
             .unwrap(),
     );
@@ -1483,24 +2048,41 @@ async fn recovering_holds_a_second_time_queues_nothing_more() {
 #[tokio::test]
 async fn still_waiting_says_no_once_an_apply_commits_the_change_before_it() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "a"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let removed = held(
-        copy.hold(h.account_id, vec![Step::Remove { calendar: "primary".into(), id: "a".into() }])
-            .await
-            .unwrap(),
+        copy.hold(
+            h.account_id,
+            vec![Step::Remove {
+                calendar: "primary".into(),
+                id: "a".into(),
+            }],
+        )
+        .await
+        .unwrap(),
     );
     assert!(copy.still_waiting(&removed));
     // The assistant's own edit, elsewhere, made through `apply`.
-    held(copy.apply(h.account_id, vec![Step::Save(event("primary", "b"))]).await.unwrap());
-    assert!(!copy.still_waiting(&removed), "apply committed it, same as holding a new change would");
+    held(
+        copy.apply(h.account_id, vec![Step::Save(event("primary", "b"))])
+            .await
+            .unwrap(),
+    );
+    assert!(
+        !copy.still_waiting(&removed),
+        "apply committed it, same as holding a new change would"
+    );
 }
 
 fn with_guest(calendar: &str, id: &str) -> Event {
     Event {
-        guests: vec![mailrs_domain::calendar::Guest { email: "ann@example.com".into(), ..Default::default() }],
+        guests: vec![mailrs_domain::calendar::Guest {
+            email: "ann@example.com".into(),
+            ..Default::default()
+        }],
         ..event(calendar, id)
     }
 }
@@ -1512,26 +2094,43 @@ fn notices(h: &Harness) -> Vec<(String, Notify)> {
 #[tokio::test]
 async fn a_new_event_with_a_guest_reaches_google_with_invitations_on() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    held(copy.apply(h.account_id, vec![Step::Save(with_guest("primary", &id))]).await.unwrap());
+    held(
+        copy.apply(h.account_id, vec![Step::Save(with_guest("primary", &id))])
+            .await
+            .unwrap(),
+    );
     copy.send(h.account_id).await.unwrap();
 
-    assert_eq!(on_google(&h, &id).unwrap().guests[0].email, "ann@example.com");
+    assert_eq!(
+        on_google(&h, &id).unwrap().guests[0].email,
+        "ann@example.com"
+    );
     assert_eq!(notices(&h), [(id, Notify::Guests)]);
 }
 
 #[tokio::test]
 async fn a_move_kept_from_the_guests_goes_out_with_updates_off() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(with_guest("primary", "review"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    let moved = Event { start: NOW + 3_600_000, end: NOW + 7_200_000, ..stored(&h, "primary", "review").await.unwrap() };
-    held(copy.apply_with(h.account_id, vec![Step::Save(moved)], Notify::Nobody).await.unwrap());
+    let moved = Event {
+        start: NOW + 3_600_000,
+        end: NOW + 7_200_000,
+        ..stored(&h, "primary", "review").await.unwrap()
+    };
+    held(
+        copy.apply_with(h.account_id, vec![Step::Save(moved)], Notify::Nobody)
+            .await
+            .unwrap(),
+    );
     copy.send(h.account_id).await.unwrap();
 
     assert_eq!(notices(&h), [("review".to_string(), Notify::Nobody)]);
@@ -1542,12 +2141,21 @@ async fn a_move_kept_from_the_guests_goes_out_with_updates_off() {
 #[tokio::test]
 async fn a_quiet_delete_held_through_a_restart_stays_quiet() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(with_guest("primary", "review"));
     let first_run = copy(&h);
     first_run.refresh(h.account_id, NOW).await.unwrap();
-    let remove = vec![Step::Remove { calendar: "primary".into(), id: "review".into() }];
-    held(first_run.hold_with(h.account_id, remove, Notify::Nobody).await.unwrap());
+    let remove = vec![Step::Remove {
+        calendar: "primary".into(),
+        id: "review".into(),
+    }];
+    held(
+        first_run
+            .hold_with(h.account_id, remove, Notify::Nobody)
+            .await
+            .unwrap(),
+    );
     drop(first_run);
 
     let next_run = copy(&h);
@@ -1560,7 +2168,8 @@ async fn a_quiet_delete_held_through_a_restart_stays_quiet() {
 
 /// The review on the primary calendar, opened in the editor.
 async fn review_on_primary(h: &Harness) -> (CalendarCopy<Connected>, Occurrence) {
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
     h.fake.put_calendar_event(with_guest("primary", "review"));
     let copy = copy(h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -1570,9 +2179,19 @@ async fn review_on_primary(h: &Harness) -> (CalendarCopy<Connected>, Occurrence)
 
 /// The editor's save of the review, moved to the team calendar and
 /// renamed.
-async fn move_review_to_team(h: &Harness, copy: &CalendarCopy<Connected>, opened: &Occurrence) -> Vec<Step> {
-    let edited = Event { calendar: "team".into(), title: "Review, renamed".into(), ..Event::clone(&opened.event) };
-    copy.change_steps(h.account_id, opened, edited, None).await.unwrap()
+async fn move_review_to_team(
+    h: &Harness,
+    copy: &CalendarCopy<Connected>,
+    opened: &Occurrence,
+) -> Vec<Step> {
+    let edited = Event {
+        calendar: "team".into(),
+        title: "Review, renamed".into(),
+        ..Event::clone(&opened.event)
+    };
+    copy.change_steps(h.account_id, opened, edited, None)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -1580,15 +2199,32 @@ async fn a_new_calendar_goes_out_as_a_move_then_the_edit() {
     let h = harness().await;
     let (copy, opened) = review_on_primary(&h).await;
     let steps = move_review_to_team(&h, &copy, &opened).await;
-    held(copy.apply_with(h.account_id, steps, Notify::Nobody).await.unwrap());
-    assert!(stored(&h, "primary", "review").await.is_none(), "it leaves the old calendar at once");
-    assert_eq!(stored(&h, "team", "review").await.unwrap().title, "Review, renamed");
+    held(
+        copy.apply_with(h.account_id, steps, Notify::Nobody)
+            .await
+            .unwrap(),
+    );
+    assert!(
+        stored(&h, "primary", "review").await.is_none(),
+        "it leaves the old calendar at once"
+    );
+    assert_eq!(
+        stored(&h, "team", "review").await.unwrap().title,
+        "Review, renamed"
+    );
 
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
     let there = on_google(&h, "review").unwrap();
-    assert_eq!((there.calendar.as_str(), there.title.as_str()), ("team", "Review, renamed"));
+    assert_eq!(
+        (there.calendar.as_str(), there.title.as_str()),
+        ("team", "Review, renamed")
+    );
     assert_eq!(h.fake.usage().calls_to("calendar.events.move"), 1);
-    assert!(notices(&h).iter().all(|(_, n)| *n == Notify::Nobody), "{:?}", notices(&h));
+    assert!(
+        notices(&h).iter().all(|(_, n)| *n == Notify::Nobody),
+        "{:?}",
+        notices(&h)
+    );
     assert!(queue(&h).await.is_empty());
 }
 
@@ -1599,7 +2235,9 @@ async fn a_queued_move_keeps_the_event_off_its_old_calendar_through_a_read() {
     let steps = move_review_to_team(&h, &copy, &opened).await;
     held(copy.apply(h.account_id, steps).await.unwrap());
     // Offline: the move waits, and a read of both calendars happens first.
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert!(stored(&h, "primary", "review").await.is_none());
     assert!(stored(&h, "team", "review").await.is_some());
 }
@@ -1627,7 +2265,10 @@ async fn undo_puts_a_moved_event_back_on_its_calendar() {
     let change = held(copy.hold(h.account_id, steps).await.unwrap());
     copy.revert(change).await.unwrap();
     assert!(stored(&h, "team", "review").await.is_none());
-    assert_eq!(stored(&h, "primary", "review").await.unwrap().title, "review");
+    assert_eq!(
+        stored(&h, "primary", "review").await.unwrap().title,
+        "review"
+    );
     assert!(queue(&h).await.is_empty());
 }
 
@@ -1638,7 +2279,10 @@ async fn a_move_google_turns_down_leaves_the_event_where_it_was() {
     let steps = move_review_to_team(&h, &copy, &opened).await;
     held(copy.apply(h.account_id, steps).await.unwrap());
     h.fake.drop_calendar_event("primary", "review");
-    h.fake.put_calendar_event(Event { etag: "\"9\"".into(), ..with_guest("primary", "review") });
+    h.fake.put_calendar_event(Event {
+        etag: "\"9\"".into(),
+        ..with_guest("primary", "review")
+    });
     h.fake.with(|s| s.refuse_moves = true);
 
     let turned = copy.send(h.account_id).await.unwrap();
@@ -1653,8 +2297,16 @@ fn invitation(calendar: &str, id: &str) -> Event {
     use mailrs_domain::calendar::Guest;
     Event {
         guests: vec![
-            Guest { email: "rita@example.com".into(), organizer: true, ..Guest::default() },
-            Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
+            Guest {
+                email: "rita@example.com".into(),
+                organizer: true,
+                ..Guest::default()
+            },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            },
         ],
         organizer: Some("rita@example.com".into()),
         ..event(calendar, id)
@@ -1664,15 +2316,28 @@ fn invitation(calendar: &str, id: &str) -> Event {
 #[tokio::test]
 async fn a_guests_removal_deletes_their_copy_quietly_and_answers_nothing() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(invitation("primary", "review"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let opened = on_day(&h, 0).await.remove(0);
     // The person was asked nothing about the guests; a guest's removal
     // is quiet whatever the caller passes.
-    let choice = Choice { scope: None, notify: Notify::Guests };
-    let Changed::Held(change) = held(copy.change(h.account_id, EventChange::Remove(opened), choice, Undo::Offer).await.unwrap()) else {
+    let choice = Choice {
+        scope: None,
+        notify: Notify::Guests,
+    };
+    let Changed::Held(change) = held(
+        copy.change(
+            h.account_id,
+            EventChange::Remove(opened),
+            choice,
+            Undo::Offer,
+        )
+        .await
+        .unwrap(),
+    ) else {
         panic!("Undo was offered");
     };
     assert!(stored(&h, "primary", "review").await.is_none());
@@ -1681,19 +2346,36 @@ async fn a_guests_removal_deletes_their_copy_quietly_and_answers_nothing() {
 
     assert!(on_google(&h, "review").is_none());
     assert_eq!(notices(&h), [("review".to_string(), Notify::Nobody)]);
-    assert_eq!(h.fake.usage().calls_to("calendar.events.patch"), 0, "no answer of No went first");
+    assert_eq!(
+        h.fake.usage().calls_to("calendar.events.patch"),
+        0,
+        "no answer of No went first"
+    );
 }
 
 #[tokio::test]
 async fn an_organizers_removal_keeps_their_choice_about_the_guests() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(with_guest("primary", "review"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let opened = on_day(&h, 0).await.remove(0);
-    let choice = Choice { scope: None, notify: Notify::Guests };
-    let Changed::Held(change) = held(copy.change(h.account_id, EventChange::Remove(opened), choice, Undo::Offer).await.unwrap()) else {
+    let choice = Choice {
+        scope: None,
+        notify: Notify::Guests,
+    };
+    let Changed::Held(change) = held(
+        copy.change(
+            h.account_id,
+            EventChange::Remove(opened),
+            choice,
+            Undo::Offer,
+        )
+        .await
+        .unwrap(),
+    ) else {
         panic!("Undo was offered");
     };
     copy.commit(change).await.unwrap();
@@ -1707,7 +2389,10 @@ fn out_of_office(id: &str, declines: mailrs_domain::calendar::Declines) -> Event
         title: "Out of office".into(),
         start: NOW - 3_600_000,
         end: NOW + 8 * 3_600_000,
-        kind: Kind::OutOfOffice(Decline { meetings: declines, message: "Back on Monday".into() }),
+        kind: Kind::OutOfOffice(Decline {
+            meetings: declines,
+            message: "Back on Monday".into(),
+        }),
         ..event("primary", id)
     }
 }
@@ -1720,8 +2405,18 @@ fn accepted_meeting() -> Event {
     Event {
         uid: "review@google.com".into(),
         guests: vec![
-            Guest { email: "rita@example.com".into(), organizer: true, answer: Some(Answer::Yes), ..Guest::default() },
-            Guest { email: "me@example.com".into(), me: true, answer: Some(Answer::Yes), ..Guest::default() },
+            Guest {
+                email: "rita@example.com".into(),
+                organizer: true,
+                answer: Some(Answer::Yes),
+                ..Guest::default()
+            },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                answer: Some(Answer::Yes),
+                ..Guest::default()
+            },
         ],
         my_answer: Some(Answer::Yes),
         ..event("primary", "review")
@@ -1732,14 +2427,23 @@ fn accepted_meeting() -> Event {
 async fn an_out_of_office_made_here_reaches_google_with_its_type() {
     use mailrs_domain::calendar::Declines;
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    copy.save(h.account_id, out_of_office(&id, Declines::All)).await.unwrap();
+    copy.save(h.account_id, out_of_office(&id, Declines::All))
+        .await
+        .unwrap();
     assert!(copy.send(h.account_id).await.unwrap().is_empty());
-    assert_eq!(on_google(&h, &id).unwrap().kind, out_of_office(&id, Declines::All).kind);
-    assert_eq!(stored(&h, "primary", &id).await.unwrap().kind, out_of_office(&id, Declines::All).kind);
+    assert_eq!(
+        on_google(&h, &id).unwrap().kind,
+        out_of_office(&id, Declines::All).kind
+    );
+    assert_eq!(
+        stored(&h, "primary", &id).await.unwrap().kind,
+        out_of_office(&id, Declines::All).kind
+    );
 }
 
 #[tokio::test]
@@ -1747,16 +2451,24 @@ async fn a_meeting_google_declines_for_an_out_of_office_shows_declined() {
     use mailrs_domain::calendar::Declines;
     use mailrs_domain::invitation::Answer;
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(accepted_meeting());
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, out_of_office(&new_event_id(), Declines::All)).await.unwrap();
+    copy.save(h.account_id, out_of_office(&new_event_id(), Declines::All))
+        .await
+        .unwrap();
     copy.send(h.account_id).await.unwrap();
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     let meeting = stored(&h, "primary", "review").await.unwrap();
     assert_eq!(meeting.my_answer, Some(Answer::No));
-    assert!(!meeting.blocks_time(), "a declined meeting leaves the hour free");
+    assert!(
+        !meeting.blocks_time(),
+        "a declined meeting leaves the hour free"
+    );
 }
 
 #[tokio::test]
@@ -1764,14 +2476,22 @@ async fn an_out_of_office_for_new_invitations_leaves_an_accepted_meeting_alone()
     use mailrs_domain::calendar::Declines;
     use mailrs_domain::invitation::Answer;
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(accepted_meeting());
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, out_of_office(&new_event_id(), Declines::New)).await.unwrap();
+    copy.save(h.account_id, out_of_office(&new_event_id(), Declines::New))
+        .await
+        .unwrap();
     copy.send(h.account_id).await.unwrap();
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert_eq!(stored(&h, "primary", "review").await.unwrap().my_answer, Some(Answer::Yes));
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored(&h, "primary", "review").await.unwrap().my_answer,
+        Some(Answer::Yes)
+    );
 }
 
 #[tokio::test]
@@ -1785,13 +2505,21 @@ async fn an_out_of_office_google_refuses_says_which_accounts_may_make_one() {
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let id = new_event_id();
-    copy.save(h.account_id, out_of_office(&id, Declines::All)).await.unwrap();
+    copy.save(h.account_id, out_of_office(&id, Declines::All))
+        .await
+        .unwrap();
     let turned_down = copy.send(h.account_id).await.unwrap();
     assert_eq!(turned_down.len(), 1);
     let reason = turned_down[0].reason.clone().unwrap_or_default();
     assert!(reason.starts_with("Google Calendar offers out of office and focus time only on some work and school accounts"), "{reason}");
-    assert!(reason.contains("Status events are not supported for this user."), "Google's own words stay: {reason}");
-    assert!(stored(&h, "primary", &id).await.is_none(), "the entry leaves the copy");
+    assert!(
+        reason.contains("Status events are not supported for this user."),
+        "Google's own words stay: {reason}"
+    );
+    assert!(
+        stored(&h, "primary", &id).await.is_none(),
+        "the entry leaves the copy"
+    );
 }
 
 // ---- Going back further than the first read ----------------------------
@@ -1800,7 +2528,11 @@ const YEAR: i64 = 365 * 24 * 60 * 60_000;
 
 /// An event `years` before `NOW`.
 fn back(calendar: &str, id: &str, years: i64) -> Event {
-    Event { start: NOW - years * YEAR, end: NOW - years * YEAR + 3_600_000, ..event(calendar, id) }
+    Event {
+        start: NOW - years * YEAR,
+        end: NOW - years * YEAR + 3_600_000,
+        ..event(calendar, id)
+    }
 }
 
 fn list_calls(h: &Harness) -> u32 {
@@ -1809,30 +2541,40 @@ fn list_calls(h: &Harness) -> u32 {
 
 async fn token_of(h: &Harness, calendar: &str) -> Option<String> {
     let (account, calendar) = (h.account_id, calendar.to_string());
-    h.db.read(move |c| store::token(c, account, &calendar)).await.unwrap()
+    h.db.read(move |c| store::token(c, account, &calendar))
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
 async fn an_older_week_is_fetched_and_kept() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "now"));
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    assert!(stored(&h, "primary", "old").await.is_none(), "the first read starts a year back");
+    assert!(
+        stored(&h, "primary", "old").await.is_none(),
+        "the first read starts a year back"
+    );
     let wanted = NOW - 2 * YEAR;
     assert!(copy.older_missing(&[h.account_id], wanted).await.unwrap());
     let read = copy.reach_back(&[h.account_id], wanted).await.unwrap();
     assert_eq!(read, 1);
     assert!(stored(&h, "primary", "old").await.is_some());
-    assert!(stored(&h, "primary", "now").await.is_some(), "what the copy had stays");
+    assert!(
+        stored(&h, "primary", "now").await.is_some(),
+        "what the copy had stays"
+    );
 }
 
 #[tokio::test]
 async fn a_range_already_fetched_is_not_fetched_again() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -1841,21 +2583,33 @@ async fn a_range_already_fetched_is_not_fetched_again() {
     let before = list_calls(&h);
     assert!(!copy.older_missing(&[h.account_id], wanted).await.unwrap());
     // The week before, in the same month, and a date the copy always had.
-    assert_eq!(copy.reach_back(&[h.account_id], wanted - 3 * 24 * 3_600_000).await.unwrap(), 0);
+    assert_eq!(
+        copy.reach_back(&[h.account_id], wanted - 3 * 24 * 3_600_000)
+            .await
+            .unwrap(),
+        0
+    );
     assert_eq!(copy.reach_back(&[h.account_id], NOW).await.unwrap(), 0);
-    assert_eq!(list_calls(&h), before, "no second request for a range the copy holds");
+    assert_eq!(
+        list_calls(&h),
+        before,
+        "no second request for a range the copy holds"
+    );
 }
 
 #[tokio::test]
 async fn a_range_fetch_leaves_the_sync_token_alone() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let token = token_of(&h, "primary").await;
     assert!(token.is_some());
-    copy.reach_back(&[h.account_id], NOW - 2 * YEAR).await.unwrap();
+    copy.reach_back(&[h.account_id], NOW - 2 * YEAR)
+        .await
+        .unwrap();
     assert_eq!(token_of(&h, "primary").await, token);
 }
 
@@ -1864,66 +2618,107 @@ async fn a_range_fetch_leaves_the_sync_token_alone() {
 #[tokio::test]
 async fn a_later_change_read_leaves_the_older_rows_alone() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(event("primary", "now"));
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.reach_back(&[h.account_id], NOW - 2 * YEAR).await.unwrap();
+    copy.reach_back(&[h.account_id], NOW - 2 * YEAR)
+        .await
+        .unwrap();
     h.fake.put_calendar_event(event("primary", "new"));
     h.fake.with(|s| s.calendar_events.retain(|e| e.id != "now"));
     h.fake.put_calendar_event(event("primary", "now"));
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert!(stored(&h, "primary", "new").await.is_some());
-    let old = stored(&h, "primary", "old").await.expect("the older row survives the change read");
-    assert_eq!(old.start, NOW - 2 * YEAR);
-    let account = h.account_id;
-    let rows = h
-        .db
-        .read(move |c| store::occurrences(c, &[account], NOW - 3 * YEAR, NOW + YEAR, mailrs_store::calendar::CalendarScope::Shown))
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
         .await
         .unwrap();
-    assert_eq!(rows.iter().filter(|o| o.event.id == "old").count(), 1, "stored once");
+    assert!(stored(&h, "primary", "new").await.is_some());
+    let old = stored(&h, "primary", "old")
+        .await
+        .expect("the older row survives the change read");
+    assert_eq!(old.start, NOW - 2 * YEAR);
+    let account = h.account_id;
+    let rows =
+        h.db.read(move |c| {
+            store::occurrences(
+                c,
+                &[account],
+                NOW - 3 * YEAR,
+                NOW + YEAR,
+                mailrs_store::calendar::CalendarScope::Shown,
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.iter().filter(|o| o.event.id == "old").count(),
+        1,
+        "stored once"
+    );
 }
 
 #[tokio::test]
 async fn a_change_to_an_older_event_the_change_read_names_replaces_its_row() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.reach_back(&[h.account_id], NOW - 2 * YEAR).await.unwrap();
-    h.fake.put_calendar_event(Event { title: "renamed".into(), ..back("primary", "old", 2) });
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.reach_back(&[h.account_id], NOW - 2 * YEAR)
+        .await
+        .unwrap();
+    h.fake.put_calendar_event(Event {
+        title: "renamed".into(),
+        ..back("primary", "old", 2)
+    });
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert_eq!(stored(&h, "primary", "old").await.unwrap().title, "renamed");
 }
 
 #[tokio::test]
 async fn a_calendar_read_whole_again_keeps_the_older_range_it_fetched() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.reach_back(&[h.account_id], NOW - 2 * YEAR).await.unwrap();
+    copy.reach_back(&[h.account_id], NOW - 2 * YEAR)
+        .await
+        .unwrap();
     h.fake.with(|s| s.expire_calendar_tokens = true);
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert!(stored(&h, "primary", "old").await.is_some(), "the whole read went back as far as the copy did");
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
+    assert!(
+        stored(&h, "primary", "old").await.is_some(),
+        "the whole read went back as far as the copy did"
+    );
 }
 
 #[tokio::test]
 async fn offline_an_older_range_fails_and_is_asked_again_later() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true)]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true)]);
     h.fake.put_calendar_event(back("primary", "old", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let wanted = NOW - 2 * YEAR;
     h.fake.with(|s| s.offline = true);
     let err = copy.reach_back(&[h.account_id], wanted).await.unwrap_err();
-    assert!(matches!(err, crate::SyncError::Backend(ref e) if e.is_transient()), "{err:?}");
-    assert!(copy.older_missing(&[h.account_id], wanted).await.unwrap(), "nothing was recorded");
+    assert!(
+        matches!(err, crate::SyncError::Backend(ref e) if e.is_transient()),
+        "{err:?}"
+    );
+    assert!(
+        copy.older_missing(&[h.account_id], wanted).await.unwrap(),
+        "nothing was recorded"
+    );
     h.fake.with(|s| s.offline = false);
     assert_eq!(copy.reach_back(&[h.account_id], wanted).await.unwrap(), 1);
 }
@@ -1931,12 +2726,15 @@ async fn offline_an_older_range_fails_and_is_asked_again_later() {
 #[tokio::test]
 async fn only_the_shown_calendars_are_fetched_back() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), hidden("team")]);
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true), hidden("team")]);
     h.fake.put_calendar_event(back("primary", "mine", 2));
     h.fake.put_calendar_event(back("team", "theirs", 2));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.reach_back(&[h.account_id], NOW - 2 * YEAR).await.unwrap();
+    copy.reach_back(&[h.account_id], NOW - 2 * YEAR)
+        .await
+        .unwrap();
     assert!(stored(&h, "primary", "mine").await.is_some());
     assert!(stored(&h, "team", "theirs").await.is_none());
 }
@@ -1947,7 +2745,10 @@ async fn only_the_shown_calendars_are_fetched_back() {
 #[tokio::test]
 async fn a_page_that_gives_a_series_whole_drops_its_other_changed_occurrences() {
     let h = harness().await;
-    let series = Event { rules: vec!["RRULE:FREQ=WEEKLY".into()], ..event("primary", "standup") };
+    let series = Event {
+        rules: vec!["RRULE:FREQ=WEEKLY".into()],
+        ..event("primary", "standup")
+    };
     let changed = |id: &str| Event {
         series: Some("standup".into()),
         original_start: Some(NOW + 7 * 86_400_000),
@@ -1956,18 +2757,27 @@ async fn a_page_that_gives_a_series_whole_drops_its_other_changed_occurrences() 
     let (kept, taken_back) = (changed("standup_kept"), changed("standup_taken_back"));
     let seeded = vec![series.clone(), kept.clone(), taken_back];
     let account = h.account_id;
-    h.db
-        .write(move |c| {
-            store::save_calendars(c, account, &[calendar("primary", true)])?;
-            store::save_events(c, account, &seeded, NOW)
-        })
-        .await
-        .unwrap();
+    h.db.write(move |c| {
+        store::save_calendars(c, account, &[calendar("primary", true)])?;
+        store::save_events(c, account, &seeded, NOW)
+    })
+    .await
+    .unwrap();
     let page = vec![series, kept];
-    h.db
-        .write(move |c| crate::calendar_copy::store_page(c, account, "primary", Default::default(), page, Vec::new(), vec!["standup".into()], NOW))
-        .await
-        .unwrap();
+    h.db.write(move |c| {
+        crate::calendar_copy::store_page(
+            c,
+            account,
+            "primary",
+            Default::default(),
+            page,
+            Vec::new(),
+            vec!["standup".into()],
+            NOW,
+        )
+    })
+    .await
+    .unwrap();
     assert!(stored(&h, "primary", "standup_kept").await.is_some());
     assert!(stored(&h, "primary", "standup_taken_back").await.is_none());
     assert!(stored(&h, "primary", "standup").await.is_some());

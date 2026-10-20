@@ -55,6 +55,13 @@ signs in to Google only with a Google client compiled in;
 one. `cargo run -p mailrs -- --demo` opens the app on sample accounts, with
 no client needed.
 
+### Nix
+
+`nix develop` supplies the Linux build environment. `nix build` builds an
+installable package, and `nix run -- --demo` opens it on sample mail.
+See [Building and installing with Nix](docs/nix.md) for installation,
+account sign-in, and checks.
+
 ### macOS
 
 On a Mac, install Rust 1.98 and the Homebrew build dependencies, then build

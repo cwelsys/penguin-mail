@@ -13,7 +13,9 @@ use std::sync::Arc;
 use gtk::glib;
 use mailrs_domain::invitation::{Invitation, When};
 use mailrs_domain::translate::gettext;
-use mailrs_domain::{AccountId, EpochMillis, FlagColor, MessageBody, MessageMeta, Target, ThreadSummary};
+use mailrs_domain::{
+    AccountId, EpochMillis, FlagColor, MessageBody, MessageMeta, Target, ThreadSummary,
+};
 use mailrs_store::calendar::CalendarScope;
 use mailrs_store::outbox::Queued;
 use mailrs_store::{messages, threads, unsubscribes};
@@ -116,7 +118,12 @@ impl MainWindow {
 
     /// The read receipt card's buttons. A card already at work has no
     /// message to answer for, so a second press sends nothing.
-    pub(super) fn answer_receipt(self: &Rc<Self>, view: &Rc<ConversationView>, message_id: String, send: bool) {
+    pub(super) fn answer_receipt(
+        self: &Rc<Self>,
+        view: &Rc<ConversationView>,
+        message_id: String,
+        send: bool,
+    ) {
         // Only the message the card asks about, and only while it asks.
         if view.find(OpenThread::receipt_asked).as_deref() != Some(message_id.as_str()) {
             return;
@@ -144,7 +151,6 @@ impl Ports {
             .account(account_id)
             .ok_or_else(|| "the account has stopped syncing".to_string())
     }
-
 }
 
 impl Screen for Ports {
@@ -267,7 +273,10 @@ impl Effects for Ports {
         Box::pin(async move {
             let sync = self.sync(account_id)?;
             self.core
-                .call(async move { sync.open_thread(&thread_id).await })
+                .call_for(
+                    account_id,
+                    async move { sync.open_thread(&thread_id).await },
+                )
                 .await
                 .map(|_| ())
                 .map_err(|err| err.to_string())
@@ -300,8 +309,10 @@ impl Effects for Ports {
                 let (core, sync) = (Rc::clone(&self.core), sync.clone());
                 async move {
                     let key = id.clone();
-                    let result = core.call(async move { sync.body(&key).await }).await;
-                    (id, result.map_err(|e| e.to_string()))
+                    let result = core
+                        .call_for(account_id, async move { sync.body(&key).await })
+                        .await;
+                    (id, result.map_err(|err| err.to_string()))
                 }
             });
             // A long thread would otherwise fire one Gmail call per message
@@ -375,7 +386,7 @@ impl Effects for Ports {
         Box::pin(async move {
             let opened = self
                 .core
-                .call(async move {
+                .call_for(account_id, async move {
                     invitations
                         .open(account_id, &message_id, &ics, now_millis())
                         .await
@@ -400,7 +411,9 @@ impl Effects for Ports {
         let invitations = self.core.invitations();
         Box::pin(async move {
             self.core
-                .call(async move { invitations.busy(account_id, &invitation).await })
+                .call_for(account_id, async move {
+                    invitations.busy(account_id, &invitation).await
+                })
                 .await
                 .map_err(|err| err.to_string())
         })
@@ -414,7 +427,7 @@ impl Effects for Ports {
         let invitations = self.core.invitations();
         Box::pin(async move {
             self.core
-                .call(async move {
+                .call_for(account_id, async move {
                     invitations
                         .series(account_id, &invitation, now_millis())
                         .await
@@ -437,7 +450,10 @@ impl Effects for Ports {
             }
             let listed = self
                 .core
-                .call(async move { calendar.calendars(account_id).await })
+                .call_for(
+                    account_id,
+                    async move { calendar.calendars(account_id).await },
+                )
                 .await
                 .map_err(|err| err.to_string())?;
             Ok(match listed {
@@ -457,7 +473,7 @@ impl Effects for Ports {
         let invitations = self.core.invitations();
         Box::pin(async move {
             self.core
-                .call(async move {
+                .call_for(account_id, async move {
                     invitations
                         .on_calendar(account_id, &invitation, now_millis())
                         .await
@@ -543,11 +559,14 @@ impl Effects for Ports {
             let window = self
                 .window()
                 .ok_or_else(|| "the window has closed".to_string())?;
-            let (config, _) = window.settings_with(|s| translation::destination(&s.ai))?;
+            let (config, reasoning) = window.settings_with(|s| {
+                translation::destination(&s.ai)
+                    .map(|(config, _)| (config, s.ai.translation_reasoning))
+            })?;
             self.core
                 .call(async move {
                     let pieces: Vec<&str> = pieces.iter().map(String::as_str).collect();
-                    translation::ask(config, &into, &pieces)
+                    translation::ask(config, &into, &pieces, reasoning)
                         .await
                         .map_err(anyhow::Error::msg)
                 })
@@ -560,7 +579,11 @@ impl Effects for Ports {
         Box::pin(glib::timeout_future_seconds(seconds))
     }
 
-    fn receipt_answered(&self, account_id: AccountId, message_id: String) -> Answer<'_, Result<bool, String>> {
+    fn receipt_answered(
+        &self,
+        account_id: AccountId,
+        message_id: String,
+    ) -> Answer<'_, Result<bool, String>> {
         Box::pin(async move {
             // Not connected yet: ask later rather than twice.
             let Some(sync) = self.core.account(account_id) else {
@@ -570,7 +593,9 @@ impl Effects for Ports {
             // account's that the mail came to, or the card would offer one
             // from another address; such a message counts as settled.
             self.core
-                .call(async move { sync.receipt_open(&message_id).await.map(|open| !open) })
+                .call_for(account_id, async move {
+                    sync.receipt_open(&message_id).await.map(|open| !open)
+                })
                 .await
                 .map_err(|err| err.to_string())
         })
@@ -588,7 +613,9 @@ impl Effects for Ports {
                 .account(account_id)
                 .ok_or_else(|| gettext("The account is not connected yet."))?;
             self.core
-                .call(async move { sync.answer_receipt(&message_id, send).await })
+                .call_for(account_id, async move {
+                    sync.answer_receipt(&message_id, send).await
+                })
                 .await
                 .map_err(|err| err.to_string())
         })

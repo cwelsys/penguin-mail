@@ -17,7 +17,11 @@ struct Fake {
 
 impl Counter for Rc<Fake> {
     async fn count(&self, ask: Ask) -> Result<Counts, String> {
-        let mailboxes = ask.mailboxes.iter().map(|m| (m.clone(), self.answer)).collect();
+        let mailboxes = ask
+            .mailboxes
+            .iter()
+            .map(|m| (m.clone(), self.answer))
+            .collect();
         self.asks.borrow_mut().push(ask);
         Ok(Counts {
             mailboxes,
@@ -94,7 +98,10 @@ async fn a_burst_of_changes_is_one_count() {
             unread.answered();
             settle().await;
             assert_eq!(fake.asks.borrow().len(), 1, "the burst shared one count");
-            assert!(!fake.asks.borrow()[0].refresh, "no window, so no server count");
+            assert!(
+                !fake.asks.borrow()[0].refresh,
+                "no window, so no server count"
+            );
 
             // Sync reports batch after batch. With no window open, those
             // that come while the last count is still recent share one.
@@ -103,7 +110,12 @@ async fn a_burst_of_changes_is_one_count() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             settle().await;
-            assert_eq!(fake.asks.borrow().len(), 3, "{:?}", fake.asks.borrow().len());
+            assert_eq!(
+                fake.asks.borrow().len(),
+                3,
+                "{:?}",
+                fake.asks.borrow().len()
+            );
         })
         .await;
 }
@@ -190,14 +202,18 @@ async fn the_tray_says_what_the_sidebar_says_for_a_folder_account() {
     let day = 24 * 60 * 60 * 1000;
     let now = now_millis();
     let imap = Arc::new(FakeImap::new());
-    imap.deliver_flagged("INBOX", &raw_message("first", "Today", now - day, None), &[], now - day);
+    imap.deliver_flagged(
+        "INBOX",
+        &raw_message("first", "Today", now - day, None),
+        &[],
+        now - day,
+    );
     let h = Harness::on_imap(Arc::clone(&imap)).await;
     imap.deliver_flagged("INBOX", &raw_message("second", "Now", now, None), &[], now);
     let lists = Arc::new(h.lists());
     let account_id = h.account_id;
-    let local = h
-        .db
-        .read(move |c| {
+    let local =
+        h.db.read(move |c| {
             use mailrs_store::threads::{ThreadFilter, unread_threads};
             let inbox = mailrs_domain::MailSet::Role(mailrs_domain::Role::Inbox);
             unread_threads(c, &ThreadFilter::account(account_id, inbox))
@@ -275,11 +291,17 @@ async fn with_no_window_only_thread_and_account_events_ask_for_a_count() {
             let fake = Rc::new(Fake::default());
             let unread = Unread::new(Rc::clone(&fake));
             started(&unread);
-            unread.heard(&ChangeEvent::NewMail { account_id: 1, message_ids: vec!["m".into()] });
+            unread.heard(&ChangeEvent::NewMail {
+                account_id: 1,
+                message_ids: vec!["m".into()],
+            });
             unread.heard(&ChangeEvent::LabelsChanged { account_id: 1 });
             settle().await;
             assert!(fake.asks.borrow().is_empty());
-            unread.heard(&ChangeEvent::AccountStateChanged { account_id: 1, state: AccountState::Ok });
+            unread.heard(&ChangeEvent::AccountStateChanged {
+                account_id: 1,
+                state: AccountState::Ok,
+            });
             settle().await;
             assert_eq!(fake.asks.borrow().len(), 1);
         })
@@ -333,7 +355,10 @@ async fn with_a_window_a_long_burst_asks_the_servers_once_per_gap() {
             assert!(asks.len() > 30, "each event read the store: {}", asks.len());
             let refreshes = asks.iter().filter(|a| a.refresh).count();
             assert_eq!(refreshes, 2, "the first count, then one after the gap");
-            assert!(asks.last().is_some_and(|a| a.refresh), "the owed refresh still came");
+            assert!(
+                asks.last().is_some_and(|a| a.refresh),
+                "the owed refresh still came"
+            );
             // A count that waits on the servers still reads every mailbox
             // the window shows, not only the inboxes.
             assert!(asks.iter().all(|a| a.full), "{asks:?}");
@@ -353,7 +378,10 @@ async fn with_no_window_each_account_asks_its_server_once_when_it_starts() {
             started(&unread);
             unread.set_accounts(vec![1, 2]);
             settle().await;
-            assert!(fake.asks.borrow().iter().all(|a| !a.refresh), "nothing started yet");
+            assert!(
+                fake.asks.borrow().iter().all(|a| !a.refresh),
+                "nothing started yet"
+            );
             unread.started(1);
             settle().await;
             // The second account starts soon after the first.
@@ -382,16 +410,15 @@ async fn with_no_window_each_account_asks_its_server_once_when_it_starts() {
 /// The only unread thread of `h`'s account.
 async fn the_unread_thread(h: &Harness) -> String {
     let account_id = h.account_id;
-    h.db
-        .read(move |c| {
-            Ok(c.query_row(
-                "SELECT id FROM threads WHERE account_id = ?1 AND unread = 1",
-                [account_id],
-                |row| row.get::<_, String>(0),
-            )?)
-        })
-        .await
-        .expect("one unread thread")
+    h.db.read(move |c| {
+        Ok(c.query_row(
+            "SELECT id FROM threads WHERE account_id = ?1 AND unread = 1",
+            [account_id],
+            |row| row.get::<_, String>(0),
+        )?)
+    })
+    .await
+    .expect("one unread thread")
 }
 
 /// A window that shows All Inboxes until the test closes it.
@@ -481,7 +508,13 @@ async fn the_tray_goes_to_none_once_read(h: Harness, window: bool) {
 
 async fn gmail_with_one_unread() -> Harness {
     let now = now_millis();
-    Harness::with(vec![mailrs_sync::fake::meta("m1", "t1", now, &["INBOX", "UNREAD"])]).await
+    Harness::with(vec![mailrs_sync::fake::meta(
+        "m1",
+        "t1",
+        now,
+        &["INBOX", "UNREAD"],
+    )])
+    .await
 }
 
 async fn imap_with_one_unread() -> Harness {

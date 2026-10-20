@@ -30,7 +30,12 @@ fn sieve_keeps_a_subject_and_has_no_contacts_limit() {
     let imap = AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::default()));
     let adapter = imap.mail.clone();
     let sieve = Arc::new(FakeSieve::new("fileinto vacation"));
-    let rules = SieveRules::new(Arc::new(crate::AnySieve::from(sieve)), adapter, "me@example.com".into(), "Example".into());
+    let rules = SieveRules::new(
+        Arc::new(crate::AnySieve::from(sieve)),
+        adapter,
+        "me@example.com".into(),
+        "Example".into(),
+    );
     let offers = imap.with_auto_reply(AnyAutoReply::Sieve(rules)).offers();
     assert!(offers.auto_reply);
     assert_eq!(kept(offers), (true, false));
@@ -38,7 +43,9 @@ fn sieve_keeps_a_subject_and_has_no_contacts_limit() {
 
 #[test]
 fn an_account_with_no_automatic_reply_keeps_nothing() {
-    let offers = AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::default())).offers();
+    let offers =
+        AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::default()))
+            .offers();
     assert!(!offers.auto_reply);
     assert_eq!(kept(offers), (false, false));
 }

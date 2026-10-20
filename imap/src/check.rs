@@ -444,7 +444,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(refused, CheckError::Smtp(ImapError::Auth { .. })), "{refused:?}");
+        assert!(
+            matches!(refused, CheckError::Smtp(ImapError::Auth { .. })),
+            "{refused:?}"
+        );
     }
 
     /// A provider that counts failed sign-ins should not see one for a

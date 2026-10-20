@@ -22,9 +22,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use objc2::rc::Retained;
 use gtk::gio::prelude::ApplicationExt;
 use gtk::{gio, glib};
+use objc2::rc::Retained;
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager, NSDate, NSString};
@@ -125,11 +125,15 @@ fn takes_scroll(inner: &Inner, event: &NSEvent) -> bool {
     if !inner.view.isFlipped() {
         at.y = bounds.size.height - at.y;
     }
-    let inside = at.x >= 0.0
-        && at.y >= 0.0
-        && at.x < bounds.size.width
-        && at.y < bounds.size.height;
-    inside && !inner.float.holes.borrow().iter().any(|hole| hole.holds(at.x, at.y))
+    let inside =
+        at.x >= 0.0 && at.y >= 0.0 && at.x < bounds.size.width && at.y < bounds.size.height;
+    inside
+        && !inner
+            .float
+            .holes
+            .borrow()
+            .iter()
+            .any(|hole| hole.holds(at.x, at.y))
 }
 
 /// Whether a key is one the page takes first: it has the focus, and the

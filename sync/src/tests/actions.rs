@@ -10,8 +10,8 @@ use super::{Connected, Harness, harness};
 use crate::actions::DEPTH;
 use crate::fake::{FakeGmail, meta};
 use crate::{
-    AccountServices, AccountSync, BackendError, History, MailAction, MailActions,
-    MailCapabilities, Outcome, Permitted, SyncError, TriageAction, now_millis,
+    AccountServices, AccountSync, BackendError, History, MailAction, MailActions, MailCapabilities,
+    Outcome, Permitted, SyncError, TriageAction, now_millis,
 };
 
 fn actions(h: &Harness) -> MailActions<Connected> {
@@ -133,7 +133,10 @@ async fn three_actions_are_undone_newest_first() {
             "the newest archive left goes back first"
         );
     }
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["t3", "t2", "t1"]);
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["t3", "t2", "t1"]
+    );
     assert!(actions.undo().await.is_none(), "and the stack is empty");
 }
 
@@ -221,7 +224,11 @@ async fn a_skipped_action_stays_off_the_stack() {
 
     let undone = actions.undo().await.expect("an undo");
     assert_eq!(undone.outcome.done, [Target::thread(h.account_id, "t1")]);
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["t1"], "t2 stays archived");
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["t1"],
+        "t2 stays archived"
+    );
     assert!(actions.undo().await.is_none());
 }
 
@@ -329,7 +336,11 @@ async fn archiving_one_message_leaves_the_rest_of_its_thread_in_the_inbox() {
     assert!(h.labels_of("b").await.is_empty());
     assert_eq!(h.labels_of("a").await, ["INBOX"]);
     assert_eq!(h.labels_of("c").await, ["INBOX"]);
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["t1"], "the thread stays");
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["t1"],
+        "the thread stays"
+    );
 
     let undone = actions.undo().await.expect("an undo");
     assert_eq!(undone.outcome.done, [target]);
@@ -440,9 +451,14 @@ async fn an_account_that_waits_out_its_ceiling_reports_what_it_left() {
         .collect();
     assert_eq!(
         told,
-        ["Gmail stayed busy for a moment, so “Move to trash” did not go through for 1 conversation."]
+        [
+            "Gmail stayed busy for a moment, so “Move to trash” did not go through for 1 conversation."
+        ]
     );
-    assert!(h.threads(MailSet::Role(Role::Inbox)).await.is_empty(), "t1 went to the trash");
+    assert!(
+        h.threads(MailSet::Role(Role::Inbox)).await.is_empty(),
+        "t1 went to the trash"
+    );
 }
 
 #[tokio::test]
@@ -557,7 +573,10 @@ async fn a_dismissed_follow_up_comes_back_on_undo_in_turn() {
     assert_eq!(undone.action, MailAction::DismissFollowUp);
     assert_eq!(undone.outcome.done, [dismissed]);
     assert_eq!(waiting().await, ["t1"]);
-    assert!(h.threads(MailSet::Role(Role::Inbox)).await.is_empty(), "the archive stands");
+    assert!(
+        h.threads(MailSet::Role(Role::Inbox)).await.is_empty(),
+        "the archive stands"
+    );
 
     actions.undo().await.expect("the archive before it");
     assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["t2"]);
@@ -626,7 +645,10 @@ async fn a_reminder_gmail_refuses_waits_for_the_next_pass() {
         body: "no".into(),
     });
     assert!(actions.return_due(now).await.unwrap().is_empty());
-    assert!(h.threads(MailSet::Role(Role::Inbox)).await.is_empty(), "still archived");
+    assert!(
+        h.threads(MailSet::Role(Role::Inbox)).await.is_empty(),
+        "still archived"
+    );
 
     let returned = actions.return_due(now).await.unwrap();
     assert_eq!(returned.len(), 1, "the next pass brings it back");
@@ -882,12 +904,17 @@ async fn deleting_forever_takes_the_mail_out_of_gmail_and_the_store() {
         Permitted::Done(Outcome {
             done: vec![target],
             failed: vec![],
+            recorded: None,
         })
     );
     assert!(!in_gmail(&h, "a"), "Gmail no longer holds the message");
     assert!(h.thread("t1").await.is_none(), "the store keeps no row");
     assert!(h.labels_of("a").await.is_empty(), "and no labels");
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["t2"], "the rest is untouched");
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["t2"],
+        "the rest is untouched"
+    );
     assert!(actions.undo().await.is_none(), "erasing records no undo");
 }
 
@@ -940,14 +967,12 @@ async fn erasing_one_message_leaves_the_rest_of_its_thread_consistent() {
     );
 }
 
-/// Waits until the writer has gone idle once, so the contacts tally it
-/// brings up to date when idle has committed. The first empty write can
-/// slip in ahead of that catch-up while the writer is still busy; the
-/// second can only run after it.
+/// Finishes the contacts tally before counting commits. Empty writes can
+/// stay queued and leave the writer no idle turn to finish it.
 async fn settled(h: &Harness) {
-    for _ in 0..2 {
-        h.db.write(|_| Ok(())).await.expect("an empty write");
-    }
+    h.db.write(mailrs_store::contacts::catch_up)
+        .await
+        .expect("the contacts tally caught up");
 }
 
 /// Transactions committed to the harness's database so far, counted from
@@ -1033,16 +1058,24 @@ async fn a_change_on_an_account_with_local_mailboxes_reaches_no_server() {
         AccountServices::fake_with_capabilities(fake, caps)
     };
     let h = super::harness_with(local).await;
-    h.fake.seed(meta("a", "t1", now_millis(), &["INBOX", "UNREAD"]));
+    h.fake
+        .seed(meta("a", "t1", now_millis(), &["INBOX", "UNREAD"]));
     h.bootstrap_all().await;
     let target = Target::thread(h.account_id, "t1");
     let read = MailAction::Triage(TriageAction::MarkRead);
     for action in [ARCHIVE, read] {
-        let outcome = actions(&h).run(std::slice::from_ref(&target), action, History::Record).await;
+        let outcome = actions(&h)
+            .run(std::slice::from_ref(&target), action, History::Record)
+            .await;
         assert_eq!(outcome.done, std::slice::from_ref(&target));
     }
-    assert!(h.threads(MailSet::Role(Role::Inbox)).await.is_empty(), "the store archived it");
-    let writes = h.fake.with(|s| s.usage.calls_to("users.messages.batchModify") + s.usage.calls_to("users.messages.modify"));
+    assert!(
+        h.threads(MailSet::Role(Role::Inbox)).await.is_empty(),
+        "the store archived it"
+    );
+    let writes = h.fake.with(|s| {
+        s.usage.calls_to("users.messages.batchModify") + s.usage.calls_to("users.messages.modify")
+    });
     assert_eq!(writes, 0);
 }
 
@@ -1062,6 +1095,13 @@ async fn deleting_forever_where_the_server_cannot_is_unsupported() {
     );
     sync.ensure_thread("t1").await.unwrap();
     let erased = sync.erase_all(&[Target::thread(h.account_id, "t1")]).await;
-    assert!(matches!(erased, Err(SyncError::Backend(BackendError::Unsupported))));
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.messages.batchDelete")), 0);
+    assert!(matches!(
+        erased,
+        Err(SyncError::Backend(BackendError::Unsupported))
+    ));
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.messages.batchDelete")),
+        0
+    );
 }

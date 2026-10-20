@@ -56,12 +56,14 @@ struct Edits {
 
 /// The file a tool names at `given`, once it is a file a message may
 /// carry: an absolute path, or one under `~/`, to a readable file of at
-/// most 25 MB that [`off_limits`] allows. `home` is the user's home folder
-/// and `private` the folders Penguin Mail keeps its own data in.
+/// most 25 MB that [`off_limits`] allows, or the user picked for this request.
+/// `home` is the user's home folder, and `private` the folders Penguin Mail
+/// keeps its own data in.
 pub(super) fn local_file(
     given: &str,
     home: &Path,
     private: &[PathBuf],
+    picked: &[PathBuf],
 ) -> Result<LocalFile, String> {
     let expanded = match given.strip_prefix("~/") {
         Some(rest) => home.join(rest),
@@ -76,7 +78,7 @@ pub(super) fn local_file(
     // as ~/.ssh.
     let path =
         std::fs::canonicalize(&expanded).map_err(|_| format!("There is no file at {given}."))?;
-    if off_limits(&path, home, private) {
+    if !picked.contains(&path) && off_limits(&path, home, private) {
         return Err(format!(
             "{given} is in a folder that holds keys, passwords or settings, so the assistant will not attach it. The user can attach it in the composer."
         ));
@@ -396,19 +398,49 @@ impl<A: Accounts> Tools<A> {
             Some(r) => Some(self.account_named(&required(r, "account")?)?),
             None => None,
         };
+        let forward_account = match forward {
+            Some(f) => Some(self.account_named(&required(f, "account")?)?),
+            None => None,
+        };
+        let task = if reply.is_some() {
+            crate::settings::AccountUse::Replies
+        } else if forward.is_some() {
+            crate::settings::AccountUse::Forwards
+        } else {
+            crate::settings::AccountUse::Assistant
+        };
         let account = match text(input, "account") {
             Some(email) => self.account_named(&email)?,
-            None => match &reply_account {
-                Some(a) => a.clone(),
-                None => {
-                    let id = self.desk.default_account().ok_or("Add an account first.")?;
-                    self.desk
-                        .accounts()
-                        .into_iter()
-                        .find(|a| a.id == id)
-                        .ok_or("Add an account first.")?
+            None => {
+                let settings = self.desk.settings();
+                let accounts = mailrs_domain::mail_accounts(&self.desk.accounts());
+                let emails: Vec<_> = accounts
+                    .iter()
+                    .map(|account| account.email.as_str())
+                    .collect();
+                let preferred = settings
+                    .preferred_live_account(task, &emails)
+                    .and_then(|email| {
+                        accounts
+                            .iter()
+                            .find(|account| account.email.eq_ignore_ascii_case(email))
+                            .cloned()
+                    });
+                match preferred
+                    .or_else(|| reply_account.clone())
+                    .or_else(|| forward_account.clone())
+                {
+                    Some(account) => account,
+                    None => {
+                        let id = self.desk.default_account().ok_or("Add an account first.")?;
+                        self.desk
+                            .accounts()
+                            .into_iter()
+                            .find(|account| account.id == id)
+                            .ok_or("Add an account first.")?
+                    }
                 }
-            },
+            }
         };
         let mut draft = self.effects.new_draft(account.id)?;
         draft.to = addresses(input, "to").unwrap_or_default();
@@ -420,21 +452,40 @@ impl<A: Accounts> Tools<A> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        if let (Some(r), Some(reply_account)) = (reply, &reply_account)
-            && reply_account.id == account.id
-        {
+        if let (Some(r), Some(reply_account)) = (reply, &reply_account) {
             let thread_id = required(r, "thread_id")?;
             let key = thread_id.clone();
+            let source_id = reply_account.id;
             let found = self
-                .read(move |c| messages::thread_messages(c, account.id, &key))
+                .read(move |c| messages::thread_messages(c, source_id, &key))
                 .await?;
             let parent = found.iter().rev().find(|m| !m.in_role(Role::Drafts));
             if let Some(parent) = parent {
-                let mail = self.modules.accounts.services(account.id).map(|s| s.mail);
-                let masked = |email: &str| mail.as_ref().is_some_and(|mail| mail.is_masked(email) == Some(true));
-                let mine = compose::reply_addresses(&self.desk.settings().senders(&account.email), parent, masked);
-                if let Some(from) = compose::reply_from(&mine, parent) {
-                    draft.from = from.clone();
+                let mail = self.modules.accounts.services(source_id).map(|s| s.mail);
+                let masked = |email: &str| {
+                    mail.as_ref()
+                        .is_some_and(|mail| mail.is_masked(email) == Some(true))
+                };
+                let mut mine = compose::reply_addresses(
+                    &self.desk.settings().senders(&reply_account.email),
+                    parent,
+                    masked,
+                );
+                if source_id == account.id {
+                    if let Some(from) = compose::reply_from(&mine, parent) {
+                        draft.from = from.clone();
+                    }
+                } else {
+                    mine.extend(
+                        self.desk
+                            .settings()
+                            .senders(&account.email)
+                            .into_iter()
+                            .map(|sender| Address {
+                                name: sender.name,
+                                email: sender.email,
+                            }),
+                    );
                 }
                 draft.to.retain(|to| {
                     !mine
@@ -447,7 +498,7 @@ impl<A: Accounts> Tools<A> {
                         .any(|own| own.email.eq_ignore_ascii_case(&cc.email))
                 });
             }
-            draft.thread_id = Some(thread_id);
+            draft.thread_id = (source_id == account.id).then_some(thread_id);
             draft.in_reply_to = parent.and_then(|m| m.rfc822_msgid.clone());
             draft.references = found
                 .iter()
@@ -516,7 +567,9 @@ impl<A: Accounts> Tools<A> {
         message_id: &str,
     ) -> Result<MessageBody, String> {
         let (s, id) = (Arc::clone(sync), message_id.to_string());
-        let body = self.call(async move { s.body(&id).await }).await?;
+        let body = self
+            .call_for(sync.account_id(), async move { s.body(&id).await })
+            .await?;
         if ciphertext(&body) {
             return Err("That message arrived encrypted, and the assistant does not send it on. The user can forward it, or save its files, from the conversation.".into());
         }
@@ -537,9 +590,11 @@ impl<A: Accounts> Tools<A> {
             )
         })?;
         let (s, id) = (Arc::clone(sync), message_id.to_string());
-        self.call(async move { s.attachment(&id, &handle).await })
-            .await
-            .map_err(|err| format!("Could not fetch {}: {err}", found.filename))
+        self.call_for(sync.account_id(), async move {
+            s.attachment(&id, &handle).await
+        })
+        .await
+        .map_err(|err| format!("Could not fetch {}: {err}", found.filename))
     }
 
     /// The files `attachments` names: those out of messages fetched now,
@@ -559,7 +614,12 @@ impl<A: Accounts> Tools<A> {
         for item in items {
             if let Some(path) = text(item, "path") {
                 let private = private.get_or_insert_with(private_dirs);
-                local.push(local_file(&path, &gtk::glib::home_dir(), private)?);
+                local.push(local_file(
+                    &path,
+                    &gtk::glib::home_dir(),
+                    private,
+                    &self.picked_files,
+                )?);
                 continue;
             }
             let email = text(item, "account").unwrap_or_else(|| self.email_of(account_id));
@@ -660,7 +720,7 @@ impl<A: Accounts> Tools<A> {
     pub(super) async fn list_drafts(&self, input: &Value) -> ToolResult {
         let accounts = match text(input, "account") {
             Some(email) => vec![self.account_named(&email)?],
-            None => self.desk.accounts(),
+            None => mailrs_domain::mail_accounts(&self.desk.accounts()),
         };
         let mut found: Vec<(String, MessageMeta)> = Vec::new();
         for account in accounts {
@@ -760,15 +820,20 @@ impl<A: Accounts> Tools<A> {
                 .await?;
             let (s, id) = (Arc::clone(&sync), message_id.clone());
             let draft_id = self
-                .call(async move { s.draft_id_for(&id).await })
+                .call_for(account.id, async move { s.draft_id_for(&id).await })
                 .await?
                 .ok_or("Gmail no longer holds that draft.")?;
             // Only the message as Gmail holds it carries the Bcc, the reply
             // headers and the bytes of the files, readable or encrypted.
             let (s, id) = (Arc::clone(&sync), message_id.clone());
-            let raw = self.call(async move { s.raw_message(&id).await }).await?;
+            let raw = self
+                .call_for(account.id, async move { s.raw_message(&id).await })
+                .await?;
             let blank = self.effects.new_draft(account.id)?;
-            let mut draft = self.effects.reopen_draft(raw.as_ref().clone(), blank).await?;
+            let mut draft = self
+                .effects
+                .reopen_draft(raw.as_ref().clone(), blank)
+                .await?;
             draft.draft_id = Some(draft_id);
             draft.thread_id = (thread.len() > 1).then_some(stored.thread_id.clone());
             let missing = self.apply(&mut draft, edits).await?;
@@ -878,7 +943,10 @@ impl<A: Accounts> Tools<A> {
         let question = discard_question(&subject_of(&stored.subject), account.provider_name());
         Ok(Plan::ask(question, async move {
             let gone = self
-                .call(async move { sync.discard_draft(&message_id).await })
+                .call_for(
+                    account.id,
+                    async move { sync.discard_draft(&message_id).await },
+                )
                 .await?;
             if !gone {
                 return Err("Gmail no longer holds that draft.".into());

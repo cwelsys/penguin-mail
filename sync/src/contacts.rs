@@ -569,7 +569,10 @@ mod tests {
 
     #[test]
     fn a_long_resource_makes_a_short_file_name() {
-        let name = photo_file(3, &format!("https://dav.example.org/{}.vcf", "a".repeat(400)));
+        let name = photo_file(
+            3,
+            &format!("https://dav.example.org/{}.vcf", "a".repeat(400)),
+        );
         assert!(name.len() <= 130, "{name}");
         assert!(name.ends_with("aaa-vcf.jpg"));
     }

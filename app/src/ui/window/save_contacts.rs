@@ -18,7 +18,9 @@ use mailrs_domain::{AccountId, Address};
 use mailrs_sync::Permitted;
 
 use super::MainWindow;
-use crate::contacts::{OfferEnd, OfferTimer, declines, failed_title, offer_timer, offer_title, saved_title};
+use crate::contacts::{
+    OfferEnd, OfferTimer, declines, failed_title, offer_timer, offer_title, saved_title,
+};
 use crate::format::account_label;
 use crate::permission::{Occasion, Permission};
 
@@ -134,13 +136,17 @@ impl MainWindow {
             if held.get().is_some() {
                 return glib::ControlFlow::Break;
             }
-            let Some(toast) = timer.upgrade() else { return glib::ControlFlow::Break };
+            let Some(toast) = timer.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
             waited.set(waited.get() + 1);
             if waited.get() < OFFER_SECONDS {
                 return glib::ControlFlow::Continue;
             }
             let shown = anchor.upgrade().map(|title| toast_widget(title.upcast()));
-            let flags = shown.map(|w| w.state_flags()).unwrap_or(gtk::StateFlags::NORMAL);
+            let flags = shown
+                .map(|w| w.state_flags())
+                .unwrap_or(gtk::StateFlags::NORMAL);
             let hovered = flags.contains(gtk::StateFlags::PRELIGHT);
             let focused = flags.contains(gtk::StateFlags::FOCUS_WITHIN);
             match offer_timer(hovered, focused) {

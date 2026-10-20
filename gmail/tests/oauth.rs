@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mailrs_gmail::{
-    CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE, CONTACTS_SCOPE,
-    CONTACTS_WRITE_SCOPE, DELETE_SCOPE, DRIVE_FILE_SCOPE, GMAIL_SCOPE, GmailError, Granted, LoopbackListener, OAuthClient, Pkce, SETTINGS_SCOPE,
-    SIGN_IN_SCOPES, parse_redirect,
+    CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE,
+    CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE, DELETE_SCOPE, DRIVE_FILE_SCOPE, GMAIL_SCOPE, GmailError,
+    Granted, LoopbackListener, OAuthClient, Pkce, SETTINGS_SCOPE, SIGN_IN_SCOPES, parse_redirect,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -35,9 +35,12 @@ fn pkce_challenge_is_the_sha256_of_the_verifier() {
 fn authorize_url_carries_pkce_and_offline_access() {
     let client = OAuthClient::new("cid", "secret");
     let pkce = Pkce::generate();
-    let url =
-        url::Url::parse(&client.authorize_url("http://127.0.0.1:5000", &pkce, "st").unwrap())
-            .unwrap();
+    let url = url::Url::parse(
+        &client
+            .authorize_url("http://127.0.0.1:5000", &pkce, "st")
+            .unwrap(),
+    )
+    .unwrap();
     let q: HashMap<String, String> = url.query_pairs().into_owned().collect();
     assert_eq!(url.host_str(), Some("accounts.google.com"));
     assert_eq!(q["client_id"], "cid");
@@ -58,16 +61,24 @@ fn authorize_url_carries_pkce_and_offline_access() {
 fn sign_in_asks_for_every_scope_at_once() {
     let client = OAuthClient::new("cid", "secret");
     let pkce = Pkce::generate();
-    let url =
-        url::Url::parse(&client.authorize_url("http://127.0.0.1:5000", &pkce, "st").unwrap())
-            .unwrap();
+    let url = url::Url::parse(
+        &client
+            .authorize_url("http://127.0.0.1:5000", &pkce, "st")
+            .unwrap(),
+    )
+    .unwrap();
     let scope = url
         .query_pairs()
         .into_owned()
         .collect::<HashMap<String, String>>()["scope"]
         .clone();
     assert_eq!(scope, SIGN_IN_SCOPES.join(" "));
-    for asked in [DELETE_SCOPE, SETTINGS_SCOPE, CONTACTS_WRITE_SCOPE, CALENDAR_SCOPE] {
+    for asked in [
+        DELETE_SCOPE,
+        SETTINGS_SCOPE,
+        CONTACTS_WRITE_SCOPE,
+        CALENDAR_SCOPE,
+    ] {
         assert!(scope.contains(asked), "{asked} missing from {scope}");
     }
 }
@@ -90,10 +101,16 @@ fn sign_in_asks_for_seven_scopes() {
         CALENDARS_SCOPE,
         DRIVE_FILE_SCOPE,
     ] {
-        assert!(SIGN_IN_SCOPES.contains(&asked), "{asked} missing from {scope}");
+        assert!(
+            SIGN_IN_SCOPES.contains(&asked),
+            "{asked} missing from {scope}"
+        );
     }
     for covered in [GMAIL_SCOPE, CONTACTS_SCOPE, CALENDAR_LIST_SCOPE] {
-        assert!(!SIGN_IN_SCOPES.contains(&covered), "{covered} should not be asked");
+        assert!(
+            !SIGN_IN_SCOPES.contains(&covered),
+            "{covered} should not be asked"
+        );
     }
 }
 
@@ -105,7 +122,10 @@ fn the_calendar_list_scope_covers_the_read_only_one() {
     assert!(old.has(CALENDAR_LIST_SCOPE));
     assert!(!old.has(CALENDAR_LIST_WRITE_SCOPE));
     let new = Granted::parse(CALENDAR_LIST_WRITE_SCOPE);
-    assert!(new.has(CALENDAR_LIST_SCOPE), "calendar.calendarlist covers the read-only list");
+    assert!(
+        new.has(CALENDAR_LIST_SCOPE),
+        "calendar.calendarlist covers the read-only list"
+    );
 }
 
 #[test]
@@ -297,12 +317,16 @@ async fn a_token_answer_past_the_cap_is_refused() {
     Mock::given(method("POST"))
         .and(path("/token"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"access_token": "at", "expires_in": 3599, "junk": padding})),
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"access_token": "at", "expires_in": 3599, "junk": padding})),
         )
         .mount(&server)
         .await;
     let result = client_for(&server).refresh("rt").await;
-    assert!(matches!(result, Err(GmailError::TooLarge { .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(GmailError::TooLarge { .. })),
+        "{result:?}"
+    );
 }
 
 #[tokio::test]
@@ -315,5 +339,8 @@ async fn a_refusal_with_an_enormous_body_is_not_read_whole() {
         .mount(&server)
         .await;
     let result = client_for(&server).refresh("rt").await;
-    assert!(matches!(result, Err(GmailError::Http { status: 400, .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(GmailError::Http { status: 400, .. })),
+        "{result:?}"
+    );
 }

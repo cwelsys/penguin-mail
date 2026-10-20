@@ -101,7 +101,9 @@ fn clean(source: &str, pictures: &str, of: Option<Arc<MessageBody>>, version: u3
     let history = quoted::history_in_html(&html);
     // The folded history is out of sight, so what it quotes does not get
     // to pick the page's colours.
-    let shown = history.as_ref().map_or(lower.as_str(), |fold| &lower[..fold.start]);
+    let shown = history
+        .as_ref()
+        .map_or(lower.as_str(), |fold| &lower[..fold.start]);
     Cleaned {
         of,
         version,
@@ -568,7 +570,11 @@ impl OpenThread {
         };
         if cleaned.is_some_and(Cleaned::is_failed) {
             // Its text part, when it has one, in place of the HTML.
-            return match body.text.as_deref().is_some_and(|text| !text.trim().is_empty()) {
+            return match body
+                .text
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty())
+            {
                 true => Showing::Body(body, None),
                 false => Showing::Unreadable,
             };
@@ -621,9 +627,10 @@ impl OpenThread {
 
     /// Whether a body the page drew loads anything from the web.
     pub fn has_remote_images(&self) -> bool {
-        self.messages
-            .iter()
-            .any(|meta| self.cleaned_of(&meta.id).is_some_and(|cleaned| cleaned.remote))
+        self.messages.iter().any(|meta| {
+            self.cleaned_of(&meta.id)
+                .is_some_and(|cleaned| cleaned.remote)
+        })
     }
 }
 
@@ -852,7 +859,10 @@ mod tests {
     fn an_html_body_is_loading_until_its_cleaned_copy_arrives() {
         let mut open = uncleaned("<p>Kites</p>");
         let page = whole(open.page(&theme()));
-        assert!(page.contains("Loading…") && !page.contains("Kites</p>"), "{page}");
+        assert!(
+            page.contains("Loading…") && !page.contains("Kites</p>"),
+            "{page}"
+        );
         let cleaned = open.to_clean().clean();
         open.take_cleaned(cleaned);
         assert_eq!(patched(open.page(&theme())), ["m1"]);
@@ -882,10 +892,12 @@ mod tests {
         let mut open = with_attachment("<p>Kites</p>", None);
         let cleaned = open.to_clean().clean();
         open.take_cleaned(cleaned);
-        open.thumbnails.insert("a1".to_string(), "data:image/png;base64,AAAA".to_string());
+        open.thumbnails
+            .insert("a1".to_string(), "data:image/png;base64,AAAA".to_string());
         open.page(&theme());
         assert!(patched(open.page(&theme())).is_empty(), "nothing changed");
-        open.thumbnails.insert("a1".to_string(), "data:image/png;base64,BBBB".to_string());
+        open.thumbnails
+            .insert("a1".to_string(), "data:image/png;base64,BBBB".to_string());
         assert_eq!(patched(open.page(&theme())), ["m1"]);
     }
 
@@ -895,8 +907,14 @@ mod tests {
         let failed = open.to_clean().failures();
         open.take_cleaned(failed);
         let page = whole(open.page(&theme()));
-        assert!(page.contains("Kites at ten") && !page.contains("Loading…"), "{page}");
-        assert!(open.to_clean().is_empty(), "the same body is not sent out again");
+        assert!(
+            page.contains("Kites at ten") && !page.contains("Loading…"),
+            "{page}"
+        );
+        assert!(
+            open.to_clean().is_empty(),
+            "the same body is not sent out again"
+        );
     }
 
     /// `ToClean::clean` and `compose::off_thread` catch a panic so one bad
@@ -905,7 +923,10 @@ mod tests {
     /// would not notice; so the manifests are read instead.
     #[test]
     fn no_profile_aborts_on_panic() {
-        for manifest in [include_str!("../../../Cargo.toml"), include_str!("../../Cargo.toml")] {
+        for manifest in [
+            include_str!("../../../Cargo.toml"),
+            include_str!("../../Cargo.toml"),
+        ] {
             let aborts = manifest
                 .lines()
                 .map(|line| line.split('#').next().unwrap_or_default().replace(' ', ""))
@@ -920,7 +941,10 @@ mod tests {
         let failed = open.to_clean().failures();
         open.take_cleaned(failed);
         let page = whole(open.page(&theme()));
-        assert!(page.contains("This message could not be displayed"), "{page}");
+        assert!(
+            page.contains("This message could not be displayed"),
+            "{page}"
+        );
         assert!(!page.contains("Loading…"), "{page}");
     }
 
@@ -1001,7 +1025,13 @@ mod tests {
         let Page::Whole(dark) = open.page(&dark) else {
             panic!("a new theme loads whole");
         };
-        assert!(light.articles.iter().zip(&dark.articles).all(|(a, b)| Rc::ptr_eq(&a.html, &b.html)));
+        assert!(
+            light
+                .articles
+                .iter()
+                .zip(&dark.articles)
+                .all(|(a, b)| Rc::ptr_eq(&a.html, &b.html))
+        );
     }
 
     #[test]
@@ -1197,10 +1227,16 @@ mod tests {
             html: Some("<p>Kites</p>".to_string()),
             ..MessageBody::default()
         };
-        open.take_bodies(vec![("m1".to_string(), Ok(Arc::new(same_words)))], HashMap::new());
+        open.take_bodies(
+            vec![("m1".to_string(), Ok(Arc::new(same_words)))],
+            HashMap::new(),
+        );
         open.take_cleaned(made);
         let page = whole(open.page(&theme()));
-        assert!(page.contains("Loading…") && !page.contains("<p>Kites</p>"), "{page}");
+        assert!(
+            page.contains("Loading…") && !page.contains("<p>Kites</p>"),
+            "{page}"
+        );
         assert!(!open.to_clean().is_empty());
     }
 
@@ -1243,7 +1279,10 @@ mod tests {
         let named = "<summary title=\"Show trimmed content\" aria-label=\"Show trimmed content\">";
         assert!(page[fold..].contains(named), "{page}");
         assert!(page.find("Monday works.") < Some(fold), "{page}");
-        assert!(page[fold..].find("Lunch?") < page[fold..].find("</details>"), "{page}");
+        assert!(
+            page[fold..].find("Lunch?") < page[fold..].find("</details>"),
+            "{page}"
+        );
     }
 
     #[test]
@@ -1257,17 +1296,23 @@ mod tests {
     /// and a font alone is not.
     #[test]
     fn a_body_that_picks_its_colours_paints_itself() {
-        let github = clean("<html><body style=\"color:#24292e;background-color:#fff\"><p>Run failed</p></body></html>");
-        let font = clean("<html><body style=\"font-family:Arial;line-height:1.5\"><p>Monday works.</p></body></html>");
+        let github = clean(
+            "<html><body style=\"color:#24292e;background-color:#fff\"><p>Run failed</p></body></html>",
+        );
+        let font = clean(
+            "<html><body style=\"font-family:Arial;line-height:1.5\"><p>Monday works.</p></body></html>",
+        );
         assert!(github.paints && !font.paints);
     }
 
     /// The wrappers a `<body>` tag leaves do not hide a reply's history.
     #[test]
     fn a_wrapped_reply_still_folds_its_history() {
-        let open = clean("<html><body style=\"font-family:Arial\"><div dir=\"ltr\">Monday works.</div>\
+        let open = clean(
+            "<html><body style=\"font-family:Arial\"><div dir=\"ltr\">Monday works.</div>\
              <div class=\"gmail_quote\"><div class=\"gmail_attr\">On Friday, Ann wrote:</div>\
-             <blockquote class=\"gmail_quote\">Lunch?</blockquote></div></body></html>");
+             <blockquote class=\"gmail_quote\">Lunch?</blockquote></div></body></html>",
+        );
         let history = open.history.expect("a fold");
         assert!(open.html[history].contains("Lunch?"));
     }
@@ -1284,7 +1329,10 @@ mod tests {
             assert!(!clean(reply).paints, "{reply}");
         }
         let red = clean("<p style=\"color:#c00\">Due today</p>");
-        assert!(red.paints, "a colour the writer chose still keeps the sheet");
+        assert!(
+            red.paints,
+            "a colour the writer chose still keeps the sheet"
+        );
     }
 
     #[test]

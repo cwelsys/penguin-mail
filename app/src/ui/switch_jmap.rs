@@ -72,10 +72,17 @@ pub fn present(
     let Some(address) = Address::parse(&account.email) else {
         return;
     };
-    let preview = core.demo.then(|| std::env::var("MAILRS_DEMO_SWITCH").ok()).flatten();
+    let preview = core
+        .demo
+        .then(|| std::env::var("MAILRS_DEMO_SWITCH").ok())
+        .flatten();
     let found = match preview.as_deref() {
         // A server that takes a password, which no demo account has.
-        Some("password") => JmapFound { provider: None, session_url: "https://mail.home.example/jmap/session".into(), ..found },
+        Some("password") => JmapFound {
+            provider: None,
+            session_url: "https://mail.home.example/jmap/session".into(),
+            ..found
+        },
         _ => found,
     };
     let proposal = add_account::jmap_proposal(found, None, &address);
@@ -110,7 +117,12 @@ pub fn present(
     let entry = adw::PreferencesGroup::new();
     entry.add(&secret);
     let browser = gtk::Button::builder()
-        .child(&adw::ButtonContent::builder().icon_name("penguin-mail-globe-symbolic").label(gettext("Sign In With Browser")).build())
+        .child(
+            &adw::ButtonContent::builder()
+                .icon_name("penguin-mail-globe-symbolic")
+                .label(gettext("Sign In With Browser"))
+                .build(),
+        )
         .css_classes(["pill", "switch-browser"])
         .build();
     crate::ui::name(&browser, &gettext("Sign In With Browser"));
@@ -120,8 +132,14 @@ pub fn present(
         .justify(gtk::Justification::Center)
         .css_classes(["dim-label", "switch-browser-line"])
         .build();
-    browser.update_property(&[gtk::accessible::Property::Description(&browser_line.label())]);
-    let browser_offer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).visible(false).build();
+    browser.update_property(&[gtk::accessible::Property::Description(
+        &browser_line.label(),
+    )]);
+    let browser_offer = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(8)
+        .visible(false)
+        .build();
     browser_offer.append(&browser);
     browser_offer.append(&browser_line);
     page.append(&browser_offer);
@@ -132,28 +150,64 @@ pub fn present(
     if let Some((heading, body, link)) = add_account::jmap_hint(&proposal, token) {
         page.append(&help_card(&heading, &body, link.as_ref()));
     }
-    let progress = gtk::Box::builder().spacing(10).halign(gtk::Align::Center).visible(false).css_classes(["switch-progress"]).build();
-    progress.append(&adw::Spinner::builder().width_request(24).height_request(24).build());
+    let progress = gtk::Box::builder()
+        .spacing(10)
+        .halign(gtk::Align::Center)
+        .visible(false)
+        .css_classes(["switch-progress"])
+        .build();
+    progress.append(
+        &adw::Spinner::builder()
+            .width_request(24)
+            .height_request(24)
+            .build(),
+    );
     progress.append(&gtk::Label::new(Some(&gettext("Matching your mail…"))));
     page.append(&progress);
     // The wait for the browser, in the button's place: a spinner and its
     // line, with Open Page Again and Cancel under them.
-    let again = gtk::Button::builder().label(gettext("Open Page Again")).css_classes(["pill"]).build();
-    let stop_wait = gtk::Button::builder().label(gettext("Cancel")).css_classes(["pill"]).build();
-    let buttons = gtk::Box::builder().spacing(12).halign(gtk::Align::Center).build();
+    let again = gtk::Button::builder()
+        .label(gettext("Open Page Again"))
+        .css_classes(["pill"])
+        .build();
+    let stop_wait = gtk::Button::builder()
+        .label(gettext("Cancel"))
+        .css_classes(["pill"])
+        .build();
+    let buttons = gtk::Box::builder()
+        .spacing(12)
+        .halign(gtk::Align::Center)
+        .build();
     buttons.append(&again);
     buttons.append(&stop_wait);
-    let wait_line = gtk::Box::builder().spacing(10).halign(gtk::Align::Center).css_classes(["switch-progress"]).build();
-    wait_line.append(&adw::Spinner::builder().width_request(24).height_request(24).build());
+    let wait_line = gtk::Box::builder()
+        .spacing(10)
+        .halign(gtk::Align::Center)
+        .css_classes(["switch-progress"])
+        .build();
+    wait_line.append(
+        &adw::Spinner::builder()
+            .width_request(24)
+            .height_request(24)
+            .build(),
+    );
     let provider = add_account::post::short_name(&proposal.provider_name);
     wait_line.append(
         &gtk::Label::builder()
-            .label(fill(&gettext("Finish signing in on {provider}'s page in your browser."), &[("provider", &provider)]))
+            .label(fill(
+                &gettext("Finish signing in on {provider}'s page in your browser."),
+                &[("provider", &provider)],
+            ))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build(),
     );
-    let waiting = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).visible(false).css_classes(["switch-waiting"]).build();
+    let waiting = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(14)
+        .visible(false)
+        .css_classes(["switch-waiting"])
+        .build();
     waiting.append(&wait_line);
     waiting.append(&buttons);
     page.insert_child_after(&waiting, Some(&browser_offer));
@@ -163,9 +217,16 @@ pub fn present(
         .propagate_natural_height(true)
         .child(&page)
         .build();
-    let switch = gtk::Button::builder().label(gettext("Switch")).css_classes(["suggested-action"]).sensitive(false).build();
+    let switch = gtk::Button::builder()
+        .label(gettext("Switch"))
+        .css_classes(["suggested-action"])
+        .sensitive(false)
+        .build();
     let cancel = gtk::Button::with_label(&gettext("Cancel"));
-    let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
+    let header = adw::HeaderBar::builder()
+        .show_start_title_buttons(false)
+        .show_end_title_buttons(false)
+        .build();
     header.pack_start(&cancel);
     header.pack_end(&switch);
     let toolbar = adw::ToolbarView::new();
@@ -182,7 +243,10 @@ pub fn present(
         .build();
     if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 400px") {
         let narrow = adw::Breakpoint::new(condition);
-        narrow.add_setters(&[(&page, "margin-start", NARROW_SIDE), (&page, "margin-end", NARROW_SIDE)]);
+        narrow.add_setters(&[
+            (&page, "margin-start", NARROW_SIDE),
+            (&page, "margin-end", NARROW_SIDE),
+        ]);
         dialog.add_breakpoint(narrow);
     }
 
@@ -261,10 +325,17 @@ pub fn present(
         }
     });
     // Sign In With Browser shows once the server says it takes one.
-    let (weak, offer) = (Rc::downgrade(&this), add_account::jmap_browser(&this.proposal));
-    let previewed = preview.as_deref().is_some_and(|stage| stage.starts_with("browser") || stage == "other-account");
+    let (weak, offer) = (
+        Rc::downgrade(&this),
+        add_account::jmap_browser(&this.proposal),
+    );
+    let previewed = preview
+        .as_deref()
+        .is_some_and(|stage| stage.starts_with("browser") || stage == "other-account");
     glib::spawn_future_local(async move {
-        let Some(core) = weak.upgrade().map(|this| Rc::clone(&this.core)) else { return };
+        let Some(core) = weak.upgrade().map(|this| Rc::clone(&this.core)) else {
+            return;
+        };
         let ready = previewed || core.jmap_browser_ready(offer).await;
         if let Some(this) = weak.upgrade()
             && ready
@@ -292,11 +363,14 @@ pub fn present(
     }
     if let Some(stage) = preview {
         if typed(&stage) {
-            this.secret.set_text(&"x".repeat(if this.token { 24 } else { 12 }));
+            this.secret
+                .set_text(&"x".repeat(if this.token { 24 } else { 12 }));
             this.secret.grab_focus();
         }
         // After the dialog has mapped and settled its own focus.
-        glib::timeout_add_local_once(std::time::Duration::from_millis(600), move || this.preview(&stage));
+        glib::timeout_add_local_once(std::time::Duration::from_millis(600), move || {
+            this.preview(&stage)
+        });
     }
 }
 
@@ -308,7 +382,12 @@ fn info_group(title: &str, rows: &[SwitchRow]) -> adw::PreferencesGroup {
         shown.add_css_class("switch-info");
         shown.set_title(&row.title);
         shown.set_subtitle(&row.subtitle);
-        shown.add_prefix(&gtk::Image::builder().icon_name(row.icon).css_classes(["dim-label"]).build());
+        shown.add_prefix(
+            &gtk::Image::builder()
+                .icon_name(row.icon)
+                .css_classes(["dim-label"])
+                .build(),
+        );
         group.add(&shown);
     }
     group
@@ -317,15 +396,30 @@ fn info_group(title: &str, rows: &[SwitchRow]) -> adw::PreferencesGroup {
 /// The provider's advice on making a token, in a tinted card, with the
 /// page that explains it.
 fn help_card(heading: &str, body: &str, link: Option<&add_account::Link>) -> gtk::Box {
-    let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["switch-help"]).build();
+    let card = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["switch-help"])
+        .build();
     let label = |text: &str, classes: &[&str]| {
-        gtk::Label::builder().label(text).wrap(true).xalign(0.0).css_classes(classes.to_vec()).build()
+        gtk::Label::builder()
+            .label(text)
+            .wrap(true)
+            .xalign(0.0)
+            .css_classes(classes.to_vec())
+            .build()
     };
     card.append(&label(heading, &["switch-help-title"]));
     card.append(&label(body, &["switch-help-body", "dim-label"]));
     if let Some(link) = link {
-        let content = adw::ButtonContent::builder().icon_name("adw-external-link-symbolic").label(&link.label).build();
-        let button = gtk::LinkButton::builder().uri(&link.url).halign(gtk::Align::Start).css_classes(["switch-help-link"]).build();
+        let content = adw::ButtonContent::builder()
+            .icon_name("adw-external-link-symbolic")
+            .label(&link.label)
+            .build();
+        let button = gtk::LinkButton::builder()
+            .uri(&link.url)
+            .halign(gtk::Align::Start)
+            .css_classes(["switch-help-link"])
+            .build();
         button.set_child(Some(&content));
         crate::ui::name(&button, &link.label);
         card.append(&button);
@@ -338,7 +432,8 @@ impl Dialog {
     /// under them, and lights them again after it.
     fn running(&self, on: bool) {
         self.secret.set_sensitive(!on);
-        self.switch.set_sensitive(!on && !self.secret.text().is_empty());
+        self.switch
+            .set_sensitive(!on && !self.secret.text().is_empty());
         self.browser.set_sensitive(!on);
         self.cancel.set_sensitive(!on);
         self.progress.set_visible(on);
@@ -412,7 +507,10 @@ impl Dialog {
 
     fn switch_with(self: &Rc<Self>, how: SwitchSignIn) {
         self.running(true);
-        self.secret.upcast_ref::<gtk::Widget>().announce(&gettext("Matching your mail…"), gtk::AccessibleAnnouncementPriority::Medium);
+        self.secret.upcast_ref::<gtk::Widget>().announce(
+            &gettext("Matching your mail…"),
+            gtk::AccessibleAnnouncementPriority::Medium,
+        );
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             match this.core.switch_to_jmap(this.account.clone(), how).await {
@@ -436,7 +534,8 @@ impl Dialog {
     /// dialog can close, which ends the wait.
     fn waiting_for_browser(&self, on: bool) {
         self.secret.set_sensitive(!on);
-        self.switch.set_sensitive(!on && !self.secret.text().is_empty());
+        self.switch
+            .set_sensitive(!on && !self.secret.text().is_empty());
         self.browser.set_sensitive(!on);
         self.browser_offer.set_visible(!on);
         self.waiting.set_visible(on);
@@ -455,8 +554,13 @@ impl Dialog {
         self.clear_failure();
         self.waiting_for_browser(true);
         let provider = add_account::post::short_name(&self.proposal.provider_name);
-        let line = fill(&gettext("Finish signing in on {provider}'s page in your browser."), &[("provider", &provider)]);
-        self.browser.upcast_ref::<gtk::Widget>().announce(&line, gtk::AccessibleAnnouncementPriority::Medium);
+        let line = fill(
+            &gettext("Finish signing in on {provider}'s page in your browser."),
+            &[("provider", &provider)],
+        );
+        self.browser
+            .upcast_ref::<gtk::Widget>()
+            .announce(&line, gtk::AccessibleAnnouncementPriority::Medium);
         let (urls, opened) = async_channel::unbounded::<String>();
         let (cancel, canceled) = async_channel::bounded::<()>(1);
         self.browser_cancel.replace(Some(cancel));
@@ -471,7 +575,10 @@ impl Dialog {
         let this = Rc::clone(self);
         let offer = add_account::jmap_browser(&self.proposal);
         glib::spawn_future_local(async move {
-            let granted = this.core.switch_grant(offer, this.account.email.clone(), urls, canceled).await;
+            let granted = this
+                .core
+                .switch_grant(offer, this.account.email.clone(), urls, canceled)
+                .await;
             this.browser_cancel.borrow_mut().take();
             this.browser_url.replace(None);
             this.waiting_for_browser(false);
@@ -492,7 +599,11 @@ impl Dialog {
 
     fn open_page(&self) {
         if let Some(url) = self.browser_url.borrow().clone() {
-            gtk::UriLauncher::new(&url).launch(self.dialog.root().and_downcast::<gtk::Window>().as_ref(), gio::Cancellable::NONE, |_| {});
+            gtk::UriLauncher::new(&url).launch(
+                self.dialog.root().and_downcast::<gtk::Window>().as_ref(),
+                gio::Cancellable::NONE,
+                |_| {},
+            );
         }
     }
 
@@ -521,7 +632,10 @@ impl Dialog {
             .xalign(0.0)
             .css_classes(["switch-toast"])
             .build();
-        let toast = adw::Toast::builder().custom_title(&words).timeout(0).build();
+        let toast = adw::Toast::builder()
+            .custom_title(&words)
+            .timeout(0)
+            .build();
         if again {
             toast.set_button_label(Some(&gettext("Try Again")));
             let weak = Rc::downgrade(self);
@@ -552,7 +666,9 @@ impl Dialog {
             let adjustment = scrolled.vadjustment();
             adjustment.set_value(adjustment.upper() - adjustment.page_size());
         });
-        self.secret.upcast_ref::<gtk::Widget>().announce(line, gtk::AccessibleAnnouncementPriority::High);
+        self.secret
+            .upcast_ref::<gtk::Widget>()
+            .announce(line, gtk::AccessibleAnnouncementPriority::High);
         self.focus_secret();
     }
 
@@ -585,7 +701,9 @@ impl Dialog {
             }
             "browser-waiting" => self.waiting_for_browser(true),
             "browser-failed" => {
-                let refused = anyhow::Error::new(mailrs_sync::sign_in::BrowserSignInError::Jmap(mailrs_jmap::JmapError::Unauthorized));
+                let refused = anyhow::Error::new(mailrs_sync::sign_in::BrowserSignInError::Jmap(
+                    mailrs_jmap::JmapError::Unauthorized,
+                ));
                 let provider = add_account::post::short_name(&self.proposal.provider_name);
                 if let Some(failed) = offered::switch_browser_failure(&refused, &provider) {
                     self.fail(&failed.line, failed.again);
@@ -599,7 +717,12 @@ impl Dialog {
             "done" | "done-rules" => {
                 self.dialog.close();
                 let rules_off = if stage == "done-rules" { 2 } else { 0 };
-                (self.done)(Switched { account: self.account.clone(), kept: 0, dropped: 0, rules_off });
+                (self.done)(Switched {
+                    account: self.account.clone(),
+                    kept: 0,
+                    dropped: 0,
+                    rules_off,
+                });
             }
             // A rule the switch turned off, or one it left running here
             // beside the server's script, as the Rules dialog lists it.
@@ -609,7 +732,10 @@ impl Dialog {
                 glib::spawn_future_local(async move {
                     let rule = mailrs_domain::Filter {
                         id: Some("local-demo-allotment".into()),
-                        criteria: mailrs_domain::FilterCriteria { subject: Some("allotment".into()), ..Default::default() },
+                        criteria: mailrs_domain::FilterCriteria {
+                            subject: Some("allotment".into()),
+                            ..Default::default()
+                        },
                         action: mailrs_domain::FilterAction {
                             add: vec![mailrs_domain::MailSet::Mailbox("Projects/Allotment".into())],
                             ..Default::default()
@@ -617,8 +743,16 @@ impl Dialog {
                         off,
                         ..Default::default()
                     };
-                    if this.core.db.write(move |c| mailrs_store::local_rules::add(c, id, &rule)).await.is_ok() {
-                        let _ = this.dialog.activate_action("win.account-rules", Some(&id.to_variant()));
+                    if this
+                        .core
+                        .db
+                        .write(move |c| mailrs_store::local_rules::add(c, id, &rule))
+                        .await
+                        .is_ok()
+                    {
+                        let _ = this
+                            .dialog
+                            .activate_action("win.account-rules", Some(&id.to_variant()));
                         this.dialog.close();
                     }
                 });

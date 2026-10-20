@@ -118,7 +118,10 @@ pub(crate) mod tests {
         let raw = b"From: me@example.org\r\nTo: \"Doe, Jane\" <jane@example.org>, bo@example.org\r\n\r\nHi";
         assert_eq!(
             first_recipient(raw),
-            Some(Address { name: Some("Doe, Jane".into()), email: "jane@example.org".into() })
+            Some(Address {
+                name: Some("Doe, Jane".into()),
+                email: "jane@example.org".into()
+            })
         );
         assert_eq!(first_recipient(b"From: me@example.org\r\n\r\nHi"), None);
     }

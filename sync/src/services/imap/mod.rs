@@ -14,7 +14,7 @@ mod mailboxes;
 mod outgoing;
 mod search;
 mod state;
-mod storage;
+pub(crate) mod storage;
 mod syntax;
 mod window;
 mod writes;
@@ -23,8 +23,8 @@ pub use api::{ImapApi, Submit};
 pub(crate) use outgoing::{envelope_of, submit_over, without_bcc};
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::ops::RangeInclusive;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use mailrs_domain::mailbox::keyword;
@@ -36,7 +36,8 @@ use tokio::time::Instant;
 
 use super::{
     Backfill, Changes, Found, IdentityService, KeywordsPage, MailBackend, MailCapabilities,
-    RawMessage, Relocated, RemoteRef, SearchQuery, SendAsAddress, Storage, SyncState, Unapplied, Want,
+    RawMessage, Relocated, RemoteRef, SearchQuery, SendAsAddress, Storage, SyncState, Unapplied,
+    Want,
 };
 use crate::api::{DraftRef, SavedDraft};
 use crate::{BackendError, MailOp};
@@ -100,6 +101,10 @@ struct Known {
     /// always keeps in step. Bounded by how many mailboxes a person opens,
     /// not by their size; a restart rebuilds it from the sync state.
     followed: BTreeSet<String>,
+    /// Foreground loads started this run. A saved feed cursor follows a
+    /// mailbox without proving its headers reached the store, so restoring
+    /// that cursor never adds it here. Failed tentative loads are removed.
+    opened: BTreeSet<String>,
     /// Where a window listing last left a mailbox, for a mailbox the feed
     /// has not kept state for yet: a mailbox just followed starts from
     /// here rather than from whatever the server holds at the next look,
@@ -160,6 +165,10 @@ impl Known {
         let delimiter = self.delimiter;
         let moved = |name: &String| renamed_name(name, from, to, delimiter);
         self.followed = std::mem::take(&mut self.followed)
+            .into_iter()
+            .map(|name| moved(&name).unwrap_or(name))
+            .collect();
+        self.opened = std::mem::take(&mut self.opened)
             .into_iter()
             .map(|name| moved(&name).unwrap_or(name))
             .collect();
@@ -265,9 +274,10 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
     /// server store there. Every mailbox can differ, so a look or a write
     /// in one never decides for another.
     fn note_keywords(&self, mailbox: &str, selected: &Selected) {
-        self.known()
-            .keywords
-            .insert(mailbox.to_string(), keywords::stored_keywords(&selected.permanent_flags));
+        self.known().keywords.insert(
+            mailbox.to_string(),
+            keywords::stored_keywords(&selected.permanent_flags),
+        );
     }
 
     /// The keywords `mailbox`'s own PERMANENTFLAGS store, or the system
@@ -332,6 +342,7 @@ impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
             batch_limit: BATCH_LIMIT,
             keywords: self.stored_keywords("INBOX"),
             native_search: false,
+            paged_mailboxes: true,
             renames: true,
             restates: false,
             tags: false,
@@ -377,15 +388,20 @@ impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
             return Ok(HashMap::new());
         };
         listed?;
-        let folders: Vec<_> = self.known().folders.iter()
+        let folders: Vec<_> = self
+            .known()
+            .folders
+            .iter()
             .filter(|f| !f.parent_only)
             .map(|f| (f.id.clone(), f.role))
             .collect();
         let mut counts = HashMap::new();
-        let mut replies = stream::iter(folders).map(|(id, role)| async move {
-            let count = timeout(limit, self.api.unread(&id)).await;
-            (id, role, count)
-        }).buffer_unordered(2);
+        let mut replies = stream::iter(folders)
+            .map(|(id, role)| async move {
+                let count = timeout(limit, self.api.unread(&id)).await;
+                (id, role, count)
+            })
+            .buffer_unordered(2);
         while let Some((id, role, count)) = replies.next().await {
             match count {
                 Ok(Ok(count)) => {
@@ -446,7 +462,16 @@ impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
     }
 
     fn follow(&self, mailbox: &str) -> bool {
-        self.known().followed.insert(mailbox.to_string())
+        let mut known = self.known();
+        known.followed.insert(mailbox.to_string());
+        known.opened.insert(mailbox.to_string())
+    }
+
+    fn reset_follow(&self, mailbox: &str) {
+        let mut known = self.known();
+        known.followed.remove(mailbox);
+        known.opened.remove(mailbox);
+        known.recent.remove(mailbox);
     }
 
     fn set_window_open(&self, open: bool) {
@@ -517,6 +542,15 @@ impl<I: ImapApi, S: Submit> MailBackend for Imap<I, S> {
         limit: usize,
     ) -> Result<Vec<RemoteRef>, BackendError> {
         self.search_server(query, limit).await
+    }
+
+    async fn mailbox_page(
+        &self,
+        mailbox: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Backfill, BackendError> {
+        self.browse_page(mailbox, cursor, limit).await
     }
 
     async fn find_sent(&self, message_id: &str) -> Result<Option<String>, BackendError> {
@@ -624,7 +658,25 @@ impl<I: ImapApi, S: Submit> IdentityService for Imap<I, S> {
 
 #[cfg(test)]
 mod tests {
-    use super::renamed_name;
+    use super::{Known, renamed_name};
+
+    #[test]
+    fn a_rename_keeps_successful_nested_loads_under_their_new_names() {
+        let mut known = Known {
+            delimiter: Some('/'),
+            ..Default::default()
+        };
+        known
+            .followed
+            .extend(["Projects".into(), "Projects/Clients".into(), "Other".into()]);
+        known.opened = known.followed.clone();
+        known.rename("Projects", "Work");
+        assert_eq!(
+            known.followed,
+            ["Other".into(), "Work".into(), "Work/Clients".into()].into()
+        );
+        assert_eq!(known.opened, known.followed);
+    }
 
     #[test]
     fn a_rename_takes_the_nested_mailboxes_along_and_nothing_else() {

@@ -46,7 +46,9 @@ pub fn route(key: gdk::Key, state: gdk::ModifierType, focus: Focus) -> Option<Li
 /// The list's own reading of `key`, or `None` for a key it leaves to
 /// GTK and the window, such as Ctrl+Tab or a letter.
 pub fn list_key(key: gdk::Key, state: gdk::ModifierType) -> Option<ListKey> {
-    let chord = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK;
+    let chord = gdk::ModifierType::CONTROL_MASK
+        | gdk::ModifierType::ALT_MASK
+        | gdk::ModifierType::SUPER_MASK;
     if state.intersects(chord) {
         return None;
     }
@@ -58,9 +60,11 @@ pub fn list_key(key: gdk::Key, state: gdk::ModifierType) -> Option<ListKey> {
         gdk::Key::ISO_Left_Tab => Some(ListKey::Leave { forward: false }),
         gdk::Key::Down | gdk::Key::KP_Down => Some(ListKey::Step(1)),
         gdk::Key::Up | gdk::Key::KP_Up => Some(ListKey::Step(-1)),
-        gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::ISO_Enter | gdk::Key::space | gdk::Key::KP_Space => {
-            Some(ListKey::Open)
-        }
+        gdk::Key::Return
+        | gdk::Key::KP_Enter
+        | gdk::Key::ISO_Enter
+        | gdk::Key::space
+        | gdk::Key::KP_Space => Some(ListKey::Open),
         _ => None,
     }
 }
@@ -102,7 +106,11 @@ pub fn step_to(reachable: &[bool], from: usize, step: i32) -> Option<usize> {
     let mut at = from;
     let mut left = step.unsigned_abs();
     while left > 0 {
-        let next = if step > 0 { at.checked_add(1) } else { at.checked_sub(1) };
+        let next = if step > 0 {
+            at.checked_add(1)
+        } else {
+            at.checked_sub(1)
+        };
         let next = next.filter(|n| *n < reachable.len())?;
         at = next;
         if reachable[at] {
@@ -119,7 +127,10 @@ mod tests {
     #[test]
     fn tab_and_shift_tab_leave_the_list() {
         let none = gdk::ModifierType::empty();
-        assert_eq!(list_key(gdk::Key::Tab, none), Some(ListKey::Leave { forward: true }));
+        assert_eq!(
+            list_key(gdk::Key::Tab, none),
+            Some(ListKey::Leave { forward: true })
+        );
         assert_eq!(
             list_key(gdk::Key::ISO_Left_Tab, gdk::ModifierType::SHIFT_MASK),
             Some(ListKey::Leave { forward: false })
@@ -139,14 +150,23 @@ mod tests {
     fn the_menu_key_and_shift_f10_open_the_rows_menu() {
         // The row's options button is no longer a Tab stop of its own, so
         // the keyboard reaches its menu this way.
-        assert_eq!(list_key(gdk::Key::Menu, gdk::ModifierType::empty()), Some(ListKey::Menu));
-        assert_eq!(list_key(gdk::Key::F10, gdk::ModifierType::SHIFT_MASK), Some(ListKey::Menu));
+        assert_eq!(
+            list_key(gdk::Key::Menu, gdk::ModifierType::empty()),
+            Some(ListKey::Menu)
+        );
+        assert_eq!(
+            list_key(gdk::Key::F10, gdk::ModifierType::SHIFT_MASK),
+            Some(ListKey::Menu)
+        );
         assert_eq!(list_key(gdk::Key::F10, gdk::ModifierType::empty()), None);
     }
 
     #[test]
     fn a_chord_or_a_letter_is_left_to_the_window() {
-        assert_eq!(list_key(gdk::Key::Tab, gdk::ModifierType::CONTROL_MASK), None);
+        assert_eq!(
+            list_key(gdk::Key::Tab, gdk::ModifierType::CONTROL_MASK),
+            None
+        );
         assert_eq!(list_key(gdk::Key::e, gdk::ModifierType::empty()), None);
     }
 
@@ -156,22 +176,45 @@ mod tests {
         // pass the list's capture handler first. The arrows must move
         // between the menu's items, and Tab must stay in the menu.
         let none = gdk::ModifierType::empty();
-        for key in [gdk::Key::Down, gdk::Key::Up, gdk::Key::Tab, gdk::Key::Return, gdk::Key::Menu] {
+        for key in [
+            gdk::Key::Down,
+            gdk::Key::Up,
+            gdk::Key::Tab,
+            gdk::Key::Return,
+            gdk::Key::Menu,
+        ] {
             assert_eq!(route(key, none, Focus::InPopover), None, "{key:?}");
         }
-        assert_eq!(route(gdk::Key::Down, none, Focus::InList), Some(ListKey::Step(1)));
+        assert_eq!(
+            route(gdk::Key::Down, none, Focus::InList),
+            Some(ListKey::Step(1))
+        );
     }
 
     #[test]
     fn a_group_row_takes_the_focus_and_enter_opens_its_menu() {
         // A server folder that holds only folders opens no mailbox, but
         // its menu has Rename, New Folder Inside, Move and Delete.
-        let group = Row { shown: true, sensitive: true, opens: false, group: true };
+        let group = Row {
+            shown: true,
+            sensitive: true,
+            opens: false,
+            group: true,
+        };
         assert!(reachable(group));
         assert_eq!(on_enter(group), Some(ListKey::Menu));
-        let title = Row { shown: true, sensitive: true, opens: false, group: false };
+        let title = Row {
+            shown: true,
+            sensitive: true,
+            opens: false,
+            group: false,
+        };
         assert!(!reachable(title));
-        let mailbox = Row { opens: true, group: false, ..title };
+        let mailbox = Row {
+            opens: true,
+            group: false,
+            ..title
+        };
         assert_eq!(on_enter(mailbox), Some(ListKey::Open));
     }
 

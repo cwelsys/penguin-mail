@@ -1,6 +1,8 @@
 //! Accounts and their sync cursors.
 
-use mailrs_domain::{Account, AccountId, AccountState, EpochMillis, Provider, RemoveSetting, SignInClient};
+use mailrs_domain::{
+    Account, AccountId, AccountState, EpochMillis, Provider, RemoveSetting, SignInClient,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{Result, StoreError};
@@ -33,18 +35,39 @@ pub fn insert_account(conn: &Connection, email: &str, now: EpochMillis) -> Resul
     )?)
 }
 
+/// Every account the store holds, oldest first. A row this build cannot
+/// read is left out and logged: one a newer build added for a provider
+/// or a state this one does not know. Going back to an older build then
+/// costs that account alone, and the others keep syncing.
 pub fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, email, state, provider, provider_name FROM accounts ORDER BY id",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, email, state, provider, provider_name FROM accounts ORDER BY id")?;
     let rows = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ))
     })?;
-    rows.map(|row| {
+    let mut accounts = Vec::new();
+    for row in rows {
         let (id, email, state, provider, provider_name) = row?;
-        to_account(id, email, state, provider, provider_name)
-    })
-    .collect()
+        match to_account(id, email, state, provider, provider_name) {
+            Ok(account) => accounts.push(account),
+            Err(StoreError::Corrupt { column, value }) => {
+                tracing::warn!(
+                    account = id,
+                    column,
+                    value,
+                    "left out an account this build cannot read"
+                );
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(accounts)
 }
 
 /// The account by id, such as `CalendarCopy` reads to name a Google
@@ -55,7 +78,15 @@ pub fn account(conn: &Connection, id: AccountId) -> Result<Option<Account>> {
         .query_row(
             "SELECT id, email, state, provider, provider_name FROM accounts WHERE id = ?1",
             params![id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()?;
     row.map(|(id, email, state, provider, provider_name)| {
@@ -69,7 +100,15 @@ pub fn account_by_email(conn: &Connection, email: &str) -> Result<Option<Account
         .query_row(
             "SELECT id, email, state, provider, provider_name FROM accounts WHERE email = ?1",
             params![email],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()?;
     row.map(|(id, email, state, provider, provider_name)| {
@@ -102,6 +141,26 @@ pub fn insert_imap_account(
     conn.execute(
         "INSERT INTO accounts (email, added_at, provider, provider_name) VALUES (?1, ?2, ?3, ?4)",
         params![email, now, Provider::Imap.as_str(), provider_name],
+    )?;
+    Ok(Some(conn.last_insert_rowid()))
+}
+
+/// Adds a calendar account under `name`. `None` when an account holds
+/// the name already, a calendar account too: it stays as it is, and the
+/// caller decides whether it is the login being signed in to. So `Some`
+/// is always a row this call added. The name stands in the column a mail
+/// account keeps its address in, which keeps it unique.
+pub fn insert_caldav_account(
+    conn: &Connection,
+    name: &str,
+    now: EpochMillis,
+) -> Result<Option<AccountId>> {
+    if account_by_email(conn, name)?.is_some() {
+        return Ok(None);
+    }
+    conn.execute(
+        "INSERT INTO accounts (email, added_at, provider) VALUES (?1, ?2, ?3)",
+        params![name, now, Provider::CalDav.as_str()],
     )?;
     Ok(Some(conn.last_insert_rowid()))
 }
@@ -172,7 +231,10 @@ pub fn pop3_remove(conn: &Connection, id: AccountId) -> Result<RemoveSetting> {
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let days = days.and_then(|d| u32::try_from(d).ok());
-    RemoveSetting::from_columns(&mode, days).ok_or(StoreError::Corrupt { column: "accounts.pop3_remove", value: mode })
+    RemoveSetting::from_columns(&mode, days).ok_or(StoreError::Corrupt {
+        column: "accounts.pop3_remove",
+        value: mode,
+    })
 }
 
 pub fn set_pop3_remove(conn: &Connection, id: AccountId, setting: RemoveSetting) -> Result<()> {
@@ -375,9 +437,7 @@ pub fn consent(conn: &Connection, id: AccountId) -> Result<Consent> {
 /// Every account's consent, keyed by id. The window's Grant Access
 /// banner reads this once for every account rather than once per
 /// account.
-pub fn all_consent(
-    conn: &Connection,
-) -> Result<std::collections::HashMap<AccountId, Consent>> {
+pub fn all_consent(conn: &Connection) -> Result<std::collections::HashMap<AccountId, Consent>> {
     let mut stmt = conn.prepare("SELECT id, granted_scopes, asked_scopes FROM accounts")?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -442,6 +502,20 @@ mod tests {
     use crate::open_in_memory;
 
     use super::*;
+
+    #[test]
+    fn an_account_this_build_cannot_read_leaves_the_others_listed() {
+        let conn = open_in_memory().unwrap();
+        let kept = insert_account(&conn, "me@example.com", 0).unwrap();
+        let newer = insert_account(&conn, "you@example.com", 0).unwrap();
+        conn.execute(
+            "UPDATE accounts SET provider = 'carrier-pigeon' WHERE id = ?1",
+            params![newer],
+        )
+        .unwrap();
+        let listed = list_accounts(&conn).unwrap();
+        assert_eq!(listed.iter().map(|a| a.id).collect::<Vec<_>>(), [kept]);
+    }
 
     #[test]
     fn consent_round_trips() {

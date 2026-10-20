@@ -32,7 +32,9 @@ const STREAM_HELD: Duration = Duration::from_secs(3 * PING_SECONDS as u64);
 /// The wait before reopening the stream after `failures` failures in a
 /// row before this one.
 fn watch_retry(failures: u32) -> Duration {
-    WATCH_RETRY.saturating_mul(1u32 << failures.min(8)).min(WATCH_RETRY_CAP)
+    WATCH_RETRY
+        .saturating_mul(1u32 << failures.min(8))
+        .min(WATCH_RETRY_CAP)
 }
 
 fn slow_poll(tray_only: bool) -> Duration {
@@ -45,7 +47,9 @@ fn slow_poll(tray_only: bool) -> Duration {
 impl<J: JmapApi> Jmap<J> {
     pub(super) fn poll_every(&self) -> Duration {
         let known = self.known();
-        let held = known.push_opened.is_some_and(|opened| opened.elapsed() >= STREAM_HELD);
+        let held = known
+            .push_opened
+            .is_some_and(|opened| opened.elapsed() >= STREAM_HELD);
         match known.push == Some(true) || held {
             true => slow_poll(!known.window_open),
             false => NO_PUSH_POLL,
@@ -70,7 +74,11 @@ impl<J: JmapApi> Jmap<J> {
         }
         self.known().push_opened = Some(Instant::now());
         let pushed = self.api().push().await;
-        let held = self.known().push_opened.take().is_some_and(|opened| opened.elapsed() >= STREAM_HELD);
+        let held = self
+            .known()
+            .push_opened
+            .take()
+            .is_some_and(|opened| opened.elapsed() >= STREAM_HELD);
         match pushed {
             Ok(Pushed::Changed) => {
                 let mut known = self.known();
@@ -94,7 +102,10 @@ impl<J: JmapApi> Jmap<J> {
                     known.push_failures = known.push_failures.saturating_add(1);
                     known.push_failures
                 };
-                tracing::warn!(failures, "the push stream failed; looking at the account instead");
+                tracing::warn!(
+                    failures,
+                    "the push stream failed; looking at the account instead"
+                );
             }
         }
     }

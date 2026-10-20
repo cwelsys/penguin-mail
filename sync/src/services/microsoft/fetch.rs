@@ -26,21 +26,39 @@ const MOST_IDS: usize = 20_000;
 
 fn address(recipient: &Recipient) -> Option<Address> {
     let email = recipient.email_address.address.clone()?;
-    Some(Address { name: recipient.email_address.name.clone().filter(|n| !n.is_empty()), email })
+    Some(Address {
+        name: recipient
+            .email_address
+            .name
+            .clone()
+            .filter(|n| !n.is_empty()),
+        email,
+    })
 }
 
 fn remote_ref(message: &Message) -> RemoteRef {
     RemoteRef {
         id: message.id.clone(),
-        thread_id: message.conversation_id.clone().unwrap_or_else(|| message.id.clone()),
+        thread_id: message
+            .conversation_id
+            .clone()
+            .unwrap_or_else(|| message.id.clone()),
     }
 }
 
 impl<G: GraphApi> Microsoft<G> {
     pub(super) fn meta_of(&self, message: &Message) -> MessageMeta {
         let folder = message.parent_folder_id.clone().unwrap_or_default();
-        let role = self.known().roles.iter().find(|(_, id)| **id == folder).map(|(r, _)| *r);
-        let mut held = Memberships { mailboxes: vec![folder], ..Memberships::default() };
+        let role = self
+            .known()
+            .roles
+            .iter()
+            .find(|(_, id)| **id == folder)
+            .map(|(r, _)| *r);
+        let mut held = Memberships {
+            mailboxes: vec![folder],
+            ..Memberships::default()
+        };
         if message.is_read == Some(true) {
             held.keywords.push(SEEN.into());
         }
@@ -53,12 +71,16 @@ impl<G: GraphApi> Microsoft<G> {
         if message.is_other() {
             held.categories.push(category::OTHER.into());
         }
-        held.mailboxes.extend(message.categories.iter().flatten().map(|c| tag_id(c)));
+        held.mailboxes
+            .extend(message.categories.iter().flatten().map(|c| tag_id(c)));
         MessageMeta {
             account_id: 0,
             id: message.id.clone(),
             thread_id: remote_ref(message).thread_id,
-            rfc822_msgid: message.internet_message_id.as_deref().map(|m| m.trim().trim_matches(['<', '>']).to_string()),
+            rfc822_msgid: message
+                .internet_message_id
+                .as_deref()
+                .map(|m| m.trim().trim_matches(['<', '>']).to_string()),
             from: message.from.as_ref().and_then(address),
             to: message.to_recipients.iter().filter_map(address).collect(),
             cc: message.cc_recipients.iter().filter_map(address).collect(),
@@ -66,7 +88,13 @@ impl<G: GraphApi> Microsoft<G> {
             date: message.received_millis().unwrap_or_default(),
             // Graph keeps the body's line breaks in the preview; a
             // preview is one paragraph wherever it is shown.
-            snippet: message.body_preview.as_deref().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" "),
+            snippet: message
+                .body_preview
+                .as_deref()
+                .unwrap_or_default()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
             // Without the size property the message goes by its
             // structure, as a size of 0 does.
             size: message.size().unwrap_or(0),
@@ -100,8 +128,15 @@ impl<G: GraphApi> Microsoft<G> {
         self.synced().await?;
         let mut found = Found::default();
         for thread in threads {
-            let listing = Listing { conversation: Some(thread.clone()), top: 100, fields: Fields::Meta, ..Listing::default() };
-            let metas = self.list_all(&listing, MOST_IN_THREAD, |m| self.meta_of(m)).await?;
+            let listing = Listing {
+                conversation: Some(thread.clone()),
+                top: 100,
+                fields: Fields::Meta,
+                ..Listing::default()
+            };
+            let metas = self
+                .list_all(&listing, MOST_IN_THREAD, |m| self.meta_of(m))
+                .await?;
             if metas.is_empty() {
                 found.gone_threads.push(thread);
                 continue;
@@ -113,11 +148,20 @@ impl<G: GraphApi> Microsoft<G> {
     }
 
     /// Every page of `listing`, mapped, up to `most` items.
-    async fn list_all<T>(&self, listing: &Listing, most: usize, map: impl Fn(&Message) -> T) -> Result<Vec<T>, BackendError> {
+    async fn list_all<T>(
+        &self,
+        listing: &Listing,
+        most: usize,
+        map: impl Fn(&Message) -> T,
+    ) -> Result<Vec<T>, BackendError> {
         let mut out = Vec::new();
         let mut next: Option<String> = None;
         loop {
-            let page = self.graph().list_messages(listing, next.as_deref()).await.map_err(backend)?;
+            let page = self
+                .graph()
+                .list_messages(listing, next.as_deref())
+                .await
+                .map_err(backend)?;
             out.extend(page.value.iter().map(&map));
             if out.len() >= most {
                 out.truncate(most);
@@ -131,20 +175,40 @@ impl<G: GraphApi> Microsoft<G> {
         }
     }
 
-    pub(super) async fn backfill_page(&self, days: i64, cursor: Option<&str>) -> Result<Backfill, BackendError> {
-        let listing = Listing { received_since: window_since(days), top: LIST_PAGE_SIZE, fields: Fields::Ids, ..Listing::default() };
+    pub(super) async fn backfill_page(
+        &self,
+        days: i64,
+        cursor: Option<&str>,
+    ) -> Result<Backfill, BackendError> {
+        let listing = Listing {
+            received_since: window_since(days),
+            top: LIST_PAGE_SIZE,
+            fields: Fields::Ids,
+            ..Listing::default()
+        };
         let page = match self.graph().list_messages(&listing, cursor).await {
             Ok(page) => page,
             // Graph no longer takes the page link it gave.
-            Err(GraphError::NotFound | GraphError::SyncStateLost | GraphError::Http { status: 400, .. }) if cursor.is_some() => {
+            Err(
+                GraphError::NotFound
+                | GraphError::SyncStateLost
+                | GraphError::Http { status: 400, .. },
+            ) if cursor.is_some() => {
                 return Err(BackendError::StateLost);
             }
             Err(err) => return Err(backend(err)),
         };
-        Ok(Backfill { refs: page.value.iter().map(remote_ref).collect(), next: page.next_link })
+        Ok(Backfill {
+            refs: page.value.iter().map(remote_ref).collect(),
+            next: page.next_link,
+        })
     }
 
-    pub(super) async fn ids_in(&self, days: Option<i64>, folder: Option<String>) -> Result<Vec<RemoteRef>, BackendError> {
+    pub(super) async fn ids_in(
+        &self,
+        days: Option<i64>,
+        folder: Option<String>,
+    ) -> Result<Vec<RemoteRef>, BackendError> {
         let since = days.and_then(window_since);
         // A category's tag id is no folder: Graph refuses it in a folder's
         // place, so a tag lists the whole mailbox filtered by its name.
@@ -152,7 +216,14 @@ impl<G: GraphApi> Microsoft<G> {
             Some(name) => (None, Some(name.to_string())),
             None => (folder, None),
         };
-        let listing = Listing { folder, category, received_since: since, top: 1000, fields: Fields::Ids, ..Listing::default() };
+        let listing = Listing {
+            folder,
+            category,
+            received_since: since,
+            top: 1000,
+            fields: Fields::Ids,
+            ..Listing::default()
+        };
         // Refused rather than cut, since a relist sweeps what it lacks.
         let ids = self.list_all(&listing, MOST_IDS + 1, remote_ref).await?;
         match ids.len() > MOST_IDS {
@@ -167,7 +238,12 @@ impl<G: GraphApi> Microsoft<G> {
     /// them all again each time.
     pub(super) async fn inbox_listing(&self) -> Result<Vec<RemoteRef>, BackendError> {
         let inbox = self.known().roles.get(&Role::Inbox).cloned();
-        let listing = Listing { folder: inbox, top: 1000, fields: Fields::Ids, ..Listing::default() };
+        let listing = Listing {
+            folder: inbox,
+            top: 1000,
+            fields: Fields::Ids,
+            ..Listing::default()
+        };
         let ids = self.list_all(&listing, MOST_IDS + 1, remote_ref).await?;
         match ids.len() > MOST_IDS {
             true => Err(BackendError::Unsupported),
@@ -185,15 +261,26 @@ impl<G: GraphApi> Microsoft<G> {
             top: 1,
             ..Listing::default()
         };
-        let page = self.graph().list_messages(&listing, None).await.map_err(backend)?;
+        let page = self
+            .graph()
+            .list_messages(&listing, None)
+            .await
+            .map_err(backend)?;
         Ok(page.value.into_iter().next().map(|m| m.id))
     }
 
     pub(super) async fn raws(&self, ids: &[String]) -> Result<Vec<RawMessage>, BackendError> {
         let mut raws = Vec::with_capacity(ids.len());
         for id in ids {
-            let bytes = self.graph().raw(id, RAW_FETCH_LIMIT).await.map_err(backend)?;
-            raws.push(RawMessage { id: id.clone(), bytes });
+            let bytes = self
+                .graph()
+                .raw(id, RAW_FETCH_LIMIT)
+                .await
+                .map_err(backend)?;
+            raws.push(RawMessage {
+                id: id.clone(),
+                bytes,
+            });
         }
         Ok(raws)
     }
@@ -223,7 +310,9 @@ impl<G: GraphApi> Microsoft<G> {
                 path,
                 mime_type: file.content_type.to_ascii_lowercase(),
                 filename: Some(file.name),
-                content_id: file.content_id.map(|c| c.trim_matches(['<', '>']).to_string()),
+                content_id: file
+                    .content_id
+                    .map(|c| c.trim_matches(['<', '>']).to_string()),
                 attachment: !file.is_inline,
                 size: file.size,
                 data: None,
@@ -233,7 +322,11 @@ impl<G: GraphApi> Microsoft<G> {
         self.remember(id, handles);
         Ok(Parts {
             headers: Vec::new(),
-            root: Part { mime_type: "multipart/mixed".into(), children, ..Part::default() },
+            root: Part {
+                mime_type: "multipart/mixed".into(),
+                children,
+                ..Part::default()
+            },
             incomplete: false,
         })
     }
@@ -243,6 +336,9 @@ impl<G: GraphApi> Microsoft<G> {
             self.structure(id).await?;
         }
         let attachment = self.remembered(id, path).ok_or(BackendError::NotFound)?;
-        self.graph().attachment(id, &attachment, PART_LIMIT).await.map_err(backend)
+        self.graph()
+            .attachment(id, &attachment, PART_LIMIT)
+            .await
+            .map_err(backend)
     }
 }

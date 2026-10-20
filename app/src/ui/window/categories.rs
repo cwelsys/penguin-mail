@@ -1,8 +1,8 @@
 //! The category switcher above an inbox and the Categorize Sender action.
 //! `mailrs_domain::Category` holds which Gmail labels each category means.
 
-use std::collections::HashMap;
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -119,7 +119,11 @@ impl CategoryBar {
             );
             let inline = badge_label(
                 "inline",
-                if worded { gtk::Align::Start } else { gtk::Align::Center },
+                if worded {
+                    gtk::Align::Start
+                } else {
+                    gtk::Align::Center
+                },
             );
             named.append(&inline);
             let name = slider(&named);
@@ -244,7 +248,8 @@ impl MainWindow {
             let weak = Rc::downgrade(self);
             bar.connect_chosen(move |category| {
                 let Some(win) = weak.upgrade() else { return };
-                win.listing.change(|screen| screen.choose_category(category));
+                win.listing
+                    .change(|screen| screen.choose_category(category));
             });
             bar.set_phone(self.nav.is_collapsed());
         }
@@ -261,7 +266,7 @@ impl MainWindow {
     /// categories on, and an account the mailbox lists sorts its inbox
     /// into Gmail's categories or into Focused and Other.
     pub(super) fn inbox_bar(&self, mailbox: &Mailbox) -> Option<InboxBar> {
-        let ids: Vec<AccountId> = self.accounts().iter().map(|a| a.id).collect();
+        let ids: Vec<AccountId> = self.mail_accounts().iter().map(|a| a.id).collect();
         crate::offered::inbox_bar(
             self.settings_with(|s| s.inbox_categories),
             mailbox,
@@ -291,9 +296,8 @@ impl MainWindow {
                 self.conversation.offer_categorize_sender(enabled);
             }
         }
-        self.conversation.set_categorize_choices(&crate::offered::categorize_choices(
-            self.offers(account_id),
-        ));
+        self.conversation
+            .set_categorize_choices(&crate::offered::categorize_choices(self.offers(account_id)));
     }
 
     /// Shows Gmail's categories or Focused and Other over the list, as

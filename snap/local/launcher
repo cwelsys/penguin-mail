@@ -7,7 +7,8 @@ arch=x86_64-linux-gnu
 export XDG_DATA_DIRS="$SNAP/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export GSETTINGS_SCHEMA_DIR="$SNAP/usr/share/glib-2.0/schemas"
 export GIO_MODULE_DIR="$SNAP/usr/lib/$arch/gio/modules"
-export LD_LIBRARY_PATH="$SNAP/usr/lib/$arch:$SNAP/usr/lib/$arch/webkitgtk-6.0/injected-bundle${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# libproxy's backend has an absolute runpath into /usr, outside the snap.
+export LD_LIBRARY_PATH="$SNAP/usr/lib/$arch:$SNAP/usr/lib/$arch/libproxy:$SNAP/usr/lib/$arch/webkitgtk-6.0/injected-bundle${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # Fontconfig reads the snap's own rules, as snapcraft's gnome extension
 # does. The host's /etc/fonts links its rules into a /usr the snap cannot

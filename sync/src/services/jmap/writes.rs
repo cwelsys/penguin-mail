@@ -55,7 +55,11 @@ impl Patch {
 }
 
 fn unapplied(taken: usize, error: BackendError) -> Unapplied {
-    Unapplied { taken, error, relocated: Vec::new() }
+    Unapplied {
+        taken,
+        error,
+        relocated: Vec::new(),
+    }
 }
 
 /// Puts `id` in or takes it out of the patch, inside a whole
@@ -69,7 +73,10 @@ fn put_mailbox(fields: &mut Map<String, Value>, id: &str, on: bool) {
         };
         return;
     }
-    fields.insert(format!("mailboxIds/{}", pointer(id)), if on { json!(true) } else { Value::Null });
+    fields.insert(
+        format!("mailboxIds/{}", pointer(id)),
+        if on { json!(true) } else { Value::Null },
+    );
 }
 
 fn set_whole(fields: &mut Map<String, Value>, id: &str) {
@@ -92,7 +99,9 @@ impl<J: JmapApi> Jmap<J> {
     fn patch_of(&self, ops: &[MailOp]) -> Result<Patch, BackendError> {
         let known = self.known();
         let role_id = |role: &Role| {
-            known.roles.get(role).cloned().ok_or_else(|| BackendError::Refused(gettext("The server has no mailbox for this.")))
+            known.roles.get(role).cloned().ok_or_else(|| {
+                BackendError::Refused(gettext("The server has no mailbox for this."))
+            })
         };
         let mut fields = Map::new();
         let mut places = Vec::new();
@@ -116,10 +125,15 @@ impl<J: JmapApi> Jmap<J> {
                     places.push(Place::Only(id.clone()));
                 }
                 MailOp::SetKeyword { keyword, on } => {
-                    fields.insert(format!("keywords/{}", pointer(keyword)), if *on { json!(true) } else { Value::Null });
+                    fields.insert(
+                        format!("keywords/{}", pointer(keyword)),
+                        if *on { json!(true) } else { Value::Null },
+                    );
                 }
                 MailOp::SetCategory { .. } => {
-                    return Err(BackendError::Refused(gettext("This server does not sort mail into categories.")));
+                    return Err(BackendError::Refused(gettext(
+                        "This server does not sort mail into categories.",
+                    )));
                 }
                 MailOp::Destroy => {}
             }
@@ -129,7 +143,11 @@ impl<J: JmapApi> Jmap<J> {
 
     /// Each message's patch: the write's own and, for a message it would
     /// take out of every mailbox, Archive in their place.
-    async fn updates_for(&self, chunk: &[String], patch: &Patch) -> Result<Map<String, Value>, BackendError> {
+    async fn updates_for(
+        &self,
+        chunk: &[String],
+        patch: &Patch,
+    ) -> Result<Map<String, Value>, BackendError> {
         let mut update = Map::new();
         if !patch.removes() {
             for id in chunk {
@@ -137,10 +155,19 @@ impl<J: JmapApi> Jmap<J> {
             }
             return Ok(update);
         }
-        let got = self.api().emails(chunk, &["id", "mailboxIds"]).await.map_err(backend)?;
+        let got = self
+            .api()
+            .emails(chunk, &["id", "mailboxIds"])
+            .await
+            .map_err(backend)?;
         let mut archive = self.known().roles.get(&Role::Archive).cloned();
         for email in got.list {
-            let now: BTreeSet<String> = email.mailbox_ids.iter().filter(|(_, on)| **on).map(|(id, _)| id.clone()).collect();
+            let now: BTreeSet<String> = email
+                .mailbox_ids
+                .iter()
+                .filter(|(_, on)| **on)
+                .map(|(id, _)| id.clone())
+                .collect();
             let mut fields = patch.fields.clone();
             if patch.end_in(&now).is_empty() {
                 if archive.is_none() {
@@ -156,23 +183,40 @@ impl<J: JmapApi> Jmap<J> {
         Ok(update)
     }
 
-    pub(super) async fn write(&self, messages: &[String], ops: &[MailOp]) -> Result<Vec<Relocated>, Unapplied> {
+    pub(super) async fn write(
+        &self,
+        messages: &[String],
+        ops: &[MailOp],
+    ) -> Result<Vec<Relocated>, Unapplied> {
         self.listed().await.map_err(|e| unapplied(0, e))?;
         let destroy = ops.iter().any(|op| matches!(op, MailOp::Destroy));
-        if ops.iter().any(|op| matches!(op, MailOp::MoveToRole(Role::Archive))) {
+        if ops
+            .iter()
+            .any(|op| matches!(op, MailOp::MoveToRole(Role::Archive)))
+        {
             self.ensure_archive().await.map_err(|e| unapplied(0, e))?;
         }
         let patch = match destroy {
             true => None,
             false => Some(self.patch_of(ops).map_err(|e| unapplied(0, e))?),
         };
-        let per_set = self.api().session().await.map_err(|e| unapplied(0, backend(e)))?.limits().max_objects_in_set.clamp(1, PER_SET);
+        let per_set = self
+            .api()
+            .session()
+            .await
+            .map_err(|e| unapplied(0, backend(e)))?
+            .limits()
+            .max_objects_in_set
+            .clamp(1, PER_SET);
         let mut taken = 0;
         for chunk in messages.chunks(per_set) {
             let answer = match &patch {
                 None => self.api().set_emails(&Map::new(), chunk).await,
                 Some(patch) => {
-                    let update = self.updates_for(chunk, patch).await.map_err(|e| unapplied(taken, e))?;
+                    let update = self
+                        .updates_for(chunk, patch)
+                        .await
+                        .map_err(|e| unapplied(taken, e))?;
                     self.api().set_emails(&update, &[]).await
                 }
             }

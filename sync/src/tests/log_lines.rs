@@ -9,38 +9,71 @@ use std::path::{Path, PathBuf};
 
 const MACROS: [&str; 5] = ["trace!(", "debug!(", "info!(", "warn!(", "error!("];
 const FORBIDDEN: [&str; 4] = ["email", "password", "token", "secret"];
-const SKIPPED: [&str; 6] = ["target", "tests", "packaging", "node_modules", ".git", ".claude"];
+const SKIPPED: [&str; 6] = [
+    "target",
+    "tests",
+    "packaging",
+    "node_modules",
+    ".git",
+    ".claude",
+];
 
 #[test]
 fn no_log_line_names_an_address_a_password_or_a_token() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut files = Vec::new();
     rust_files(&root, &mut files);
-    assert!(files.len() > 100, "found only {} source files under {}", files.len(), root.display());
+    assert!(
+        files.len() > 100,
+        "found only {} source files under {}",
+        files.len(),
+        root.display()
+    );
     let found: Vec<String> = files
         .iter()
         .filter_map(|file| Some((file, std::fs::read_to_string(file).ok()?)))
-        .flat_map(|(file, text)| offending(&text, &file.strip_prefix(&root).unwrap_or(file).display().to_string()))
+        .flat_map(|(file, text)| {
+            offending(
+                &text,
+                &file
+                    .strip_prefix(&root)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string(),
+            )
+        })
         .collect();
-    assert!(found.is_empty(), "log lines that name a secret or an address:\n{}", found.join("\n"));
+    assert!(
+        found.is_empty(),
+        "log lines that name a secret or an address:\n{}",
+        found.join("\n")
+    );
 }
 
 #[test]
 fn a_field_naming_an_address_is_found_and_the_message_is_not() {
     let text = "fn a() {\n    tracing::warn!(account = id, \"lost the refresh token\");\n    \
                 tracing::info!(\n        account = %account.email,\n        \"no client\"\n    );\n}\n";
-    assert_eq!(offending(text, "a.rs"), ["a.rs:3: info!( account = %account.email, \"\" )"]);
+    assert_eq!(
+        offending(text, "a.rs"),
+        ["a.rs:3: info!( account = %account.email, \"\" )"]
+    );
 }
 
 #[test]
 fn a_test_module_is_skipped_and_the_code_after_it_is_not() {
     let text = "#[cfg(test)]\nmod tests {\n    fn b() { tracing::info!(%email, \"{}\", '}'); }\n}\n\
                 fn c() { tracing::debug!(password = %p, \"é\"); }\n";
-    assert_eq!(offending(text, "c.rs"), ["c.rs:5: debug!(password = %p, \"\")"]);
+    assert_eq!(
+        offending(text, "c.rs"),
+        ["c.rs:5: debug!(password = %p, \"\")"]
+    );
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name();
@@ -67,11 +100,18 @@ fn offending(text: &str, shown: &str) -> Vec<String> {
                 continue;
             }
             let open = start + name.len() - 1;
-            let fields = without_strings(&product[open..closing(product.as_bytes(), open, b'(', b')')]);
-            if FORBIDDEN.iter().any(|word| fields.to_lowercase().contains(word)) {
+            let fields =
+                without_strings(&product[open..closing(product.as_bytes(), open, b'(', b')')]);
+            if FORBIDDEN
+                .iter()
+                .any(|word| fields.to_lowercase().contains(word))
+            {
                 let line = product[..start].matches('\n').count() + 1;
                 let call = format!("{}{fields}", name.trim_end_matches('('));
-                found.push(format!("{shown}:{line}: {}", call.split_whitespace().collect::<Vec<_>>().join(" ")));
+                found.push(format!(
+                    "{shown}:{line}: {}",
+                    call.split_whitespace().collect::<Vec<_>>().join(" ")
+                ));
             }
         }
     }
@@ -86,7 +126,9 @@ fn without_test_modules(text: &str) -> String {
     let mut bytes = text.as_bytes().to_vec();
     for (start, marker) in text.match_indices("#[cfg(test)]\nmod ") {
         let header = start + marker.len();
-        let Some(brace) = text[header..].find(['{', ';']).map(|i| header + i) else { continue };
+        let Some(brace) = text[header..].find(['{', ';']).map(|i| header + i) else {
+            continue;
+        };
         if bytes[brace] != b'{' {
             continue;
         }

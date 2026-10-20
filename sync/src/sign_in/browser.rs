@@ -11,8 +11,13 @@ use mailrs_graph::GraphError;
 use mailrs_jmap::JmapError;
 
 use super::own_client::OwnClientError;
-use super::{JmapSignInError, MicrosoftSignInError, NewMicrosoft, SignInError, google_signed_in, microsoft_signed_in};
-use crate::{AccountServices, Clients, Connector, SyncError, connect_account, connect_microsoft, now_millis};
+use super::{
+    JmapSignInError, MicrosoftSignInError, NewMicrosoft, SignInError, google_signed_in,
+    microsoft_signed_in,
+};
+use crate::{
+    AccountServices, Clients, Connector, SyncError, connect_account, connect_microsoft, now_millis,
+};
 
 /// A sign-in that runs on the provider's page in the browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,12 +28,13 @@ pub enum Browser {
 
 impl Browser {
     /// The browser sign-in an account of `provider` goes through, or
-    /// `None` for an IMAP or POP3 account, which signs in with a password.
+    /// `None` for an IMAP, POP3, JMAP or calendar account, which signs in
+    /// again through the Add Account form.
     pub fn of(provider: Provider) -> Option<Browser> {
         match provider {
             Provider::Gmail => Some(Browser::Google),
             Provider::Microsoft => Some(Browser::Microsoft),
-            Provider::Imap | Provider::Pop3 | Provider::Jmap => None,
+            Provider::Imap | Provider::Pop3 | Provider::Jmap | Provider::CalDav => None,
         }
     }
 }
@@ -55,10 +61,12 @@ impl Wanted {
 
     fn check(&self, signed_in: &str) -> Result<(), BrowserSignInError> {
         match self {
-            Wanted::Only(wanted) if !wanted.eq_ignore_ascii_case(signed_in) => Err(BrowserSignInError::OtherAddress {
-                signed_in: signed_in.to_string(),
-                wanted: wanted.clone(),
-            }),
+            Wanted::Only(wanted) if !wanted.eq_ignore_ascii_case(signed_in) => {
+                Err(BrowserSignInError::OtherAddress {
+                    signed_in: signed_in.to_string(),
+                    wanted: wanted.clone(),
+                })
+            }
             _ => Ok(()),
         }
     }
@@ -98,7 +106,12 @@ pub enum BrowserSignInError {
     NotOffered,
     /// The JMAP server signed in without a refresh token, so the account
     /// could not stay signed in.
-    #[error("{}", gettext("The server did not let Penguin Mail stay signed in. Sign in with a password or a token instead."))]
+    #[error(
+        "{}",
+        gettext(
+            "The server did not let Penguin Mail stay signed in. Sign in with a password or a token instead."
+        )
+    )]
     NoRefreshToken,
     /// Nobody came back from the browser within the wait.
     #[error("{}", gettext("Gave up waiting for the browser after ten minutes."))]
@@ -148,10 +161,12 @@ fn google_refused(err: &GmailError) -> String {
 
 fn microsoft_refused(err: &GraphError) -> String {
     match err {
-        GraphError::AdminApproval => gettext("Your organization's administrator must approve Penguin Mail."),
-        GraphError::Declined | GraphError::MailNotGranted => {
-            gettext("Penguin Mail cannot work without access to your mail. Sign in again and allow it.")
+        GraphError::AdminApproval => {
+            gettext("Your organization's administrator must approve Penguin Mail.")
         }
+        GraphError::Declined | GraphError::MailNotGranted => gettext(
+            "Penguin Mail cannot work without access to your mail. Sign in again and allow it.",
+        ),
         GraphError::MailboxOnPremises => gettext(
             "This mailbox is on your organization's own Exchange server, which Penguin Mail cannot reach.",
         ),
@@ -180,7 +195,9 @@ pub async fn in_browser(
 /// the own client the environment names, over the build's. Half an own
 /// client is an error rather than a quiet fall back to the build's,
 /// which the person set the variables to avoid.
-pub fn google_sign_in(clients: &Clients) -> Result<(OAuthClient, SignInClient), BrowserSignInError> {
+pub fn google_sign_in(
+    clients: &Clients,
+) -> Result<(OAuthClient, SignInClient), BrowserSignInError> {
     match &clients.own_google {
         Some(Ok(own)) => Ok((own.oauth(), SignInClient::Own)),
         Some(Err(half)) => Err(half.clone().into()),
@@ -197,7 +214,12 @@ async fn with_google(
     wanted: Wanted,
     open: impl FnOnce(&str),
 ) -> Result<SignedIn, BrowserSignInError> {
-    let Connector { db, clients, secrets, .. } = connector;
+    let Connector {
+        db,
+        clients,
+        secrets,
+        ..
+    } = connector;
     let (oauth, _) = google_sign_in(clients)?;
     let own = match &clients.own_google {
         Some(Ok(own)) => Some(own),
@@ -232,20 +254,39 @@ async fn with_microsoft(
     wanted: Wanted,
     open: impl FnOnce(&str),
 ) -> Result<SignedIn, BrowserSignInError> {
-    let Connector { db, config, clients, secrets } = connector;
-    let client = clients.microsoft.clone().ok_or(BrowserSignInError::NoClient(Browser::Microsoft))?;
-    let authorized = mailrs_graph::authorize(&client, mailrs_graph::GRAPH_BASE, wanted.address(), open)
-        .await
-        .map_err(BrowserSignInError::Microsoft)?;
+    let Connector {
+        db,
+        config,
+        clients,
+        secrets,
+    } = connector;
+    let client = clients
+        .microsoft
+        .clone()
+        .ok_or(BrowserSignInError::NoClient(Browser::Microsoft))?;
+    let authorized =
+        mailrs_graph::authorize(&client, mailrs_graph::GRAPH_BASE, wanted.address(), open)
+            .await
+            .map_err(BrowserSignInError::Microsoft)?;
     wanted.check(&authorized.email)?;
     let new = NewMicrosoft {
         address: authorized.email.clone(),
         provider_name: authorized.tenant.provider_name().to_string(),
         refresh_token: authorized.refresh_token,
-        granted: authorized.granted.as_ref().map(mailrs_graph::Granted::to_scope),
+        granted: authorized
+            .granted
+            .as_ref()
+            .map(mailrs_graph::Granted::to_scope),
     };
     let tokens = Arc::clone(&secrets.microsoft);
-    let account = microsoft_signed_in(db, Arc::clone(&tokens), new, now_millis(), &mailrs_graph::SCOPES.join(" ")).await?;
+    let account = microsoft_signed_in(
+        db,
+        Arc::clone(&tokens),
+        new,
+        now_millis(),
+        &mailrs_graph::SCOPES.join(" "),
+    )
+    .await?;
     let window_days = config.engine_config().window_days;
     let services = connect_microsoft(db, tokens, client, &account, window_days).await?;
     Ok(SignedIn {

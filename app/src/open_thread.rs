@@ -169,7 +169,9 @@ impl OpenThread {
     }
 
     pub fn is_draft(&self) -> bool {
-        self.messages.last().is_some_and(|m| m.in_role(Role::Drafts))
+        self.messages
+            .last()
+            .is_some_and(|m| m.in_role(Role::Drafts))
     }
 
     pub fn starred(&self) -> bool {
@@ -199,7 +201,10 @@ impl OpenThread {
         if self.queued.is_some() {
             return None;
         }
-        self.messages.iter().rev().find(|m| !m.in_role(Role::Drafts))
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| !m.in_role(Role::Drafts))
     }
 
     /// What a reply to or a forward of one message starts from: `only`, or

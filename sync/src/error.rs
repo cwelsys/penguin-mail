@@ -8,9 +8,8 @@ use mailrs_store::StoreError;
 /// What went wrong on the server's side, as a kind every provider shares.
 /// The retry rules and the account states read the kind. An adapter maps
 /// its own errors to the kinds that fit and keeps the rest in its own
-/// variant, as `Gmail` does. While Gmail is the only provider, a kind that
-/// stands for a Gmail error reads in Gmail's own words, so no message a
-/// person sees changed when these kinds arrived.
+/// variant, as `Gmail` does. A shared kind says what happened without
+/// naming a provider. The window names the account when it has one.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BackendError {
     /// The server no longer accepts the account's sign-in.
@@ -18,8 +17,11 @@ pub enum BackendError {
     NeedsReauth,
     #[error("network error: {0}")]
     Offline(String),
-    /// Too many calls; the server may say how long to wait.
-    #[error("Gmail rate limit hit")]
+    /// Too many calls; the server may say how long to wait. The words do
+    /// not name a provider, because Microsoft, IMAP, JMAP, POP3 and CalDAV
+    /// report the same kind. `SyncError::for_person` names the account
+    /// when the window knows it.
+    #[error("{}", rate_limited(.0))]
     RateLimited(Option<Duration>),
     #[error("not found")]
     NotFound,
@@ -140,6 +142,36 @@ impl SyncError {
     pub(crate) fn io(err: std::io::Error) -> Self {
         Self::Write(err.to_string())
     }
+
+    /// The words a person reads. A rate limit names `provider` when the
+    /// caller knows which account asked the app to wait. An empty name
+    /// keeps the provider-neutral sentence. Every other error keeps its
+    /// own wording.
+    pub fn for_person(&self, provider: &str) -> String {
+        match self {
+            SyncError::Backend(BackendError::RateLimited(_)) => Self::asked_to_wait(provider),
+            other => other.to_string(),
+        }
+    }
+
+    /// The rate-limit sentence. An empty `provider` stays neutral, because
+    /// "The server" is not a name to fill into `{provider}`.
+    pub fn asked_to_wait(provider: &str) -> String {
+        if provider.is_empty() {
+            rate_limited(&None)
+        } else {
+            fill(
+                &gettext("{provider} asked Penguin Mail to wait"),
+                &[("provider", provider)],
+            )
+        }
+    }
+}
+
+/// A rate limit, without a provider. The window fills in the account
+/// through `SyncError::for_person` when it has one.
+fn rate_limited(_: &Option<Duration>) -> String {
+    gettext("The server asked Penguin Mail to wait")
 }
 
 /// Lets `?` take a Gmail error where a sync error is due.
@@ -244,7 +276,6 @@ mod tests {
     fn every_gmail_error_reads_as_it_did() {
         for err in [
             GmailError::NeedsReauth,
-            GmailError::RateLimited { retry_after: None },
             GmailError::MissingScope,
             GmailError::ApiDisabled {
                 service: "Google Calendar API".into(),
@@ -267,5 +298,23 @@ mod tests {
         ] {
             assert_eq!(SyncError::from(err.clone()).to_string(), err.to_string());
         }
+    }
+
+    /// The shared kind used to say "Gmail rate limit hit", which a
+    /// Microsoft or IMAP account then showed. Gmail's own error keeps
+    /// that sentence. The shared one does not.
+    #[test]
+    fn a_rate_limit_names_the_provider_when_one_is_known() {
+        let gmail = GmailError::RateLimited { retry_after: None };
+        assert_eq!(gmail.to_string(), "Gmail rate limit hit");
+        let err = SyncError::from(gmail);
+        assert_eq!(err.to_string(), "The server asked Penguin Mail to wait");
+        assert_eq!(
+            err.for_person("Outlook"),
+            "Outlook asked Penguin Mail to wait"
+        );
+        assert_eq!(err.for_person(""), "The server asked Penguin Mail to wait");
+        let missing = SyncError::from(GmailError::NotFound);
+        assert_eq!(missing.for_person("Outlook"), missing.to_string());
     }
 }

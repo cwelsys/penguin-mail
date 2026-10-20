@@ -268,11 +268,16 @@ impl Invitation {
             return None;
         }
         const DAY: EpochMillis = 24 * 60 * 60 * 1_000;
-        let midnight = |day: NaiveDate| day.and_hms_opt(0, 0, 0).map(|d| d.and_utc().timestamp_millis());
+        let midnight = |day: NaiveDate| {
+            day.and_hms_opt(0, 0, 0)
+                .map(|d| d.and_utc().timestamp_millis())
+        };
         let (start, end, all_day) = match self.when? {
-            When::At { starts_at, ends_at } => {
-                (starts_at, ends_at.unwrap_or(starts_at + 60 * 60 * 1_000), false)
-            }
+            When::At { starts_at, ends_at } => (
+                starts_at,
+                ends_at.unwrap_or(starts_at + 60 * 60 * 1_000),
+                false,
+            ),
             When::Days { first, last } => (midnight(first)?, midnight(last)? + DAY, true),
         };
         Some(crate::calendar::Event {
@@ -281,7 +286,10 @@ impl Invitation {
             start,
             end,
             all_day,
-            zone: self.zone.clone().unwrap_or_else(|| calendar_zone.to_string()),
+            zone: self
+                .zone
+                .clone()
+                .unwrap_or_else(|| calendar_zone.to_string()),
             title: self.summary.clone(),
             place: self.location.clone().unwrap_or_default(),
             description: self.description.clone().unwrap_or_default(),
@@ -321,14 +329,25 @@ pub fn from_occurrence(found: &crate::calendar::Occurrence, sequence: i64) -> In
     let day = |at: EpochMillis| chrono::DateTime::from_timestamp_millis(at).map(|d| d.date_naive());
     let when = match (event.all_day, day(found.start), day(found.end - 1)) {
         (true, Some(first), Some(last)) => When::Days { first, last },
-        _ => When::At { starts_at: found.start, ends_at: Some(found.end) },
+        _ => When::At {
+            starts_at: found.start,
+            ends_at: Some(found.end),
+        },
     };
     let organizer = event
         .guests
         .iter()
         .find(|g| g.organizer)
-        .map(|g| Address { name: g.name.clone(), email: g.email.clone() })
-        .or_else(|| event.organizer.clone().map(|email| Address { name: None, email }));
+        .map(|g| Address {
+            name: g.name.clone(),
+            email: g.email.clone(),
+        })
+        .or_else(|| {
+            event
+                .organizer
+                .clone()
+                .map(|email| Address { name: None, email })
+        });
     let occurrence = crate::calendar::series::in_series(event).then(|| {
         let at = event.original_start.unwrap_or(found.start);
         let stamp = chrono::DateTime::from_timestamp_millis(at).unwrap_or_default();
@@ -336,7 +355,10 @@ pub fn from_occurrence(found: &crate::calendar::Occurrence, sequence: i64) -> In
             true => format!(";VALUE=DATE:{}", stamp.format("%Y%m%d")),
             false => format!(":{}", stamp.format("%Y%m%dT%H%M%SZ")),
         };
-        Occurrence { written, at: Some(at) }
+        Occurrence {
+            written,
+            at: Some(at),
+        }
     });
     Invitation {
         uid: event.uid.clone(),
@@ -351,7 +373,10 @@ pub fn from_occurrence(found: &crate::calendar::Occurrence, sequence: i64) -> In
             .guests
             .iter()
             .map(|g| Guest {
-                who: Address { name: g.name.clone(), email: g.email.clone() },
+                who: Address {
+                    name: g.name.clone(),
+                    email: g.email.clone(),
+                },
                 answer: g.answer,
                 optional: false,
             })
@@ -477,7 +502,9 @@ fn rules_of(event: &Block<'_>, zones: &Zones) -> Vec<String> {
             }
             line.push(':');
             line.push_str(property.value().trim());
-            lines.push(crate::calendar::rename_zone(&line, &|tzid| zones.iana(tzid)));
+            lines.push(crate::calendar::rename_zone(&line, &|tzid| {
+                zones.iana(tzid)
+            }));
         }
     }
     lines

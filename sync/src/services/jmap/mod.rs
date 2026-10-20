@@ -11,8 +11,8 @@ pub(crate) mod calendar;
 mod contacts;
 mod errors;
 mod feed;
-pub(crate) mod jscal;
 mod fetch;
+pub(crate) mod jscal;
 #[cfg(test)]
 pub(crate) use bodies::RAWS_BUDGET;
 #[cfg(test)]
@@ -23,8 +23,8 @@ mod mailboxes;
 mod outgoing;
 mod receipts;
 mod search;
-mod storage;
 mod sieve;
+mod storage;
 mod vacation;
 mod writes;
 
@@ -40,16 +40,17 @@ use mailrs_jmap::{Identity, Mailbox};
 use mailrs_mime::Parts;
 
 pub use api::JmapApi;
-pub use sieve::{JmapSieve, SERVER_REPLY_SCRIPT};
+#[cfg(test)]
+pub(crate) use bodies::numbered as numbered_for_tests;
 pub(crate) use errors::backend;
 pub(crate) use fetch::received_millis;
 pub(crate) use outgoing::{bare_message_id, has_message_id};
-#[cfg(test)]
-pub(crate) use bodies::numbered as numbered_for_tests;
+pub use sieve::{JmapSieve, SERVER_REPLY_SCRIPT};
 
 use super::{
-    Backfill, Changes, Claimed, Found, Held, KeywordsPage, MailBackend, MailCapabilities, RawMessage, ReceiptOut, Relocated,
-    RemoteRef, SearchQuery, Settled, Storage, SyncState, Unapplied, Unheld, Want,
+    Backfill, Changes, Claimed, Found, Held, KeywordsPage, MailBackend, MailCapabilities,
+    RawMessage, ReceiptOut, Relocated, RemoteRef, SearchQuery, Settled, Storage, SyncState,
+    Unapplied, Unheld, Want,
 };
 use crate::api::{DraftRef, SavedDraft};
 use crate::{BackendError, MailOp};
@@ -70,6 +71,7 @@ pub(super) fn capabilities_of(labels: bool) -> MailCapabilities {
         batch_limit: 500,
         keywords: KEYWORDS,
         native_search: false,
+        paged_mailboxes: false,
         renames: false,
         restates: true,
         tags: false,
@@ -158,11 +160,24 @@ impl Handles {
 
     pub(super) fn get(&self, id: &str, path: &str) -> Option<String> {
         let (_, handles) = self.recent.iter().find(|(m, _)| m == id)?;
-        handles.iter().find(|(p, _)| p == path).map(|(_, h)| h.clone())
+        handles
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, h)| h.clone())
     }
 }
 
+pub(crate) type StorageFallback = Arc<
+    dyn Fn(
+            String,
+        )
+            -> futures::future::BoxFuture<'static, Result<Option<Storage>, crate::BackendError>>
+        + Send
+        + Sync,
+>;
+
 pub struct Jmap<J> {
+    storage_fallback: Option<StorageFallback>,
     api: Arc<J>,
     settings: Arc<JmapSettings>,
     known: Arc<Mutex<Known>>,
@@ -173,6 +188,7 @@ pub struct Jmap<J> {
 impl<J> Clone for Jmap<J> {
     fn clone(&self) -> Self {
         Jmap {
+            storage_fallback: self.storage_fallback.clone(),
             api: Arc::clone(&self.api),
             settings: Arc::clone(&self.settings),
             known: Arc::clone(&self.known),
@@ -184,11 +200,17 @@ impl<J> Clone for Jmap<J> {
 impl<J: JmapApi> Jmap<J> {
     pub fn new(api: Arc<J>, settings: JmapSettings) -> Self {
         Jmap {
+            storage_fallback: None,
             api,
             settings: Arc::new(settings),
             known: Arc::new(Mutex::new(Known::default())),
             handles: Arc::new(Mutex::new(Handles::default())),
         }
+    }
+
+    pub(crate) fn with_storage_fallback(mut self, read: StorageFallback) -> Self {
+        self.storage_fallback = Some(read);
+        self
     }
 
     pub(super) fn api(&self) -> &J {
@@ -280,13 +302,23 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
         self.remove_mailbox(id).await
     }
 
-    async fn set_mailbox_color(&self, _: &str, _: &LabelColor) -> Result<RemoteMailbox, BackendError> {
-        Err(BackendError::Refused(mailrs_domain::translate::gettext("This server keeps no colors for its mailboxes.")))
+    async fn set_mailbox_color(
+        &self,
+        _: &str,
+        _: &LabelColor,
+    ) -> Result<RemoteMailbox, BackendError> {
+        Err(BackendError::Refused(mailrs_domain::translate::gettext(
+            "This server keeps no colors for its mailboxes.",
+        )))
     }
 
     async fn mailbox_threads(&self, id: &str) -> Result<u64, BackendError> {
         self.listed().await?;
-        self.known().mailboxes.get(id).map(|m| m.total_threads).ok_or(BackendError::NotFound)
+        self.known()
+            .mailboxes
+            .get(id)
+            .map(|m| m.total_threads)
+            .ok_or(BackendError::NotFound)
     }
 
     /// The feed covers every mailbox, so there is nothing to follow.
@@ -307,7 +339,12 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
     }
 
     /// The feed names every keyword change, so there is nothing to page.
-    async fn keywords_in(&self, _: &str, _: u32, _: RangeInclusive<u32>) -> Result<KeywordsPage, BackendError> {
+    async fn keywords_in(
+        &self,
+        _: &str,
+        _: u32,
+        _: RangeInclusive<u32>,
+    ) -> Result<KeywordsPage, BackendError> {
         Ok(KeywordsPage::default())
     }
 
@@ -323,7 +360,11 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
         self.backfill_page(days, cursor).await
     }
 
-    async fn window_ids(&self, days: i64, mailbox: Option<&str>) -> Result<Vec<RemoteRef>, BackendError> {
+    async fn window_ids(
+        &self,
+        days: i64,
+        mailbox: Option<&str>,
+    ) -> Result<Vec<RemoteRef>, BackendError> {
         self.ids_in(Some(days), mailbox).await
     }
 
@@ -331,7 +372,11 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
         self.inbox_listing().await
     }
 
-    async fn search(&self, query: &SearchQuery, limit: usize) -> Result<Vec<RemoteRef>, BackendError> {
+    async fn search(
+        &self,
+        query: &SearchQuery,
+        limit: usize,
+    ) -> Result<Vec<RemoteRef>, BackendError> {
         self.find(query, limit).await
     }
 
@@ -371,14 +416,23 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
     }
 
     fn set_of(&self, id: &str) -> MailSet {
-        let role = self.known().roles.iter().find(|(_, m)| *m == id).map(|(r, _)| *r);
+        let role = self
+            .known()
+            .roles
+            .iter()
+            .find(|(_, m)| *m == id)
+            .map(|(r, _)| *r);
         match role {
             Some(role) => MailSet::Role(role),
             None => MailSet::Mailbox(id.to_string()),
         }
     }
 
-    async fn apply(&self, messages: &[String], ops: &[MailOp]) -> Result<Vec<Relocated>, Unapplied> {
+    async fn apply(
+        &self,
+        messages: &[String],
+        ops: &[MailOp],
+    ) -> Result<Vec<Relocated>, Unapplied> {
         let written = self.write(messages, ops).await;
         // Counted after the server answers, taken or refused, so a listing
         // asked while the write was on its way does not count as after it.
@@ -391,7 +445,12 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
     }
 
     /// The server threads a draft itself, so the thread id is not used.
-    async fn save_draft(&self, draft_id: Option<&str>, raw: &[u8], _thread_id: Option<&str>) -> Result<SavedDraft, BackendError> {
+    async fn save_draft(
+        &self,
+        draft_id: Option<&str>,
+        raw: &[u8],
+        _thread_id: Option<&str>,
+    ) -> Result<SavedDraft, BackendError> {
         self.save(draft_id, raw).await
     }
 
@@ -419,11 +478,21 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
         self.claimed(email_id).await
     }
 
-    async fn unschedule(&self, handle: &str, message_id: &str, send_at: EpochMillis) -> Result<Unheld, BackendError> {
+    async fn unschedule(
+        &self,
+        handle: &str,
+        message_id: &str,
+        send_at: EpochMillis,
+    ) -> Result<Unheld, BackendError> {
         self.release(handle, message_id, send_at).await
     }
 
-    async fn settle(&self, handle: &str, message_id: &str, send_at: EpochMillis) -> Result<Settled, BackendError> {
+    async fn settle(
+        &self,
+        handle: &str,
+        message_id: &str,
+        send_at: EpochMillis,
+    ) -> Result<Settled, BackendError> {
         self.settle_hold(handle, message_id, send_at).await
     }
 
@@ -433,7 +502,10 @@ impl<J: JmapApi> MailBackend for Jmap<J> {
 }
 
 fn masked_of(said: mailrs_jmap::MaskedEmail) -> Option<crate::masked::MaskedAddress> {
-    let millis = |at: Option<&str>| at.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok()).map(|at| at.timestamp_millis());
+    let millis = |at: Option<&str>| {
+        at.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+            .map(|at| at.timestamp_millis())
+    };
     Some(crate::masked::MaskedAddress {
         state: crate::masked::MaskedState::parse(&said.state)?,
         created: millis(said.created_at.as_deref()),
@@ -448,17 +520,29 @@ fn masked_of(said: mailrs_jmap::MaskedEmail) -> Option<crate::masked::MaskedAddr
 impl<J: JmapApi> Jmap<J> {
     /// The session offered Masked Email at sign-in.
     pub fn masked_email(&self) -> bool {
-        self.settings.capabilities.iter().any(|c| c == mailrs_jmap::MASKED_EMAIL)
+        self.settings
+            .capabilities
+            .iter()
+            .any(|c| c == mailrs_jmap::MASKED_EMAIL)
     }
 
     /// Every masked address but the deleted ones, newest first. The
     /// adapter keeps their addresses, for `is_masked`.
-    pub async fn masked_addresses(&self) -> Result<Vec<crate::masked::MaskedAddress>, BackendError> {
+    pub async fn masked_addresses(
+        &self,
+    ) -> Result<Vec<crate::masked::MaskedAddress>, BackendError> {
         let listed = self.api.masked_emails().await.map_err(backend)?;
-        let mut kept: Vec<_> =
-            listed.into_iter().filter_map(masked_of).filter(|m| m.state != crate::masked::MaskedState::Deleted).collect();
+        let mut kept: Vec<_> = listed
+            .into_iter()
+            .filter_map(masked_of)
+            .filter(|m| m.state != crate::masked::MaskedState::Deleted)
+            .collect();
         kept.sort_by_key(|m| std::cmp::Reverse(m.created));
-        self.known().masked = Some(kept.iter().map(|m| (m.id.clone(), m.email.to_lowercase())).collect());
+        self.known().masked = Some(
+            kept.iter()
+                .map(|m| (m.id.clone(), m.email.to_lowercase()))
+                .collect(),
+        );
         Ok(kept)
     }
 
@@ -470,13 +554,26 @@ impl<J: JmapApi> Jmap<J> {
             return Some(false);
         }
         let wanted = address.trim().to_lowercase();
-        self.known().masked.as_ref().map(|masked| masked.values().any(|held| *held == wanted))
+        self.known()
+            .masked
+            .as_ref()
+            .map(|masked| masked.values().any(|held| *held == wanted))
     }
 
-    pub async fn make_masked(&self, site: &str, note: &str) -> Result<crate::masked::MaskedAddress, BackendError> {
-        let made = self.api.create_masked(site.trim(), note.trim()).await.map_err(backend)?;
+    pub async fn make_masked(
+        &self,
+        site: &str,
+        note: &str,
+    ) -> Result<crate::masked::MaskedAddress, BackendError> {
+        let made = self
+            .api
+            .create_masked(site.trim(), note.trim())
+            .await
+            .map_err(backend)?;
         let made = masked_of(made).ok_or_else(|| {
-            BackendError::Refused(mailrs_domain::translate::gettext("The server made an address Penguin Mail cannot read."))
+            BackendError::Refused(mailrs_domain::translate::gettext(
+                "The server made an address Penguin Mail cannot read.",
+            ))
         })?;
         if let Some(masked) = self.known().masked.as_mut() {
             masked.insert(made.id.clone(), made.email.to_lowercase());
@@ -485,7 +582,11 @@ impl<J: JmapApi> Jmap<J> {
     }
 
     /// Turns an address on, off or away. Only the server sets `Pending`.
-    pub async fn set_masked(&self, id: &str, state: crate::masked::MaskedState) -> Result<(), BackendError> {
+    pub async fn set_masked(
+        &self,
+        id: &str,
+        state: crate::masked::MaskedState,
+    ) -> Result<(), BackendError> {
         use crate::masked::MaskedState as State;
         let wire = match state {
             State::Enabled => mailrs_jmap::MaskedState::Enabled,

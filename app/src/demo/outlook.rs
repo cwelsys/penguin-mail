@@ -39,7 +39,10 @@ pub async fn seed_outlook(
     let account_id = db
         .write(move |c| {
             accounts::insert_microsoft_account(c, OUTLOOK, "Outlook", now)?.ok_or(
-                StoreError::Corrupt { column: "accounts.provider", value: OUTLOOK.to_string() },
+                StoreError::Corrupt {
+                    column: "accounts.provider",
+                    value: OUTLOOK.to_string(),
+                },
             )
         })
         .await?;
@@ -74,8 +77,16 @@ pub async fn seed_outlook(
     );
     graph.tag(&mum, &["Family"]);
     for (from, subject, hours) in [
-        (("Streamly", "news@streamly.example"), "Three new series this week", 3),
-        (("CityBikes", "hello@citybikes.example"), "Your monthly ride summary", 9),
+        (
+            ("Streamly", "news@streamly.example"),
+            "Three new series this week",
+            3,
+        ),
+        (
+            ("CityBikes", "hello@citybikes.example"),
+            "Your monthly ride summary",
+            9,
+        ),
     ] {
         let id = graph.deliver(
             &inbox,
@@ -116,7 +127,10 @@ pub async fn seed_outlook(
                 }],
                 ..RulePredicates::default()
             }),
-            actions: Some(RuleActions { mark_as_read: Some(true), ..RuleActions::default() }),
+            actions: Some(RuleActions {
+                mark_as_read: Some(true),
+                ..RuleActions::default()
+            }),
             ..MessageRule::default()
         });
     });
@@ -163,7 +177,9 @@ pub async fn seed_outlook(
 /// one occurrence. Graph names a series only through its occurrences, so
 /// the calendar delta finds the master through that one.
 fn standup(now: EpochMillis) -> (GraphEvent, GraphEvent) {
-    let today = chrono::DateTime::from_timestamp_millis(now).unwrap_or_default().date_naive();
+    let today = chrono::DateTime::from_timestamp_millis(now)
+        .unwrap_or_default()
+        .date_naive();
     let back = i64::from(today.weekday().num_days_from_monday());
     let this_monday = today - chrono::Duration::days(back);
     let start = this_monday - chrono::Duration::days(21);

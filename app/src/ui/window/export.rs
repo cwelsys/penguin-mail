@@ -95,7 +95,8 @@ impl MainWindow {
                 .core
                 .call(async move {
                     let raw = actions.export_message(account_id, &message_id).await?;
-                    tokio::task::spawn_blocking(move || std::fs::write(&path, raw.as_slice())).await??;
+                    tokio::task::spawn_blocking(move || std::fs::write(&path, raw.as_slice()))
+                        .await??;
                     Ok::<(), anyhow::Error>(())
                 })
                 .await;

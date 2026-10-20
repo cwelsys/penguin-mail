@@ -7,13 +7,25 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::NSApplication;
 use objc2_foundation::NSString;
 
-#[derive(Default)]
 pub(in crate::app) struct Badge {
     /// The number last drawn, so an unchanged count does not redraw.
     shown: Cell<Option<i64>>,
 }
 
 impl Badge {
+    /// The Dock knows the app by its process; the id is for the Linux
+    /// badge, which has to name a desktop file.
+    pub(in crate::app) fn new(_app_id: &str) -> Badge {
+        Badge {
+            shown: Cell::new(None),
+        }
+    }
+
+    /// Takes the number off the icon before the process ends.
+    pub(in crate::app) fn hide_now(&self) {
+        self.show(0);
+    }
+
     /// Shows `unread` on the app icon, and nothing at zero.
     pub(in crate::app) fn show(&self, unread: i64) {
         let unread = unread.max(0);

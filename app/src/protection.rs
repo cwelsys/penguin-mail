@@ -1044,15 +1044,24 @@ mod tests {
     #[test]
     fn a_signed_message_shows_the_signing_shield() {
         let shown = shield(true, false).expect("a shield");
-        assert_eq!((shown.icon, shown.said.as_str()), ("security-high-symbolic", "Signed"));
+        assert_eq!(
+            (shown.icon, shown.said.as_str()),
+            ("security-high-symbolic", "Signed")
+        );
     }
 
     #[test]
     fn an_encrypted_message_shows_the_lock_whether_or_not_it_is_signed() {
         let encrypted = shield(false, true).expect("a shield");
-        assert_eq!((encrypted.icon, encrypted.said.as_str()), ("channel-secure-symbolic", "Encrypted"));
+        assert_eq!(
+            (encrypted.icon, encrypted.said.as_str()),
+            ("channel-secure-symbolic", "Encrypted")
+        );
         let both = shield(true, true).expect("a shield");
-        assert_eq!((both.icon, both.said.as_str()), ("channel-secure-symbolic", "Signed and encrypted"));
+        assert_eq!(
+            (both.icon, both.said.as_str()),
+            ("channel-secure-symbolic", "Signed and encrypted")
+        );
     }
 
     fn certificate(address: &str, held: bool) -> mailrs_smime::Recipient {

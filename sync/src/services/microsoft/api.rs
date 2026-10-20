@@ -18,60 +18,176 @@ pub trait GraphApi: Send + Sync + 'static {
     fn granted(&self) -> Option<Granted>;
 
     fn me(&self) -> impl Future<Output = Answer<Me>> + Send;
-    fn well_known(&self, names: &[&str]) -> impl Future<Output = Answer<Vec<Option<MailFolder>>>> + Send;
-    fn folders(&self, parent: Option<&str>, next: Option<&str>) -> impl Future<Output = Answer<Page<MailFolder>>> + Send;
+    fn well_known(
+        &self,
+        names: &[&str],
+    ) -> impl Future<Output = Answer<Vec<Option<MailFolder>>>> + Send;
+    fn folders(
+        &self,
+        parent: Option<&str>,
+        next: Option<&str>,
+    ) -> impl Future<Output = Answer<Page<MailFolder>>> + Send;
     fn categories(&self) -> impl Future<Output = Answer<Vec<MasterCategory>>> + Send;
-    fn message_delta(&self, folder: &str, link: Option<&str>, received_since: &str) -> impl Future<Output = Answer<DeltaPage<Message>>> + Send;
-    fn list_messages(&self, listing: &Listing, next: Option<&str>) -> impl Future<Output = Answer<Page<Message>>> + Send;
-    fn messages(&self, ids: &[String]) -> impl Future<Output = Answer<Vec<Answer<Message>>>> + Send;
+    fn message_delta(
+        &self,
+        folder: &str,
+        link: Option<&str>,
+        received_since: Option<&str>,
+    ) -> impl Future<Output = Answer<DeltaPage<Message>>> + Send;
+    fn list_messages(
+        &self,
+        listing: &Listing,
+        next: Option<&str>,
+    ) -> impl Future<Output = Answer<Page<Message>>> + Send;
+    fn messages(&self, ids: &[String])
+    -> impl Future<Output = Answer<Vec<Answer<Message>>>> + Send;
     fn raw(&self, id: &str, limit: usize) -> impl Future<Output = Answer<Vec<u8>>> + Send;
     fn body(&self, id: &str) -> impl Future<Output = Answer<MessageBody>> + Send;
-    fn attachment(&self, message: &str, attachment: &str, limit: usize) -> impl Future<Output = Answer<Vec<u8>>> + Send;
+    fn attachment(
+        &self,
+        message: &str,
+        attachment: &str,
+        limit: usize,
+    ) -> impl Future<Output = Answer<Vec<u8>>> + Send;
     fn apply(&self, writes: &[Write]) -> impl Future<Output = Answer<Vec<Answer<()>>>> + Send;
-    fn create_folder(&self, parent: Option<&str>, name: &str) -> impl Future<Output = Answer<MailFolder>> + Send;
-    fn rename_folder(&self, id: &str, name: &str) -> impl Future<Output = Answer<MailFolder>> + Send;
+    fn create_folder(
+        &self,
+        parent: Option<&str>,
+        name: &str,
+    ) -> impl Future<Output = Answer<MailFolder>> + Send;
+    fn rename_folder(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> impl Future<Output = Answer<MailFolder>> + Send;
     fn delete_folder(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
-    fn set_category_color(&self, id: &str, color: &str) -> impl Future<Output = Answer<MasterCategory>> + Send;
+    fn set_category_color(
+        &self,
+        id: &str,
+        color: &str,
+    ) -> impl Future<Output = Answer<MasterCategory>> + Send;
     fn send_mime(&self, raw: &[u8]) -> impl Future<Output = Answer<()>> + Send;
     fn create_draft_mime(&self, raw: &[u8]) -> impl Future<Output = Answer<Message>> + Send;
     fn create_draft(&self, draft: &Value) -> impl Future<Output = Answer<Message>> + Send;
-    fn upload_session(&self, message: &str, name: &str, size: u64, is_inline: bool, content_id: Option<&str>) -> impl Future<Output = Answer<String>> + Send;
-    fn upload_chunk(&self, url: &str, offset: u64, total: u64, bytes: &[u8]) -> impl Future<Output = Answer<bool>> + Send;
+    fn upload_session(
+        &self,
+        message: &str,
+        name: &str,
+        size: u64,
+        is_inline: bool,
+        content_id: Option<&str>,
+    ) -> impl Future<Output = Answer<String>> + Send;
+    fn upload_chunk(
+        &self,
+        url: &str,
+        offset: u64,
+        total: u64,
+        bytes: &[u8],
+    ) -> impl Future<Output = Answer<bool>> + Send;
     fn send_draft(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
     fn delete_message(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
 
     fn calendars(&self) -> impl Future<Output = Answer<Vec<GraphCalendar>>> + Send;
-    fn calendar_view_delta(&self, calendar: &str, link: Option<&str>, start: &str, end: &str) -> impl Future<Output = Answer<DeltaPage<GraphEvent>>> + Send;
+    fn calendar_view_delta(
+        &self,
+        calendar: &str,
+        link: Option<&str>,
+        start: &str,
+        end: &str,
+    ) -> impl Future<Output = Answer<DeltaPage<GraphEvent>>> + Send;
     fn event(&self, id: &str) -> impl Future<Output = Answer<GraphEvent>> + Send;
-    fn instances(&self, series: &str, start: &str, end: &str) -> impl Future<Output = Answer<Vec<GraphEvent>>> + Send;
-    fn original_starts(&self, ids: &[String]) -> impl Future<Output = Answer<Vec<Answer<GraphEvent>>>> + Send;
-    fn events(&self, ids: &[String]) -> impl Future<Output = Answer<Vec<Answer<GraphEvent>>>> + Send;
-    fn events_by_uid(&self, calendar: &str, uid: &str) -> impl Future<Output = Answer<Vec<GraphEvent>>> + Send;
-    fn create_event(&self, calendar: &str, body: &Value) -> impl Future<Output = Answer<GraphEvent>> + Send;
-    fn update_event(&self, id: &str, body: &Value, etag: Option<&str>) -> impl Future<Output = Answer<GraphEvent>> + Send;
-    fn delete_event(&self, id: &str, etag: Option<&str>) -> impl Future<Output = Answer<()>> + Send;
-    fn respond(&self, id: &str, response: Response, comment: Option<&str>) -> impl Future<Output = Answer<()>> + Send;
-    fn calendar_view_of(&self, calendar: &str, start: &str, end: &str, link: Option<&str>) -> impl Future<Output = Answer<Page<GraphEvent>>> + Send;
-    fn create_calendar(&self, name: &str, hex: &str) -> impl Future<Output = Answer<GraphCalendar>> + Send;
-    fn update_calendar(&self, id: &str, body: &Value) -> impl Future<Output = Answer<GraphCalendar>> + Send;
+    fn instances(
+        &self,
+        series: &str,
+        start: &str,
+        end: &str,
+    ) -> impl Future<Output = Answer<Vec<GraphEvent>>> + Send;
+    fn original_starts(
+        &self,
+        ids: &[String],
+    ) -> impl Future<Output = Answer<Vec<Answer<GraphEvent>>>> + Send;
+    fn events(
+        &self,
+        ids: &[String],
+    ) -> impl Future<Output = Answer<Vec<Answer<GraphEvent>>>> + Send;
+    fn events_by_uid(
+        &self,
+        calendar: &str,
+        uid: &str,
+    ) -> impl Future<Output = Answer<Vec<GraphEvent>>> + Send;
+    fn create_event(
+        &self,
+        calendar: &str,
+        body: &Value,
+    ) -> impl Future<Output = Answer<GraphEvent>> + Send;
+    fn update_event(
+        &self,
+        id: &str,
+        body: &Value,
+        etag: Option<&str>,
+    ) -> impl Future<Output = Answer<GraphEvent>> + Send;
+    fn delete_event(&self, id: &str, etag: Option<&str>)
+    -> impl Future<Output = Answer<()>> + Send;
+    fn respond(
+        &self,
+        id: &str,
+        response: Response,
+        comment: Option<&str>,
+    ) -> impl Future<Output = Answer<()>> + Send;
+    fn calendar_view_of(
+        &self,
+        calendar: &str,
+        start: &str,
+        end: &str,
+        link: Option<&str>,
+    ) -> impl Future<Output = Answer<Page<GraphEvent>>> + Send;
+    fn create_calendar(
+        &self,
+        name: &str,
+        hex: &str,
+    ) -> impl Future<Output = Answer<GraphCalendar>> + Send;
+    fn update_calendar(
+        &self,
+        id: &str,
+        body: &Value,
+    ) -> impl Future<Output = Answer<GraphCalendar>> + Send;
     fn delete_calendar(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
 
     fn contact_folders(&self) -> impl Future<Output = Answer<Vec<ContactFolder>>> + Send;
     fn default_contact_folder(&self) -> impl Future<Output = Answer<Option<String>>> + Send;
-    fn contact_delta(&self, folder: &str, link: Option<&str>) -> impl Future<Output = Answer<DeltaPage<GraphContact>>> + Send;
-    fn contact_photo(&self, id: &str, limit: usize) -> impl Future<Output = Answer<Option<Vec<u8>>>> + Send;
+    fn contact_delta(
+        &self,
+        folder: &str,
+        link: Option<&str>,
+    ) -> impl Future<Output = Answer<DeltaPage<GraphContact>>> + Send;
+    fn contact_photo(
+        &self,
+        id: &str,
+        limit: usize,
+    ) -> impl Future<Output = Answer<Option<Vec<u8>>>> + Send;
     fn create_contact(&self, body: &Value) -> impl Future<Output = Answer<GraphContact>> + Send;
     fn contact_name(&self, id: &str) -> impl Future<Output = Answer<GraphContact>> + Send;
-    fn update_contact(&self, id: &str, body: &Value) -> impl Future<Output = Answer<GraphContact>> + Send;
+    fn update_contact(
+        &self,
+        id: &str,
+        body: &Value,
+    ) -> impl Future<Output = Answer<GraphContact>> + Send;
 
     fn rules(&self) -> impl Future<Output = Answer<Vec<MessageRule>>> + Send;
     fn create_rule(&self, rule: &MessageRule) -> impl Future<Output = Answer<MessageRule>> + Send;
     fn delete_rule(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
     fn automatic_replies(&self) -> impl Future<Output = Answer<AutomaticReplies>> + Send;
     /// Writes the reply and answers what the mailbox kept, which may differ.
-    fn set_automatic_replies(&self, replies: &AutomaticReplies) -> impl Future<Output = Answer<AutomaticReplies>> + Send;
+    fn set_automatic_replies(
+        &self,
+        replies: &AutomaticReplies,
+    ) -> impl Future<Output = Answer<AutomaticReplies>> + Send;
     fn overrides(&self) -> impl Future<Output = Answer<Vec<Override>>> + Send;
-    fn set_override(&self, address: &str, other: bool) -> impl Future<Output = Answer<Override>> + Send;
+    fn set_override(
+        &self,
+        address: &str,
+        other: bool,
+    ) -> impl Future<Output = Answer<Override>> + Send;
     fn delete_override(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
 }
 
@@ -96,7 +212,12 @@ impl GraphApi for Graph {
         Graph::categories(self).await
     }
 
-    async fn message_delta(&self, folder: &str, link: Option<&str>, received_since: &str) -> Answer<DeltaPage<Message>> {
+    async fn message_delta(
+        &self,
+        folder: &str,
+        link: Option<&str>,
+        received_since: Option<&str>,
+    ) -> Answer<DeltaPage<Message>> {
         Graph::message_delta(self, folder, link, received_since).await
     }
 
@@ -152,7 +273,14 @@ impl GraphApi for Graph {
         Graph::create_draft(self, draft).await
     }
 
-    async fn upload_session(&self, message: &str, name: &str, size: u64, is_inline: bool, content_id: Option<&str>) -> Answer<String> {
+    async fn upload_session(
+        &self,
+        message: &str,
+        name: &str,
+        size: u64,
+        is_inline: bool,
+        content_id: Option<&str>,
+    ) -> Answer<String> {
         Graph::upload_session(self, message, name, size, is_inline, content_id).await
     }
 
@@ -168,12 +296,17 @@ impl GraphApi for Graph {
         Graph::delete_message(self, id).await
     }
 
-
     async fn calendars(&self) -> Answer<Vec<GraphCalendar>> {
         Graph::calendars(self).await
     }
 
-    async fn calendar_view_delta(&self, calendar: &str, link: Option<&str>, start: &str, end: &str) -> Answer<DeltaPage<GraphEvent>> {
+    async fn calendar_view_delta(
+        &self,
+        calendar: &str,
+        link: Option<&str>,
+        start: &str,
+        end: &str,
+    ) -> Answer<DeltaPage<GraphEvent>> {
         Graph::calendar_view_delta(self, calendar, link, start, end).await
     }
 
@@ -213,7 +346,13 @@ impl GraphApi for Graph {
         Graph::respond(self, id, response, comment).await
     }
 
-    async fn calendar_view_of(&self, calendar: &str, start: &str, end: &str, link: Option<&str>) -> Answer<Page<GraphEvent>> {
+    async fn calendar_view_of(
+        &self,
+        calendar: &str,
+        start: &str,
+        end: &str,
+        link: Option<&str>,
+    ) -> Answer<Page<GraphEvent>> {
         Graph::calendar_view_of(self, calendar, start, end, link).await
     }
 
@@ -229,7 +368,6 @@ impl GraphApi for Graph {
         Graph::delete_calendar(self, id).await
     }
 
-
     async fn contact_folders(&self) -> Answer<Vec<ContactFolder>> {
         Graph::contact_folders(self).await
     }
@@ -238,7 +376,11 @@ impl GraphApi for Graph {
         Graph::default_contact_folder(self).await
     }
 
-    async fn contact_delta(&self, folder: &str, link: Option<&str>) -> Answer<DeltaPage<GraphContact>> {
+    async fn contact_delta(
+        &self,
+        folder: &str,
+        link: Option<&str>,
+    ) -> Answer<DeltaPage<GraphContact>> {
         Graph::contact_delta(self, folder, link).await
     }
 
@@ -257,7 +399,6 @@ impl GraphApi for Graph {
     async fn update_contact(&self, id: &str, body: &Value) -> Answer<GraphContact> {
         Graph::update_contact(self, id, body).await
     }
-
 
     async fn rules(&self) -> Answer<Vec<MessageRule>> {
         Graph::rules(self).await

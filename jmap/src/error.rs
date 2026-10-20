@@ -50,7 +50,11 @@ pub enum JmapError {
     Method { kind: String, description: String },
     /// A request-level problem (RFC 7807) or another HTTP failure.
     #[error("HTTP {status} {kind}: {detail}")]
-    Problem { status: u16, kind: String, detail: String },
+    Problem {
+        status: u16,
+        kind: String,
+        detail: String,
+    },
     #[error("could not read the server's answer: {0}")]
     Decode(String),
     /// A hold went out and no answer came back, so the server may have
@@ -100,12 +104,20 @@ pub enum JmapError {
 /// only. serde_json's own text quotes the rejected value, which can be an
 /// address.
 pub(crate) fn decode(what: &str, err: &serde_json::Error) -> JmapError {
-    JmapError::Decode(format!("{what}: {:?} at line {} column {}", err.classify(), err.line(), err.column()))
+    JmapError::Decode(format!(
+        "{what}: {:?} at line {} column {}",
+        err.classify(),
+        err.line(),
+        err.column()
+    ))
 }
 
 impl JmapError {
     pub fn is_transient(&self) -> bool {
-        matches!(self, JmapError::Network(_) | JmapError::RateLimited { .. } | JmapError::SignInLocked)
+        matches!(
+            self,
+            JmapError::Network(_) | JmapError::RateLimited { .. } | JmapError::SignInLocked
+        )
     }
 }
 
@@ -164,8 +176,13 @@ pub fn method_error(kind: &str, description: Option<&str>) -> JmapError {
         "notFound" | "accountNotFound" => JmapError::NotFound,
         "requestTooLarge" | "tooLarge" => JmapError::RequestTooLarge,
         "rateLimit" | "serverUnavailable" => JmapError::RateLimited { retry_after: None },
-        "accountNotSupportedByMethod" | "unknownMethod" => JmapError::UnknownCapability(description),
-        other => JmapError::Method { kind: other.to_string(), description },
+        "accountNotSupportedByMethod" | "unknownMethod" => {
+            JmapError::UnknownCapability(description)
+        }
+        other => JmapError::Method {
+            kind: other.to_string(),
+            description,
+        },
     }
 }
 
@@ -180,7 +197,11 @@ pub fn problem(status: u16, kind: &str, detail: &str) -> JmapError {
         (_, "unknownCapability") => JmapError::UnknownCapability(detail.to_string()),
         (_, "limit") | (413, _) => JmapError::RequestTooLarge,
         (404, _) => JmapError::NotFound,
-        _ => JmapError::Problem { status, kind: short.to_string(), detail: detail.to_string() },
+        _ => JmapError::Problem {
+            status,
+            kind: short.to_string(),
+            detail: detail.to_string(),
+        },
     }
 }
 
@@ -192,18 +213,33 @@ mod tests {
 
     #[test]
     fn method_errors_map_to_kinds() {
-        assert_eq!(method_error("cannotCalculateChanges", None), JmapError::CannotCalculateChanges);
-        assert_eq!(method_error("stateMismatch", None), JmapError::StateMismatch);
+        assert_eq!(
+            method_error("cannotCalculateChanges", None),
+            JmapError::CannotCalculateChanges
+        );
+        assert_eq!(
+            method_error("stateMismatch", None),
+            JmapError::StateMismatch
+        );
         assert_eq!(
             method_error("forbidden", Some("no vacation for tokens")),
             JmapError::Forbidden("no vacation for tokens".into())
         );
         assert_eq!(method_error("notFound", None), JmapError::NotFound);
-        assert_eq!(method_error("requestTooLarge", None), JmapError::RequestTooLarge);
-        assert_eq!(method_error("rateLimit", None), JmapError::RateLimited { retry_after: None });
+        assert_eq!(
+            method_error("requestTooLarge", None),
+            JmapError::RequestTooLarge
+        );
+        assert_eq!(
+            method_error("rateLimit", None),
+            JmapError::RateLimited { retry_after: None }
+        );
         assert_eq!(
             method_error("invalidArguments", Some("bad filter")),
-            JmapError::Method { kind: "invalidArguments".into(), description: "bad filter".into() }
+            JmapError::Method {
+                kind: "invalidArguments".into(),
+                description: "bad filter".into()
+            }
         );
     }
 
@@ -216,29 +252,51 @@ mod tests {
     fn a_decode_error_keeps_the_category_and_position_but_not_the_value() {
         let err = serde_json::from_str::<Vec<u8>>(r#"["secret@example.org"]"#).unwrap_err();
         let said = decode("the answer", &err).to_string();
-        assert!(said.contains("the answer") && said.contains("line 1"), "{said}");
+        assert!(
+            said.contains("the answer") && said.contains("line 1"),
+            "{said}"
+        );
         assert!(!said.contains("secret@example.org"), "{said}");
     }
 
     #[test]
     fn request_problems_map_to_kinds() {
         assert_eq!(problem(401, "", ""), JmapError::Unauthorized);
-        assert_eq!(problem(429, "", ""), JmapError::RateLimited { retry_after: None });
         assert_eq!(
-            problem(400, "urn:ietf:params:jmap:error:unknownCapability", "calendars"),
+            problem(429, "", ""),
+            JmapError::RateLimited { retry_after: None }
+        );
+        assert_eq!(
+            problem(
+                400,
+                "urn:ietf:params:jmap:error:unknownCapability",
+                "calendars"
+            ),
             JmapError::UnknownCapability("calendars".into())
         );
-        assert_eq!(problem(400, "urn:ietf:params:jmap:error:limit", "maxCallsInRequest"), JmapError::RequestTooLarge);
+        assert_eq!(
+            problem(400, "urn:ietf:params:jmap:error:limit", "maxCallsInRequest"),
+            JmapError::RequestTooLarge
+        );
         assert_eq!(
             problem(400, "urn:ietf:params:jmap:error:notJSON", "x"),
-            JmapError::Problem { status: 400, kind: "notJSON".into(), detail: "x".into() }
+            JmapError::Problem {
+                status: 400,
+                kind: "notJSON".into(),
+                detail: "x".into()
+            }
         );
     }
 
     #[test]
     fn only_the_network_and_rate_limits_are_worth_a_retry() {
         assert!(JmapError::Network("reset".into()).is_transient());
-        assert!(JmapError::RateLimited { retry_after: Some(Duration::from_secs(2)) }.is_transient());
+        assert!(
+            JmapError::RateLimited {
+                retry_after: Some(Duration::from_secs(2))
+            }
+            .is_transient()
+        );
         assert!(!JmapError::CannotCalculateChanges.is_transient());
         assert!(!JmapError::Unauthorized.is_transient());
     }

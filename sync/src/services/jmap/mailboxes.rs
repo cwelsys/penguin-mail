@@ -38,7 +38,10 @@ fn path_of(id: &str, by_id: &HashMap<String, &Mailbox>) -> String {
         if names.len() >= MOST_DEPTH {
             break;
         }
-        at = mailbox.parent_id.as_deref().and_then(|p| by_id.get(p).copied());
+        at = mailbox
+            .parent_id
+            .as_deref()
+            .and_then(|p| by_id.get(p).copied());
     }
     names.reverse();
     names.join("/")
@@ -51,7 +54,8 @@ impl<J: JmapApi> Jmap<J> {
         let writes = self.known().writes;
         let listed = self.api().mailboxes().await.map_err(backend)?;
         let labels = self.settings().labels;
-        let by_id: HashMap<String, &Mailbox> = listed.list.iter().map(|m| (m.id.clone(), m)).collect();
+        let by_id: HashMap<String, &Mailbox> =
+            listed.list.iter().map(|m| (m.id.clone(), m)).collect();
         let mut roles = BTreeMap::new();
         let mut paths = HashMap::new();
         let mut out = Vec::with_capacity(listed.list.len());
@@ -71,7 +75,14 @@ impl<J: JmapApi> Jmap<J> {
                 (None, true) => MailboxKind::Label,
                 (None, false) => MailboxKind::Folder,
             };
-            out.push(RemoteMailbox { id: mailbox.id.clone(), name, kind, role, color: None, hidden: false });
+            out.push(RemoteMailbox {
+                id: mailbox.id.clone(),
+                name,
+                kind,
+                role,
+                color: None,
+                hidden: false,
+            });
         }
         let mut known = self.known();
         known.roles = roles;
@@ -107,21 +118,40 @@ impl<J: JmapApi> Jmap<J> {
             None => None,
             Some(parent) => {
                 let known = self.known();
-                let found = known.paths.iter().find(|(_, p)| p.as_str() == parent).map(|(id, _)| id.clone());
+                let found = known
+                    .paths
+                    .iter()
+                    .find(|(_, p)| p.as_str() == parent)
+                    .map(|(id, _)| id.clone());
                 Some(found.ok_or(BackendError::NotFound)?)
             }
         };
         Ok((parent_id, name.to_string()))
     }
 
-    fn listed_as(&self, id: &str, listed: Vec<RemoteMailbox>) -> Result<RemoteMailbox, BackendError> {
-        listed.into_iter().find(|m| m.id == id).ok_or(BackendError::NotFound)
+    fn listed_as(
+        &self,
+        id: &str,
+        listed: Vec<RemoteMailbox>,
+    ) -> Result<RemoteMailbox, BackendError> {
+        listed
+            .into_iter()
+            .find(|m| m.id == id)
+            .ok_or(BackendError::NotFound)
     }
 
     pub(super) async fn make_mailbox(&self, path: &str) -> Result<RemoteMailbox, BackendError> {
         self.listed().await?;
         let (parent_id, name) = self.place_of(path)?;
-        let id = self.api().set_mailbox(&MailboxWrite::Create { name, parent_id, role: None }).await.map_err(backend)?;
+        let id = self
+            .api()
+            .set_mailbox(&MailboxWrite::Create {
+                name,
+                parent_id,
+                role: None,
+            })
+            .await
+            .map_err(backend)?;
         let listed = self.list_mailboxes().await?;
         self.listed_as(&id, listed)
     }
@@ -135,9 +165,15 @@ impl<J: JmapApi> Jmap<J> {
         if let Some(id) = self.known().roles.get(&Role::Archive) {
             return Ok(Some(id.clone()));
         }
-        let make = |role: Option<&str>| MailboxWrite::Create { name: ARCHIVE.into(), parent_id: None, role: role.map(str::to_string) };
+        let make = |role: Option<&str>| MailboxWrite::Create {
+            name: ARCHIVE.into(),
+            parent_id: None,
+            role: role.map(str::to_string),
+        };
         let made = match self.api().set_mailbox(&make(Some("archive"))).await {
-            Err(JmapError::Method { kind, .. }) if kind == "invalidProperties" => self.api().set_mailbox(&make(None)).await,
+            Err(JmapError::Method { kind, .. }) if kind == "invalidProperties" => {
+                self.api().set_mailbox(&make(None)).await
+            }
             answer => answer,
         };
         if let Err(err) = made {
@@ -147,16 +183,30 @@ impl<J: JmapApi> Jmap<J> {
         Ok(self.known().roles.get(&Role::Archive).cloned())
     }
 
-    pub(super) async fn move_mailbox(&self, id: &str, path: &str) -> Result<RemoteMailbox, BackendError> {
+    pub(super) async fn move_mailbox(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<RemoteMailbox, BackendError> {
         self.listed().await?;
         let (parent_id, name) = self.place_of(path)?;
-        self.api().set_mailbox(&MailboxWrite::Update { id: id.to_string(), name, parent_id }).await.map_err(backend)?;
+        self.api()
+            .set_mailbox(&MailboxWrite::Update {
+                id: id.to_string(),
+                name,
+                parent_id,
+            })
+            .await
+            .map_err(backend)?;
         let listed = self.list_mailboxes().await?;
         self.listed_as(id, listed)
     }
 
     pub(super) async fn remove_mailbox(&self, id: &str) -> Result<(), BackendError> {
-        self.api().set_mailbox(&MailboxWrite::Destroy { id: id.to_string() }).await.map_err(backend)?;
+        self.api()
+            .set_mailbox(&MailboxWrite::Destroy { id: id.to_string() })
+            .await
+            .map_err(backend)?;
         self.list_mailboxes().await.map(drop)
     }
 }

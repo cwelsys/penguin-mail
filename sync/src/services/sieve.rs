@@ -77,7 +77,10 @@ impl<M: ManageSieveApi> SieveRules<M> {
     /// These rules on a server that keeps its own automatic reply in the
     /// script named `script`.
     pub fn beside_server_reply(self, script: Option<&'static str>) -> Self {
-        SieveRules { server_reply: script, ..self }
+        SieveRules {
+            server_reply: script,
+            ..self
+        }
     }
 
     fn is_server_reply(&self, name: &str) -> bool {
@@ -87,7 +90,11 @@ impl<M: ManageSieveApi> SieveRules<M> {
     /// Takes out an include of the server's own reply script, which an
     /// older build wrote.
     fn drop_server_reply(&self, script: &mut Script) {
-        if script.include.as_deref().is_some_and(|name| self.is_server_reply(name)) {
+        if script
+            .include
+            .as_deref()
+            .is_some_and(|name| self.is_server_reply(name))
+        {
             script.include = None;
         }
     }
@@ -113,7 +120,12 @@ impl<M: ManageSieveApi> SieveRules<M> {
             return Ok(());
         };
         for rule in &mut script.rules {
-            for set in rule.action.add.iter_mut().chain(rule.action.remove.iter_mut()) {
+            for set in rule
+                .action
+                .add
+                .iter_mut()
+                .chain(rule.action.remove.iter_mut())
+            {
                 if let MailSet::Mailbox(id) = set
                     && let Some((_, to)) = moved.iter().find(|(from, _)| from == id)
                 {
@@ -123,9 +135,13 @@ impl<M: ManageSieveApi> SieveRules<M> {
         }
         self.turn_off_orphans(&mut script, &ext, None).await?;
         self.drop_server_reply(&mut script);
-        let text = script::write(&script, &self.address, &|set| self.folder(set), &ext).map_err(|e| self.words(e))?;
+        let text = script::write(&script, &self.address, &|set| self.folder(set), &ext)
+            .map_err(|e| self.words(e))?;
         if text != held {
-            self.api.put(SCRIPT_NAME, &text).await.map_err(|e| self.err(e))?;
+            self.api
+                .put(SCRIPT_NAME, &text)
+                .await
+                .map_err(|e| self.err(e))?;
         }
         Ok(())
     }
@@ -142,9 +158,16 @@ impl<M: ManageSieveApi> SieveRules<M> {
         let _writing = self.writing.lock().await;
         let (mut script, ext, running) = self.load().await?;
         for rule in rules {
-            if !script.rules.iter().any(|held| held.criteria == rule.criteria && held.action == rule.action) {
+            if !script
+                .rules
+                .iter()
+                .any(|held| held.criteria == rule.criteria && held.action == rule.action)
+            {
                 let id = format!("sieve-{:016x}", rand::random::<u64>());
-                script.rules.push(Filter { id: Some(id), ..rule.clone() });
+                script.rules.push(Filter {
+                    id: Some(id),
+                    ..rule.clone()
+                });
             }
         }
         self.store(script, &ext, running, None).await
@@ -163,15 +186,29 @@ impl<M: ManageSieveApi> SieveRules<M> {
 
     /// The rule files into a folder the account no longer lists.
     fn misses_folder(&self, rule: &Filter, ext: &Extensions) -> bool {
-        let alone = Script { rules: vec![Filter { off: false, ..rule.clone() }], ..Script::default() };
-        matches!(script::write(&alone, &self.address, &|set| self.folder(set), ext), Err(WriteError::NoFolder(_)))
+        let alone = Script {
+            rules: vec![Filter {
+                off: false,
+                ..rule.clone()
+            }],
+            ..Script::default()
+        };
+        matches!(
+            script::write(&alone, &self.address, &|set| self.folder(set), ext),
+            Err(WriteError::NoFolder(_))
+        )
     }
 
     /// Turns off each rule but `keep` whose folder a JMAP account no longer
     /// lists, after one fresh listing confirms it is gone. Only a JMAP
     /// account can tell: an IMAP folder's id is its name, which the script
     /// names whether or not the folder is there.
-    async fn turn_off_orphans(&self, script: &mut Script, ext: &Extensions, keep: Option<&str>) -> Result<(), BackendError> {
+    async fn turn_off_orphans(
+        &self,
+        script: &mut Script,
+        ext: &Extensions,
+        keep: Option<&str>,
+    ) -> Result<(), BackendError> {
         if !matches!(self.mail, AnyMail::Jmap(_)) {
             return Ok(());
         }
@@ -181,7 +218,11 @@ impl<M: ManageSieveApi> SieveRules<M> {
                 .rules
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| !r.off && (keep.is_none() || r.id.as_deref() != keep) && self.misses_folder(r, ext))
+                .filter(|(_, r)| {
+                    !r.off
+                        && (keep.is_none() || r.id.as_deref() != keep)
+                        && self.misses_folder(r, ext)
+                })
                 .map(|(i, _)| i)
                 .collect()
         };
@@ -273,7 +314,9 @@ impl<M: ManageSieveApi> SieveRules<M> {
 
     /// As `load`, with the script's text as the server holds it, `None`
     /// when the server has no script of the app's.
-    async fn load_text(&self) -> Result<(Script, Extensions, Running, Option<String>), BackendError> {
+    async fn load_text(
+        &self,
+    ) -> Result<(Script, Extensions, Running, Option<String>), BackendError> {
         let caps = self.api.capabilities().await.map_err(|e| self.err(e))?;
         self.state().extensions = Some(caps.sieve.clone());
         let listed = self.api.scripts().await.map_err(|e| self.err(e))?;
@@ -339,7 +382,12 @@ impl<M: ManageSieveApi> SieveRules<M> {
     /// rule that is off turns it back on.
     fn fresh(filter: &Filter) -> Filter {
         Filter {
-            id: Some(filter.id.clone().unwrap_or_else(|| format!("sieve-{:016x}", rand::random::<u64>()))),
+            id: Some(
+                filter
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| format!("sieve-{:016x}", rand::random::<u64>())),
+            ),
             off: false,
             ..filter.clone()
         }
@@ -357,7 +405,8 @@ impl<M: ManageSieveApi> RulesService for SieveRules<M> {
         let (mut script, ext, running) = self.load().await?;
         let made = Self::fresh(filter);
         script.rules.push(made.clone());
-        self.store(script, &ext, running, made.id.as_deref()).await?;
+        self.store(script, &ext, running, made.id.as_deref())
+            .await?;
         Ok(made)
     }
 
@@ -383,7 +432,8 @@ impl<M: ManageSieveApi> RulesService for SieveRules<M> {
             .ok_or(BackendError::NotFound)?;
         let made = Self::fresh(new);
         script.rules[slot] = made.clone();
-        self.store(script, &ext, running, made.id.as_deref()).await?;
+        self.store(script, &ext, running, made.id.as_deref())
+            .await?;
         Ok(made)
     }
 

@@ -99,8 +99,7 @@ impl Smime {
                 let found = status::signature(&run.status).ok_or_else(|| failure(&run))?;
                 // A trusted chain, a revoked certificate, and a signature
                 // with no chain to speak of are gpgsm's final word.
-                if found.chain != Chain::Untrusted || found.verdict == Verdict::RevokedCertificate
-                {
+                if found.chain != Chain::Untrusted || found.verdict == Verdict::RevokedCertificate {
                     return Ok((run, found));
                 }
                 Some((run, found))

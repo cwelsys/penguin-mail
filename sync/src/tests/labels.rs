@@ -35,13 +35,12 @@ async fn labels_are_created_renamed_with_children_and_deleted() {
 }
 
 async fn positions(h: &super::Harness) -> Vec<(String, i64)> {
-    let mut order: Vec<(String, i64)> = h
-        .db
-        .read(|c| mailrs_store::labels::positions(c, 1))
-        .await
-        .unwrap()
-        .into_iter()
-        .collect();
+    let mut order: Vec<(String, i64)> =
+        h.db.read(|c| mailrs_store::labels::positions(c, 1))
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
     order.sort_by_key(|(_, position)| *position);
     order
 }
@@ -58,8 +57,14 @@ async fn a_label_moved_among_its_siblings_keeps_its_name_and_takes_its_place() {
         .await
         .unwrap();
 
-    assert_eq!(positions(&h).await, [(work.id.clone(), 0), (personal.id, 1)]);
-    assert!(h.fake.with(|s| s.labels.iter().any(|l| l.id == work.id && l.name == "Work")));
+    assert_eq!(
+        positions(&h).await,
+        [(work.id.clone(), 0), (personal.id, 1)]
+    );
+    assert!(
+        h.fake
+            .with(|s| s.labels.iter().any(|l| l.id == work.id && l.name == "Work"))
+    );
 }
 
 #[tokio::test]
@@ -71,11 +76,19 @@ async fn a_label_dropped_into_another_is_renamed_under_it_and_placed() {
     let bugs = h.sync.create_label("Work/bugs").await.unwrap();
 
     h.sync
-        .place_label(&bugs.id, "Personal/bugs", &[bugs.id.clone(), bills.id.clone()])
+        .place_label(
+            &bugs.id,
+            "Personal/bugs",
+            &[bugs.id.clone(), bills.id.clone()],
+        )
         .await
         .unwrap();
 
-    assert!(h.fake.with(|s| s.labels.iter().any(|l| l.id == bugs.id && l.name == "Personal/bugs")));
+    assert!(h.fake.with(|s| {
+        s.labels
+            .iter()
+            .any(|l| l.id == bugs.id && l.name == "Personal/bugs")
+    }));
     assert_eq!(positions(&h).await, [(bugs.id, 0), (bills.id, 1)]);
 }
 

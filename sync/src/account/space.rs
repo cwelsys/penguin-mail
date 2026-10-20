@@ -36,16 +36,27 @@ mod tests {
     #[tokio::test]
     async fn the_account_says_how_full_its_server_is() {
         let h = harness().await;
-        h.fake.with(|s| s.drive_storage = Some(DriveStorage { usage: 30, limit: Some(100) }));
+        h.fake.with(|s| {
+            s.drive_storage = Some(DriveStorage {
+                usage: 30,
+                limit: Some(100),
+            })
+        });
         assert_eq!(h.sync.storage().await.unwrap(), Storage::new(30, 100, None));
     }
 
     #[tokio::test]
     async fn a_failed_read_carries_no_server_text() {
         let h = harness().await;
-        h.fake.fail_next(mailrs_gmail::GmailError::Http { status: 400, body: "no quota for ada@example.com".into() });
+        h.fake.fail_next(mailrs_gmail::GmailError::Http {
+            status: 400,
+            body: "no quota for ada@example.com".into(),
+        });
         let err = h.sync.storage().await.unwrap_err();
         let (shown, logged) = (err.to_string(), format!("{err:?}"));
-        assert!(!shown.contains("ada@example.com") && !logged.contains("ada@example.com"), "{logged}");
+        assert!(
+            !shown.contains("ada@example.com") && !logged.contains("ada@example.com"),
+            "{logged}"
+        );
     }
 }

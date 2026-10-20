@@ -81,7 +81,11 @@ fn own_loopback(redirect_uri: &str) -> Result<(), JmapError> {
         && url.host() == Some(Host::Ipv4(Ipv4Addr::LOCALHOST))
         && url.username().is_empty()
         && url.password().is_none();
-    if ours { Ok(()) } else { Err(JmapError::BadRedirect) }
+    if ours {
+        Ok(())
+    } else {
+        Err(JmapError::BadRedirect)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -114,7 +118,10 @@ pub struct Pkce {
 // By hand, so the verifier never reaches a log line.
 impl std::fmt::Debug for Pkce {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Pkce").field("verifier", &"<hidden>").field("challenge", &self.challenge).finish()
+        f.debug_struct("Pkce")
+            .field("verifier", &"<hidden>")
+            .field("challenge", &self.challenge)
+            .finish()
     }
 }
 
@@ -122,7 +129,10 @@ impl Pkce {
     pub fn generate() -> Pkce {
         let verifier = random_token(32);
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-        Pkce { verifier, challenge }
+        Pkce {
+            verifier,
+            challenge,
+        }
     }
 }
 
@@ -148,7 +158,10 @@ impl std::fmt::Debug for Tokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tokens")
             .field("expires_in", &self.expires_in)
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<hidden>"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<hidden>"),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -188,7 +201,10 @@ fn http() -> Result<reqwest::Client, JmapError> {
 async fn read(response: reqwest::Response) -> Result<(u16, Value), JmapError> {
     let status = response.status().as_u16();
     let bytes = read_capped(response, ANSWER_LIMIT).await?;
-    Ok((status, serde_json::from_slice(&bytes).unwrap_or(Value::Null)))
+    Ok((
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    ))
 }
 
 /// The authorization server's metadata, beside the session URL's host,
@@ -202,7 +218,8 @@ pub async fn metadata(session_url: &str) -> Result<Metadata, JmapError> {
 async fn metadata_over(session_url: &str, transport: Transport) -> Result<Metadata, JmapError> {
     // The session URL could hold a password or an address, so the errors
     // name which URL it was and none of it, as `JmapClient::new` does.
-    let parsed = Url::parse(session_url).map_err(|_| JmapError::BadUrl("the session URL".into()))?;
+    let parsed =
+        Url::parse(session_url).map_err(|_| JmapError::BadUrl("the session URL".into()))?;
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(JmapError::BadUrl("the session URL".into()));
     }
@@ -215,7 +232,8 @@ async fn metadata_over(session_url: &str, transport: Transport) -> Result<Metada
     if !(200..300).contains(&status) {
         return Err(JmapError::NotFound);
     }
-    let found: Metadata = serde_json::from_value(body).map_err(|e| decode("the OAuth metadata", &e))?;
+    let found: Metadata =
+        serde_json::from_value(body).map_err(|e| decode("the OAuth metadata", &e))?;
     checked(found, &issuer, transport)
 }
 
@@ -231,8 +249,14 @@ fn checked(found: Metadata, issuer: &str, transport: Transport) -> Result<Metada
     if let Some(registration) = &found.registration_endpoint {
         secure(registration, transport)?;
     }
-    if !found.code_challenge_methods_supported.iter().any(|m| m == "S256") {
-        return Err(JmapError::Forbidden("the server does not take PKCE S256".into()));
+    if !found
+        .code_challenge_methods_supported
+        .iter()
+        .any(|m| m == "S256")
+    {
+        return Err(JmapError::Forbidden(
+            "the server does not take PKCE S256".into(),
+        ));
     }
     Ok(found)
 }
@@ -286,7 +310,11 @@ pub fn authorize_url(
 /// id. A server without a registration endpoint, or with one off https,
 /// refuses. Pass the exact redirect the authorize request will name, port
 /// included: Fastmail matches `http://127.0.0.1/` exactly.
-pub async fn register(metadata: &Metadata, redirect_uri: &str, scopes: &[String]) -> Result<String, JmapError> {
+pub async fn register(
+    metadata: &Metadata,
+    redirect_uri: &str,
+    scopes: &[String],
+) -> Result<String, JmapError> {
     register_over(metadata, redirect_uri, scopes, Transport::HttpsOnly).await
 }
 
@@ -311,7 +339,15 @@ async fn register_over(
         "token_endpoint_auth_method": "none",
         "scope": scopes.join(" "),
     });
-    let (status, answer) = read(http()?.post(endpoint).json(&body).send().await.map_err(network)?).await?;
+    let (status, answer) = read(
+        http()?
+            .post(endpoint)
+            .json(&body)
+            .send()
+            .await
+            .map_err(network)?,
+    )
+    .await?;
     if !(200..300).contains(&status) {
         return Err(JmapError::Forbidden(error_code(answer["error"].as_str())));
     }
@@ -328,8 +364,19 @@ const REVOKE_WAIT: Duration = Duration::from_secs(5);
 /// endpoint the server beside `session_url` names (RFC 7009). Answers
 /// `false` when it names none. Gives up after five seconds, and an error
 /// carries none of the server's words.
-pub async fn revoke(session_url: &str, client_id: &str, refresh_token: &str) -> Result<bool, JmapError> {
-    revoke_over(session_url, client_id, refresh_token, Transport::HttpsOnly, REVOKE_WAIT).await
+pub async fn revoke(
+    session_url: &str,
+    client_id: &str,
+    refresh_token: &str,
+) -> Result<bool, JmapError> {
+    revoke_over(
+        session_url,
+        client_id,
+        refresh_token,
+        Transport::HttpsOnly,
+        REVOKE_WAIT,
+    )
+    .await
 }
 
 async fn revoke_over(
@@ -341,28 +388,59 @@ async fn revoke_over(
 ) -> Result<bool, JmapError> {
     let revoking = async {
         let metadata = metadata_over(session_url, transport).await?;
-        let Some(endpoint) = metadata.revocation_endpoint else { return Ok(false) };
-        revoke_at(&endpoint, client_id, refresh_token, transport).await.map(|()| true)
+        let Some(endpoint) = metadata.revocation_endpoint else {
+            return Ok(false);
+        };
+        revoke_at(&endpoint, client_id, refresh_token, transport)
+            .await
+            .map(|()| true)
     };
     tokio::time::timeout(wait, revoking)
         .await
         .unwrap_or_else(|_| Err(JmapError::Network("the revocation took too long".into())))
 }
 
-async fn revoke_at(endpoint: &str, client_id: &str, refresh_token: &str, transport: Transport) -> Result<(), JmapError> {
+async fn revoke_at(
+    endpoint: &str,
+    client_id: &str,
+    refresh_token: &str,
+    transport: Transport,
+) -> Result<(), JmapError> {
     let endpoint = secure(endpoint, transport)?;
-    let form = [("token", refresh_token), ("token_type_hint", "refresh_token"), ("client_id", client_id)];
-    let (status, body) = read(http()?.post(endpoint).form(&form).send().await.map_err(network)?).await?;
+    let form = [
+        ("token", refresh_token),
+        ("token_type_hint", "refresh_token"),
+        ("client_id", client_id),
+    ];
+    let (status, body) = read(
+        http()?
+            .post(endpoint)
+            .form(&form)
+            .send()
+            .await
+            .map_err(network)?,
+    )
+    .await?;
     match status {
         200..300 => Ok(()),
-        status => Err(JmapError::Problem { status, kind: error_code(body["error"].as_str()), detail: String::new() }),
+        status => Err(JmapError::Problem {
+            status,
+            kind: error_code(body["error"].as_str()),
+            detail: String::new(),
+        }),
     }
 }
 
 impl OAuthClient {
     /// Trades the code from the redirect for tokens.
-    pub async fn exchange(&self, code: &str, redirect_uri: &str, pkce: &Pkce) -> Result<Tokens, JmapError> {
-        self.exchange_over(code, redirect_uri, pkce, Transport::HttpsOnly).await
+    pub async fn exchange(
+        &self,
+        code: &str,
+        redirect_uri: &str,
+        pkce: &Pkce,
+    ) -> Result<Tokens, JmapError> {
+        self.exchange_over(code, redirect_uri, pkce, Transport::HttpsOnly)
+            .await
     }
 
     async fn exchange_over(
@@ -373,14 +451,17 @@ impl OAuthClient {
         transport: Transport,
     ) -> Result<Tokens, JmapError> {
         own_loopback(redirect_uri)?;
-        self.token(transport, &[
-            ("grant_type", "authorization_code"),
-            ("client_id", &self.client_id),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", &pkce.verifier),
-            ("resource", &self.resource),
-        ])
+        self.token(
+            transport,
+            &[
+                ("grant_type", "authorization_code"),
+                ("client_id", &self.client_id),
+                ("code", code),
+                ("redirect_uri", redirect_uri),
+                ("code_verifier", &pkce.verifier),
+                ("resource", &self.resource),
+            ],
+        )
         .await
     }
 
@@ -390,23 +471,40 @@ impl OAuthClient {
         self.refresh_over(refresh_token, Transport::HttpsOnly).await
     }
 
-    async fn refresh_over(&self, refresh_token: &str, transport: Transport) -> Result<Tokens, JmapError> {
-        self.refresh_answer(refresh_token, transport).await.map_err(|(err, _)| err)
+    async fn refresh_over(
+        &self,
+        refresh_token: &str,
+        transport: Transport,
+    ) -> Result<Tokens, JmapError> {
+        self.refresh_answer(refresh_token, transport)
+            .await
+            .map_err(|(err, _)| err)
     }
 
     /// `refresh_over`, with the refresh token a 2xx answer carried when the
     /// client refuses the rest of it.
-    async fn refresh_answer(&self, refresh_token: &str, transport: Transport) -> Result<Tokens, Refused> {
-        self.answer(transport, &[
-            ("grant_type", "refresh_token"),
-            ("client_id", &self.client_id),
-            ("refresh_token", refresh_token),
-            ("resource", &self.resource),
-        ])
+    async fn refresh_answer(
+        &self,
+        refresh_token: &str,
+        transport: Transport,
+    ) -> Result<Tokens, Refused> {
+        self.answer(
+            transport,
+            &[
+                ("grant_type", "refresh_token"),
+                ("client_id", &self.client_id),
+                ("refresh_token", refresh_token),
+                ("resource", &self.resource),
+            ],
+        )
         .await
     }
 
-    async fn token(&self, transport: Transport, form: &[(&str, &str)]) -> Result<Tokens, JmapError> {
+    async fn token(
+        &self,
+        transport: Transport,
+        form: &[(&str, &str)],
+    ) -> Result<Tokens, JmapError> {
         self.answer(transport, form).await.map_err(|(err, _)| err)
     }
 
@@ -416,23 +514,45 @@ impl OAuthClient {
     /// already moved to it.
     async fn answer(&self, transport: Transport, form: &[(&str, &str)]) -> Result<Tokens, Refused> {
         let endpoint = secure(&self.token_endpoint, transport).map_err(|err| (err, None))?;
-        let response = http().map_err(|err| (err, None))?.post(endpoint).form(form).send().await;
-        let (status, body) = read(response.map_err(|err| (network(err), None))?).await.map_err(|err| (err, None))?;
+        let response = http()
+            .map_err(|err| (err, None))?
+            .post(endpoint)
+            .form(form)
+            .send()
+            .await;
+        let (status, body) = read(response.map_err(|err| (network(err), None))?)
+            .await
+            .map_err(|err| (err, None))?;
         if (200..300).contains(&status) {
-            let rotated = body["refresh_token"].as_str().filter(|t| !t.is_empty()).map(str::to_string);
-            let bearer = body["token_type"].as_str().is_some_and(|kind| kind.eq_ignore_ascii_case("Bearer"));
+            let rotated = body["refresh_token"]
+                .as_str()
+                .filter(|t| !t.is_empty())
+                .map(str::to_string);
+            let bearer = body["token_type"]
+                .as_str()
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("Bearer"));
             if !bearer {
                 return Err((JmapError::NotBearer, rotated));
             }
-            return serde_json::from_value(body).map_err(|e| (decode("the token answer", &e), rotated));
+            return serde_json::from_value(body)
+                .map_err(|e| (decode("the token answer", &e), rotated));
         }
-        Err((match (status, error_code(body["error"].as_str()).as_str()) {
-            (_, "invalid_grant") if body["temporary"].as_bool() == Some(true) => JmapError::SignInLocked,
-            (_, "invalid_client" | "unauthorized_client") => JmapError::UnknownClient,
-            (_, "invalid_grant") => JmapError::Unauthorized,
-            (429 | 503, _) => JmapError::RateLimited { retry_after: None },
-            (status, error) => JmapError::Problem { status, kind: error.to_string(), detail: String::new() },
-        }, None))
+        Err((
+            match (status, error_code(body["error"].as_str()).as_str()) {
+                (_, "invalid_grant") if body["temporary"].as_bool() == Some(true) => {
+                    JmapError::SignInLocked
+                }
+                (_, "invalid_client" | "unauthorized_client") => JmapError::UnknownClient,
+                (_, "invalid_grant") => JmapError::Unauthorized,
+                (429 | 503, _) => JmapError::RateLimited { retry_after: None },
+                (status, error) => JmapError::Problem {
+                    status,
+                    kind: error.to_string(),
+                    detail: String::new(),
+                },
+            },
+            None,
+        ))
     }
 }
 
@@ -469,7 +589,11 @@ struct Access {
 impl Access {
     fn new(token: String, expires_in: u64) -> Access {
         let life = Duration::from_secs(expires_in).min(LONGEST_LIFETIME);
-        Access { token, until: Instant::now() + life, margin: EXPIRY_MARGIN.min(life / 2) }
+        Access {
+            token,
+            until: Instant::now() + life,
+            margin: EXPIRY_MARGIN.min(life / 2),
+        }
     }
 }
 
@@ -513,8 +637,12 @@ impl Keeper {
         // The callback's words stay out of the log: they are the caller's.
         match tokio::time::timeout(wait, (self.keep)(token)).await {
             Ok(Ok(())) => *unsaved = None,
-            Ok(Err(_)) => tracing::warn!("could not keep the server's new refresh token; the next call tries again"),
-            Err(_) => tracing::warn!("keeping the server's new refresh token took too long; the next call tries again"),
+            Ok(Err(_)) => tracing::warn!(
+                "could not keep the server's new refresh token; the next call tries again"
+            ),
+            Err(_) => tracing::warn!(
+                "keeping the server's new refresh token took too long; the next call tries again"
+            ),
         }
     }
 }
@@ -538,20 +666,34 @@ pub struct OAuthSession {
 // By hand, so neither token nor the client id reaches a log line.
 impl std::fmt::Debug for OAuthSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OAuthSession").field("token_endpoint", &self.client.token_endpoint).finish_non_exhaustive()
+        f.debug_struct("OAuthSession")
+            .field("token_endpoint", &self.client.token_endpoint)
+            .finish_non_exhaustive()
     }
 }
 
 impl OAuthSession {
     /// A session that starts from a kept refresh token.
     pub fn new(client: OAuthClient, refresh_token: String) -> OAuthSession {
-        OAuthSession::holding(client, Held { refresh_token, access: None })
+        OAuthSession::holding(
+            client,
+            Held {
+                refresh_token,
+                access: None,
+            },
+        )
     }
 
     /// A session that starts from the code exchange's tokens.
     pub fn signed_in(client: OAuthClient, tokens: Tokens) -> OAuthSession {
         let access = Some(Access::new(tokens.access_token, tokens.expires_in));
-        OAuthSession::holding(client, Held { refresh_token: tokens.refresh_token.unwrap_or_default(), access })
+        OAuthSession::holding(
+            client,
+            Held {
+                refresh_token: tokens.refresh_token.unwrap_or_default(),
+                access,
+            },
+        )
     }
 
     fn holding(client: OAuthClient, held: Held) -> OAuthSession {
@@ -574,7 +716,11 @@ impl OAuthSession {
         mut self,
         keep: impl Fn(String) -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
     ) -> OAuthSession {
-        let keeper = Keeper { keep: Box::new(keep), retired: Arc::clone(&self.retired), unsaved: Arc::new(tokio::sync::Mutex::new(None)) };
+        let keeper = Keeper {
+            keep: Box::new(keep),
+            retired: Arc::clone(&self.retired),
+            unsaved: Arc::new(tokio::sync::Mutex::new(None)),
+        };
         self.keeper = Some(Arc::new(keeper));
         self
     }
@@ -644,7 +790,9 @@ impl OAuthSession {
     /// session is retired.
     fn save_again(&self) {
         let Some(keeper) = &self.keeper else { return };
-        let Ok(mut unsaved) = Arc::clone(&keeper.unsaved).try_lock_owned() else { return };
+        let Ok(mut unsaved) = Arc::clone(&keeper.unsaved).try_lock_owned() else {
+            return;
+        };
         // Read under the lock, as `Keeper::save` reads it.
         if unsaved.is_none() || self.retired() {
             return;
@@ -657,8 +805,16 @@ impl OAuthSession {
     /// that gives up halfway cannot drop a rotated refresh token the
     /// server has already moved to.
     async fn renewed(&self, held: tokio::sync::OwnedMutexGuard<Held>) -> Result<String, JmapError> {
-        let refreshing = renew(self.client.clone(), held, self.keeper.clone(), self.keep_wait, self.transport);
-        tokio::spawn(refreshing).await.map_err(|_| JmapError::Network("the token refresh stopped".into()))?
+        let refreshing = renew(
+            self.client.clone(),
+            held,
+            self.keeper.clone(),
+            self.keep_wait,
+            self.transport,
+        );
+        tokio::spawn(refreshing)
+            .await
+            .map_err(|_| JmapError::Network("the token refresh stopped".into()))?
     }
 }
 
@@ -703,7 +859,10 @@ impl Loopback {
     pub async fn bind() -> Result<Loopback, JmapError> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(io)?;
         let port = listener.local_addr().map_err(io)?.port();
-        Ok(Loopback { listener, redirect_uri: format!("http://127.0.0.1:{port}/") })
+        Ok(Loopback {
+            listener,
+            redirect_uri: format!("http://127.0.0.1:{port}/"),
+        })
     }
 
     /// Answers requests until one carries the code or an error for this
@@ -715,7 +874,11 @@ impl Loopback {
     ///
     /// This waits for as long as the browser takes: the caller bounds the
     /// whole sign-in with its own timeout and drops this future.
-    pub async fn wait_for_code(self, state: &str, metadata: &Metadata) -> Result<String, JmapError> {
+    pub async fn wait_for_code(
+        self,
+        state: &str,
+        metadata: &Metadata,
+    ) -> Result<String, JmapError> {
         let mut reading = JoinSet::new();
         loop {
             tokio::select! {
@@ -803,7 +966,9 @@ fn error_code(error: Option<&str>) -> String {
         Some(code)
             if !code.is_empty()
                 && code.len() <= 64
-                && code.bytes().all(|b| matches!(b, 0x20..=0x21 | 0x23..=0x5B | 0x5D..=0x7E)) =>
+                && code
+                    .bytes()
+                    .all(|b| matches!(b, 0x20..=0x21 | 0x23..=0x5B | 0x5D..=0x7E)) =>
         {
             code.to_string()
         }
@@ -817,7 +982,11 @@ fn error_code(error: Option<&str>) -> String {
 /// issuer than `metadata`'s, or that lacks the `iss` the metadata
 /// promised, is refused: the code came from a server other than the one
 /// that will be asked to redeem it.
-pub fn parse_redirect(request: &str, state: &str, metadata: &Metadata) -> Option<Result<String, JmapError>> {
+pub fn parse_redirect(
+    request: &str,
+    state: &str,
+    metadata: &Metadata,
+) -> Option<Result<String, JmapError>> {
     let target = request.lines().next()?.split_whitespace().nth(1)?;
     let url = Url::parse(&format!("http://127.0.0.1{target}")).ok()?;
     let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
@@ -929,7 +1098,11 @@ mod tests {
         assert!(found.authorization_response_iss_parameter_supported);
         assert_eq!(
             oauth_scopes(&found),
-            ["urn:ietf:params:oauth:scope:mail", "urn:ietf:params:oauth:scope:contacts", "offline_access"]
+            [
+                "urn:ietf:params:oauth:scope:mail",
+                "urn:ietf:params:oauth:scope:contacts",
+                "offline_access"
+            ]
         );
     }
 
@@ -950,7 +1123,9 @@ mod tests {
         // trailing slash is already another issuer.
         metadata["issuer"] = json!(format!("{}/", server.uri()));
         serving(&server, metadata).await;
-        let err = metadata_over(&session_of(&server), LOCAL).await.unwrap_err();
+        let err = metadata_over(&session_of(&server), LOCAL)
+            .await
+            .unwrap_err();
         assert_eq!(err, JmapError::IssuerMismatch);
         assert!(!err.to_string().contains("127.0.0.1"), "{err}");
     }
@@ -961,7 +1136,12 @@ mod tests {
         let mut metadata = metadata_for(&server, true);
         metadata["issuer"] = json!("https://evil.example");
         serving(&server, metadata).await;
-        assert_eq!(metadata_over(&session_of(&server), LOCAL).await.unwrap_err(), JmapError::IssuerMismatch);
+        assert_eq!(
+            metadata_over(&session_of(&server), LOCAL)
+                .await
+                .unwrap_err(),
+            JmapError::IssuerMismatch
+        );
     }
 
     #[test]
@@ -976,13 +1156,32 @@ mod tests {
             authorization_response_iss_parameter_supported: false,
             revocation_endpoint: None,
         };
-        assert_eq!(checked(https.clone(), "https://auth.example.com", Transport::HttpsOnly), Ok(https.clone()));
+        assert_eq!(
+            checked(
+                https.clone(),
+                "https://auth.example.com",
+                Transport::HttpsOnly
+            ),
+            Ok(https.clone())
+        );
         let http = "http://auth.example.com/x".to_string();
         for bad in [
-            Metadata { authorization_endpoint: http.clone(), ..https.clone() },
-            Metadata { token_endpoint: http.clone(), ..https.clone() },
-            Metadata { registration_endpoint: Some(http.clone()), ..https.clone() },
-            Metadata { token_endpoint: "not a url".into(), ..https.clone() },
+            Metadata {
+                authorization_endpoint: http.clone(),
+                ..https.clone()
+            },
+            Metadata {
+                token_endpoint: http.clone(),
+                ..https.clone()
+            },
+            Metadata {
+                registration_endpoint: Some(http.clone()),
+                ..https.clone()
+            },
+            Metadata {
+                token_endpoint: "not a url".into(),
+                ..https.clone()
+            },
         ] {
             let err = checked(bad, "https://auth.example.com", Transport::HttpsOnly).unwrap_err();
             assert_eq!(err, JmapError::NotHttps);
@@ -996,7 +1195,11 @@ mod tests {
         serving_metadata(&server, false).await;
         let found = metadata_over(&session_of(&server), LOCAL).await.unwrap();
         assert!(found.registration_endpoint.is_none());
-        assert!(register_over(&found, "http://127.0.0.1/", &[], LOCAL).await.is_err());
+        assert!(
+            register_over(&found, "http://127.0.0.1/", &[], LOCAL)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1005,14 +1208,27 @@ mod tests {
         serving_metadata(&server, true).await;
         Mock::given(method("POST"))
             .and(path("/register"))
-            .and(body_string_contains("\"token_endpoint_auth_method\":\"none\""))
-            .and(body_string_contains("\"redirect_uris\":[\"http://127.0.0.1:5555/\"]"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({"client_id": "stateless-123"})))
+            .and(body_string_contains(
+                "\"token_endpoint_auth_method\":\"none\"",
+            ))
+            .and(body_string_contains(
+                "\"redirect_uris\":[\"http://127.0.0.1:5555/\"]",
+            ))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"client_id": "stateless-123"})),
+            )
             .mount(&server)
             .await;
         let found = metadata_over(&session_of(&server), LOCAL).await.unwrap();
         assert_eq!(
-            register_over(&found, "http://127.0.0.1:5555/", &oauth_scopes(&found), LOCAL).await.unwrap(),
+            register_over(
+                &found,
+                "http://127.0.0.1:5555/",
+                &oauth_scopes(&found),
+                LOCAL
+            )
+            .await
+            .unwrap(),
             "stateless-123"
         );
     }
@@ -1034,13 +1250,28 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("grant_type=refresh_token"))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_grant", "temporary": true})))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_json(json!({"error": "invalid_grant", "temporary": true})),
+            )
             .mount(&server)
             .await;
         let client = client_of(&server);
-        let tokens = client.exchange_over("code", "http://127.0.0.1:5555/", &Pkce::generate(), LOCAL).await.unwrap();
-        assert_eq!((tokens.access_token.as_str(), tokens.refresh_token.as_deref()), ("a1", Some("r1")));
-        assert_eq!(client.refresh_over("r1", LOCAL).await.unwrap_err(), JmapError::SignInLocked);
+        let tokens = client
+            .exchange_over("code", "http://127.0.0.1:5555/", &Pkce::generate(), LOCAL)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                tokens.access_token.as_str(),
+                tokens.refresh_token.as_deref()
+            ),
+            ("a1", Some("r1"))
+        );
+        assert_eq!(
+            client.refresh_over("r1", LOCAL).await.unwrap_err(),
+            JmapError::SignInLocked
+        );
         assert!(JmapError::SignInLocked.is_transient());
     }
 
@@ -1049,10 +1280,18 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_grant"})))
+            .respond_with(
+                ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_grant"})),
+            )
             .mount(&server)
             .await;
-        assert_eq!(client_of(&server).refresh_over("r1", LOCAL).await.unwrap_err(), JmapError::Unauthorized);
+        assert_eq!(
+            client_of(&server)
+                .refresh_over("r1", LOCAL)
+                .await
+                .unwrap_err(),
+            JmapError::Unauthorized
+        );
     }
 
     #[tokio::test]
@@ -1064,12 +1303,23 @@ mod tests {
                 .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": error})))
                 .mount(&server)
                 .await;
-            assert_eq!(client_of(&server).refresh_over("r1", LOCAL).await.unwrap_err(), JmapError::UnknownClient, "{error}");
+            assert_eq!(
+                client_of(&server)
+                    .refresh_over("r1", LOCAL)
+                    .await
+                    .unwrap_err(),
+                JmapError::UnknownClient,
+                "{error}"
+            );
         }
     }
 
     async fn answering_tokens(server: &MockServer, answer: ResponseTemplate) {
-        Mock::given(method("POST")).and(path("/token")).respond_with(answer).mount(server).await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(answer)
+            .mount(server)
+            .await;
     }
 
     #[tokio::test]
@@ -1081,7 +1331,10 @@ mod tests {
                 answer["token_type"] = token_type.clone();
             }
             answering_tokens(&server, ResponseTemplate::new(200).set_body_json(answer)).await;
-            let err = client_of(&server).refresh_over("r1", LOCAL).await.unwrap_err();
+            let err = client_of(&server)
+                .refresh_over("r1", LOCAL)
+                .await
+                .unwrap_err();
             assert_eq!(err, JmapError::NotBearer, "{token_type}");
         }
     }
@@ -1091,7 +1344,14 @@ mod tests {
         let server = MockServer::start().await;
         let answer = json!({"access_token": "a1", "token_type": "bEaReR", "expires_in": 3600});
         answering_tokens(&server, ResponseTemplate::new(200).set_body_json(answer)).await;
-        assert_eq!(client_of(&server).refresh_over("r1", LOCAL).await.unwrap().access_token, "a1");
+        assert_eq!(
+            client_of(&server)
+                .refresh_over("r1", LOCAL)
+                .await
+                .unwrap()
+                .access_token,
+            "a1"
+        );
     }
 
     #[tokio::test]
@@ -1099,19 +1359,49 @@ mod tests {
         let server = MockServer::start().await;
         let answer = json!({"error": "invalid_request", "error_description": "refresh token tok-SECRET-123 is malformed"});
         answering_tokens(&server, ResponseTemplate::new(400).set_body_json(answer)).await;
-        let err = client_of(&server).refresh_over("r1", LOCAL).await.unwrap_err();
-        assert_eq!(err, JmapError::Problem { status: 400, kind: "invalid_request".into(), detail: String::new() });
+        let err = client_of(&server)
+            .refresh_over("r1", LOCAL)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            JmapError::Problem {
+                status: 400,
+                kind: "invalid_request".into(),
+                detail: String::new()
+            }
+        );
         let said = format!("{err} {err:?}");
         assert!(!said.contains("SECRET"), "{said}");
     }
 
     #[tokio::test]
     async fn a_token_error_code_outside_the_rfc_charset_becomes_a_fixed_word() {
-        for code in [json!("tok-SECRET-\\x"), json!("quote\"SECRET"), json!("SECRET".repeat(11)), json!(42)] {
+        for code in [
+            json!("tok-SECRET-\\x"),
+            json!("quote\"SECRET"),
+            json!("SECRET".repeat(11)),
+            json!(42),
+        ] {
             let server = MockServer::start().await;
-            answering_tokens(&server, ResponseTemplate::new(400).set_body_json(json!({"error": code}))).await;
-            let err = client_of(&server).refresh_over("r1", LOCAL).await.unwrap_err();
-            assert_eq!(err, JmapError::Problem { status: 400, kind: "unknown".into(), detail: String::new() }, "{code}");
+            answering_tokens(
+                &server,
+                ResponseTemplate::new(400).set_body_json(json!({"error": code})),
+            )
+            .await;
+            let err = client_of(&server)
+                .refresh_over("r1", LOCAL)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                err,
+                JmapError::Problem {
+                    status: 400,
+                    kind: "unknown".into(),
+                    detail: String::new()
+                },
+                "{code}"
+            );
             assert!(!format!("{err} {err:?}").contains("SECRET"), "{err:?}");
         }
     }
@@ -1128,7 +1418,9 @@ mod tests {
             .mount(&server)
             .await;
         let found = metadata_over(&session_of(&server), LOCAL).await.unwrap();
-        let err = register_over(&found, "http://127.0.0.1/", &[], LOCAL).await.unwrap_err();
+        let err = register_over(&found, "http://127.0.0.1/", &[], LOCAL)
+            .await
+            .unwrap_err();
         assert_eq!(err, JmapError::Forbidden("invalid_redirect_uri".into()));
         assert!(!format!("{err} {err:?}").contains("SECRET"), "{err:?}");
     }
@@ -1141,7 +1433,10 @@ mod tests {
 
     type Saved = Arc<Mutex<Vec<String>>>;
 
-    fn kept() -> (Saved, impl Fn(String) -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static) {
+    fn kept() -> (
+        Saved,
+        impl Fn(String) -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
+    ) {
         let kept = Arc::new(Mutex::new(Vec::new()));
         let into = Arc::clone(&kept);
         (kept, move |token: String| {
@@ -1165,14 +1460,20 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .respond_with(
-                bearer_answer(json!({"access_token": "a2", "expires_in": 3600, "refresh_token": "r2"}))
-                    .set_delay(Duration::from_millis(50)),
+                bearer_answer(
+                    json!({"access_token": "a2", "expires_in": 3600, "refresh_token": "r2"}),
+                )
+                .set_delay(Duration::from_millis(50)),
             )
             .expect(1)
             .mount(&server)
             .await;
         let (saved, keep) = kept();
-        let session = Arc::new(OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL));
+        let session = Arc::new(
+            OAuthSession::new(client_of(&server), "r1".into())
+                .on_rotated(keep)
+                .over(LOCAL),
+        );
         let (one, two) = tokio::join!(session.bearer(false), session.bearer(false));
         assert_eq!((one.unwrap().as_str(), two.unwrap().as_str()), ("a2", "a2"));
         assert_eq!(*saved.lock().unwrap(), ["r2"]);
@@ -1184,18 +1485,25 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r1"))
-            .respond_with(bearer_answer(json!({"access_token": "a2", "expires_in": 0, "refresh_token": "r2"})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a2", "expires_in": 0, "refresh_token": "r2"}),
+            ))
             .expect(1)
             .mount(&server)
             .await;
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r2"))
-            .respond_with(bearer_answer(json!({"access_token": "a3", "expires_in": 3600})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a3", "expires_in": 3600}),
+            ))
             .mount(&server)
             .await;
         let session = OAuthSession::new(client_of(&server), "r1".into())
-            .on_rotated(|_| Box::pin(async { Err("the keyring is locked".to_string()) }) as BoxFuture<'static, Result<(), String>>)
+            .on_rotated(|_| {
+                Box::pin(async { Err("the keyring is locked".to_string()) })
+                    as BoxFuture<'static, Result<(), String>>
+            })
             .over(LOCAL);
         assert_eq!(session.bearer(false).await.unwrap(), "a2");
         // a2 expired at once; the next refresh goes with r2, never r1 again.
@@ -1209,8 +1517,10 @@ mod tests {
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r1"))
             .respond_with(
-                bearer_answer(json!({"access_token": "a2", "expires_in": 3600, "refresh_token": "r2"}))
-                    .set_delay(Duration::from_millis(200)),
+                bearer_answer(
+                    json!({"access_token": "a2", "expires_in": 3600, "refresh_token": "r2"}),
+                )
+                .set_delay(Duration::from_millis(200)),
             )
             .expect(1)
             .mount(&server)
@@ -1218,13 +1528,20 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r2"))
-            .respond_with(bearer_answer(json!({"access_token": "a3", "expires_in": 3600})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a3", "expires_in": 3600}),
+            ))
             .mount(&server)
             .await;
         let (saved, keep) = kept();
-        let session = OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL);
+        let session = OAuthSession::new(client_of(&server), "r1".into())
+            .on_rotated(keep)
+            .over(LOCAL);
         let gave_up = tokio::time::timeout(Duration::from_millis(20), session.bearer(false)).await;
-        assert!(gave_up.is_err(), "the refresh finished before the caller gave up");
+        assert!(
+            gave_up.is_err(),
+            "the refresh finished before the caller gave up"
+        );
         assert_eq!(session.bearer(true).await.unwrap(), "a3");
         assert_eq!(*saved.lock().unwrap(), ["r2"]);
     }
@@ -1232,14 +1549,30 @@ mod tests {
     #[tokio::test]
     async fn a_session_without_a_refresh_token_asks_to_sign_in_again() {
         let server = MockServer::start().await;
-        Mock::given(any()).respond_with(ResponseTemplate::new(500)).expect(0).mount(&server).await;
-        let tokens = Tokens { access_token: "a1".into(), expires_in: 0, refresh_token: None };
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let tokens = Tokens {
+            access_token: "a1".into(),
+            expires_in: 0,
+            refresh_token: None,
+        };
         let session = OAuthSession::signed_in(client_of(&server), tokens).over(LOCAL);
-        assert_eq!(session.bearer(false).await.unwrap_err(), JmapError::Unauthorized);
+        assert_eq!(
+            session.bearer(false).await.unwrap_err(),
+            JmapError::Unauthorized
+        );
     }
 
     /// A keep that refuses its first `refusals` tokens and keeps the rest.
-    fn refusing_first(refusals: usize) -> (Saved, impl Fn(String) -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static) {
+    fn refusing_first(
+        refusals: usize,
+    ) -> (
+        Saved,
+        impl Fn(String) -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
+    ) {
         let kept = Arc::new(Mutex::new(Vec::new()));
         let into = Arc::clone(&kept);
         let tries = Arc::new(Mutex::new(0usize));
@@ -1272,14 +1605,18 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r1"))
-            .respond_with(bearer_answer(json!({"access_token": "a2", "expires_in": expires_in, "refresh_token": "r2"})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a2", "expires_in": expires_in, "refresh_token": "r2"}),
+            ))
             .expect(1)
             .mount(server)
             .await;
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r2"))
-            .respond_with(bearer_answer(json!({"access_token": "a3", "expires_in": 3600})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a3", "expires_in": 3600}),
+            ))
             .mount(server)
             .await;
     }
@@ -1289,7 +1626,9 @@ mod tests {
         let server = MockServer::start().await;
         rotating_once(&server, 3600).await;
         let (saved, keep) = refusing_first(1);
-        let session = OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL);
+        let session = OAuthSession::new(client_of(&server), "r1".into())
+            .on_rotated(keep)
+            .over(LOCAL);
         assert_eq!(session.bearer(false).await.unwrap(), "a2");
         assert!(saved.lock().unwrap().is_empty());
         assert_eq!(session.bearer(false).await.unwrap(), "a2");
@@ -1305,13 +1644,25 @@ mod tests {
         let server = MockServer::start().await;
         rotating_once(&server, 0).await;
         let session = OAuthSession::new(client_of(&server), "r1".into())
-            .on_rotated(|_| Box::pin(futures::future::pending()) as BoxFuture<'static, Result<(), String>>)
+            .on_rotated(|_| {
+                Box::pin(futures::future::pending()) as BoxFuture<'static, Result<(), String>>
+            })
             .over(LOCAL)
             .waiting_for_keep(Duration::from_millis(50));
         let first = tokio::time::timeout(Duration::from_secs(2), session.bearer(false)).await;
-        assert_eq!(first.expect("the refresh waited on the keyring for good").unwrap(), "a2");
+        assert_eq!(
+            first
+                .expect("the refresh waited on the keyring for good")
+                .unwrap(),
+            "a2"
+        );
         let second = tokio::time::timeout(Duration::from_secs(2), session.bearer(false)).await;
-        assert_eq!(second.expect("the refresh waited on the keyring for good").unwrap(), "a3");
+        assert_eq!(
+            second
+                .expect("the refresh waited on the keyring for good")
+                .unwrap(),
+            "a3"
+        );
     }
 
     #[tokio::test]
@@ -1329,12 +1680,19 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r2"))
-            .respond_with(bearer_answer(json!({"access_token": "a3", "expires_in": 3600})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a3", "expires_in": 3600}),
+            ))
             .mount(&server)
             .await;
         let (saved, keep) = kept();
-        let session = OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL);
-        assert_eq!(session.bearer(false).await.unwrap_err(), JmapError::NotBearer);
+        let session = OAuthSession::new(client_of(&server), "r1".into())
+            .on_rotated(keep)
+            .over(LOCAL);
+        assert_eq!(
+            session.bearer(false).await.unwrap_err(),
+            JmapError::NotBearer
+        );
         assert_eq!(*saved.lock().unwrap(), ["r2"]);
         assert_eq!(session.bearer(false).await.unwrap(), "a3");
     }
@@ -1345,13 +1703,20 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(body_string_contains("refresh_token=r1"))
-            .respond_with(bearer_answer(json!({"access_token": 42, "refresh_token": "r2"})))
+            .respond_with(bearer_answer(
+                json!({"access_token": 42, "refresh_token": "r2"}),
+            ))
             .expect(1)
             .mount(&server)
             .await;
         let (saved, keep) = kept();
-        let session = OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL);
-        assert!(matches!(session.bearer(false).await, Err(JmapError::Decode(_))));
+        let session = OAuthSession::new(client_of(&server), "r1".into())
+            .on_rotated(keep)
+            .over(LOCAL);
+        assert!(matches!(
+            session.bearer(false).await,
+            Err(JmapError::Decode(_))
+        ));
         assert_eq!(*saved.lock().unwrap(), ["r2"]);
     }
 
@@ -1360,7 +1725,9 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(bearer_answer(json!({"access_token": "a2", "expires_in": 60})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a2", "expires_in": 60}),
+            ))
             .expect(1)
             .mount(&server)
             .await;
@@ -1374,15 +1741,27 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(bearer_answer(json!({"access_token": "a2", "expires_in": u64::MAX})))
+            .respond_with(bearer_answer(
+                json!({"access_token": "a2", "expires_in": u64::MAX}),
+            ))
             .expect(1)
             .mount(&server)
             .await;
         let session = OAuthSession::new(client_of(&server), "r1".into()).over(LOCAL);
         assert_eq!(session.bearer(false).await.unwrap(), "a2");
         assert_eq!(session.bearer(false).await.unwrap(), "a2");
-        let signed = Tokens { access_token: "a1".into(), expires_in: u64::MAX, refresh_token: Some("r1".into()) };
-        assert_eq!(OAuthSession::signed_in(client_of(&server), signed).bearer(false).await.unwrap(), "a1");
+        let signed = Tokens {
+            access_token: "a1".into(),
+            expires_in: u64::MAX,
+            refresh_token: Some("r1".into()),
+        };
+        assert_eq!(
+            OAuthSession::signed_in(client_of(&server), signed)
+                .bearer(false)
+                .await
+                .unwrap(),
+            "a1"
+        );
     }
 
     /// Serves a session that names `server`'s own API, to any token.
@@ -1400,15 +1779,26 @@ mod tests {
     }
 
     fn jmap_with(server: &MockServer, access: &str) -> JmapClient {
-        let tokens = Tokens { access_token: access.into(), expires_in: 3600, refresh_token: Some("r1".into()) };
+        let tokens = Tokens {
+            access_token: access.into(),
+            expires_in: 3600,
+            refresh_token: Some("r1".into()),
+        };
         let session = OAuthSession::signed_in(client_of(server), tokens).over(LOCAL);
-        JmapClient::new(&format!("{}/jmap/session", server.uri()), Auth::OAuth(Arc::new(session))).unwrap()
+        JmapClient::new(
+            &format!("{}/jmap/session", server.uri()),
+            Auth::OAuth(Arc::new(session)),
+        )
+        .unwrap()
     }
 
     async fn refreshing_to_fresh(server: &MockServer, times: u64) {
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(bearer_answer(json!({"access_token": "fresh", "expires_in": 3600})).set_delay(Duration::from_millis(50)))
+            .respond_with(
+                bearer_answer(json!({"access_token": "fresh", "expires_in": 3600}))
+                    .set_delay(Duration::from_millis(50)),
+            )
             .expect(times)
             .mount(server)
             .await;
@@ -1431,7 +1821,11 @@ mod tests {
             })))
             .mount(server)
             .await;
-        Mock::given(method("POST")).and(path("/api/")).respond_with(echoed()).mount(server).await;
+        Mock::given(method("POST"))
+            .and(path("/api/"))
+            .respond_with(echoed())
+            .mount(server)
+            .await;
     }
 
     /// `stale` answers 401 at `at` once; `fresh` gets `answer`.
@@ -1443,7 +1837,12 @@ mod tests {
             .expect(1)
             .mount(server)
             .await;
-        Mock::given(method(verb)).and(path(at)).and(header("Authorization", "Bearer fresh")).respond_with(answer).mount(server).await;
+        Mock::given(method(verb))
+            .and(path(at))
+            .and(header("Authorization", "Bearer fresh"))
+            .respond_with(answer)
+            .mount(server)
+            .await;
     }
 
     #[tokio::test]
@@ -1451,8 +1850,20 @@ mod tests {
         let server = MockServer::start().await;
         refreshing_to_fresh(&server, 1).await;
         session_read_while_stale(&server).await;
-        refused_then(&server, "GET", "/d/B1", ResponseTemplate::new(200).set_body_bytes(b"blob".to_vec())).await;
-        assert_eq!(jmap_with(&server, "stale").download("A1", "B1", "n", "text/plain", 100).await.unwrap(), b"blob");
+        refused_then(
+            &server,
+            "GET",
+            "/d/B1",
+            ResponseTemplate::new(200).set_body_bytes(b"blob".to_vec()),
+        )
+        .await;
+        assert_eq!(
+            jmap_with(&server, "stale")
+                .download("A1", "B1", "n", "text/plain", 100)
+                .await
+                .unwrap(),
+            b"blob"
+        );
     }
 
     #[tokio::test]
@@ -1461,8 +1872,17 @@ mod tests {
         refreshing_to_fresh(&server, 1).await;
         session_read_while_stale(&server).await;
         let uploaded = json!({"accountId": "A1", "blobId": "B9", "type": "text/plain", "size": 4});
-        refused_then(&server, "POST", "/u/", ResponseTemplate::new(200).set_body_json(uploaded)).await;
-        let got = jmap_with(&server, "stale").upload("A1", "text/plain", b"blob".to_vec()).await.unwrap();
+        refused_then(
+            &server,
+            "POST",
+            "/u/",
+            ResponseTemplate::new(200).set_body_json(uploaded),
+        )
+        .await;
+        let got = jmap_with(&server, "stale")
+            .upload("A1", "text/plain", b"blob".to_vec())
+            .await
+            .unwrap();
         assert_eq!(got.blob_id, "B9");
         let bodies: Vec<Vec<u8>> = server
             .received_requests()
@@ -1472,7 +1892,11 @@ mod tests {
             .filter(|r| r.url.path() == "/u/")
             .map(|r| r.body)
             .collect();
-        assert_eq!(bodies, [b"blob".to_vec(), b"blob".to_vec()], "the same bytes go again");
+        assert_eq!(
+            bodies,
+            [b"blob".to_vec(), b"blob".to_vec()],
+            "the same bytes go again"
+        );
     }
 
     #[tokio::test]
@@ -1481,9 +1905,14 @@ mod tests {
         refreshing_to_fresh(&server, 1).await;
         session_read_while_stale(&server).await;
         let body = "event: state\ndata: {\"@type\":\"StateChange\",\"changed\":{\"A1\":{\"Email\":\"e2\"}}}\n\n";
-        let stream = ResponseTemplate::new(200).insert_header("Content-Type", "text/event-stream").set_body_string(body);
+        let stream = ResponseTemplate::new(200)
+            .insert_header("Content-Type", "text/event-stream")
+            .set_body_string(body);
         refused_then(&server, "GET", "/events/", stream).await;
-        let pushed = jmap_with(&server, "stale").push(Duration::from_secs(5)).await.unwrap();
+        let pushed = jmap_with(&server, "stale")
+            .push(Duration::from_secs(5))
+            .await
+            .unwrap();
         assert_eq!(pushed, crate::Pushed::Changed);
     }
 
@@ -1494,7 +1923,9 @@ mod tests {
     }
 
     fn echoed() -> ResponseTemplate {
-        ResponseTemplate::new(200).set_body_json(json!({"methodResponses": [["Core/echo", {}, "c0"]], "sessionState": "s"}))
+        ResponseTemplate::new(200).set_body_json(
+            json!({"methodResponses": [["Core/echo", {}, "c0"]], "sessionState": "s"}),
+        )
     }
 
     #[tokio::test]
@@ -1509,7 +1940,10 @@ mod tests {
             .mount(&server)
             .await;
         serving_session(&server).await;
-        assert_eq!(jmap_with(&server, "stale").session().await.unwrap().state, "s");
+        assert_eq!(
+            jmap_with(&server, "stale").session().await.unwrap().state,
+            "s"
+        );
     }
 
     #[tokio::test]
@@ -1555,10 +1989,18 @@ mod tests {
         let server = MockServer::start().await;
         refreshing_to_fresh(&server, 1).await;
         serving_session(&server).await;
-        Mock::given(method("POST")).and(path("/api/")).respond_with(ResponseTemplate::new(401)).expect(2).mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/api/"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(2)
+            .mount(&server)
+            .await;
         let jmap = jmap_with(&server, "fresh");
         jmap.session().await.unwrap();
-        assert_eq!(jmap.send(&echo()).await.unwrap_err(), JmapError::Unauthorized);
+        assert_eq!(
+            jmap.send(&echo()).await.unwrap_err(),
+            JmapError::Unauthorized
+        );
     }
 
     #[tokio::test]
@@ -1566,7 +2008,12 @@ mod tests {
         let server = MockServer::start().await;
         refreshing_to_fresh(&server, 0).await;
         serving_session(&server).await;
-        Mock::given(method("POST")).and(path("/api/")).respond_with(ResponseTemplate::new(500)).expect(1).mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/api/"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
         let jmap = jmap_with(&server, "fresh");
         jmap.session().await.unwrap();
         assert!(jmap.send(&echo()).await.is_err());
@@ -1584,7 +2031,12 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        Mock::given(method("GET")).and(path("/jmap/session")).respond_with(ResponseTemplate::new(401)).expect(1).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/jmap/session"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&server)
+            .await;
         let err = jmap_with(&server, "stale").session().await.unwrap_err();
         assert_eq!(err, JmapError::Unauthorized);
         assert!(!format!("{err} {err:?}").contains("SECRET"), "{err:?}");
@@ -1596,14 +2048,20 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .respond_with(
-                bearer_answer(json!({"access_token": "a2", "expires_in": 3600, "refresh_token": "r2"}))
-                    .set_delay(Duration::from_millis(300)),
+                bearer_answer(
+                    json!({"access_token": "a2", "expires_in": 3600, "refresh_token": "r2"}),
+                )
+                .set_delay(Duration::from_millis(300)),
             )
             .expect(1)
             .mount(&server)
             .await;
         let (saved, keep) = kept();
-        let session = Arc::new(OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL));
+        let session = Arc::new(
+            OAuthSession::new(client_of(&server), "r1".into())
+                .on_rotated(keep)
+                .over(LOCAL),
+        );
         let refreshing = tokio::spawn({
             let session = Arc::clone(&session);
             async move { session.bearer(false).await }
@@ -1613,7 +2071,10 @@ mod tests {
         // waits on the server.
         let last = session.retire().await;
         assert_eq!(refreshing.await.unwrap().unwrap(), "a2");
-        assert!(saved.lock().unwrap().is_empty(), "a retired session wrote the keyring");
+        assert!(
+            saved.lock().unwrap().is_empty(),
+            "a retired session wrote the keyring"
+        );
         assert_eq!(last, "r2", "retiring hands back the newest refresh token");
     }
 
@@ -1622,12 +2083,17 @@ mod tests {
         let server = MockServer::start().await;
         rotating_once(&server, 3600).await;
         let (saved, keep) = refusing_first(1);
-        let session = OAuthSession::new(client_of(&server), "r1".into()).on_rotated(keep).over(LOCAL);
+        let session = OAuthSession::new(client_of(&server), "r1".into())
+            .on_rotated(keep)
+            .over(LOCAL);
         assert_eq!(session.bearer(false).await.unwrap(), "a2");
         session.retire().await;
         session.bearer(false).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(saved.lock().unwrap().is_empty(), "save_again ran for a retired session");
+        assert!(
+            saved.lock().unwrap().is_empty(),
+            "save_again ran for a retired session"
+        );
     }
 
     /// Metadata that names `/revoke` on the mock server.
@@ -1650,7 +2116,14 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let revoked = revoke_over(&session_of(&server), "c1", "r1", LOCAL, Duration::from_secs(5)).await;
+        let revoked = revoke_over(
+            &session_of(&server),
+            "c1",
+            "r1",
+            LOCAL,
+            Duration::from_secs(5),
+        )
+        .await;
         assert_eq!(revoked, Ok(true));
     }
 
@@ -1658,8 +2131,22 @@ mod tests {
     async fn a_server_that_names_no_revocation_endpoint_is_left_alone() {
         let server = MockServer::start().await;
         serving_metadata(&server, true).await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&server).await;
-        assert_eq!(revoke_over(&session_of(&server), "c1", "r1", LOCAL, Duration::from_secs(5)).await, Ok(false));
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        assert_eq!(
+            revoke_over(
+                &session_of(&server),
+                "c1",
+                "r1",
+                LOCAL,
+                Duration::from_secs(5)
+            )
+            .await,
+            Ok(false)
+        );
     }
 
     #[tokio::test]
@@ -1672,9 +2159,19 @@ mod tests {
             .mount(&server)
             .await;
         let started = std::time::Instant::now();
-        let revoked = revoke_over(&session_of(&server), "c1", "r1", LOCAL, Duration::from_millis(200)).await;
+        let revoked = revoke_over(
+            &session_of(&server),
+            "c1",
+            "r1",
+            LOCAL,
+            Duration::from_millis(200),
+        )
+        .await;
         assert!(revoked.is_err());
-        assert!(started.elapsed() < Duration::from_secs(2), "the removal would wait on the server");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the removal would wait on the server"
+        );
     }
 
     #[tokio::test]
@@ -1683,17 +2180,36 @@ mod tests {
         serving_revocation(&server).await;
         Mock::given(method("POST"))
             .and(path("/revoke"))
-            .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_request", "error_description": "SECRET r1"})))
+            .respond_with(ResponseTemplate::new(400).set_body_json(
+                json!({"error": "invalid_request", "error_description": "SECRET r1"}),
+            ))
             .mount(&server)
             .await;
-        let err = revoke_over(&session_of(&server), "c1", "r1", LOCAL, Duration::from_secs(5)).await.unwrap_err();
+        let err = revoke_over(
+            &session_of(&server),
+            "c1",
+            "r1",
+            LOCAL,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap_err();
         let shown = format!("{err} {err:?}");
-        assert!(!shown.contains("SECRET") && !shown.contains("r1"), "{shown}");
+        assert!(
+            !shown.contains("SECRET") && !shown.contains("r1"),
+            "{shown}"
+        );
     }
 
     #[tokio::test]
     async fn a_revocation_endpoint_off_https_is_never_called() {
-        let refused = revoke_at("http://auth.example.com/revoke", "c1", "r1", Transport::HttpsOnly).await;
+        let refused = revoke_at(
+            "http://auth.example.com/revoke",
+            "c1",
+            "r1",
+            Transport::HttpsOnly,
+        )
+        .await;
         assert_eq!(refused, Err(JmapError::NotHttps));
     }
 }

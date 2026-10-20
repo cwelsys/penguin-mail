@@ -128,7 +128,11 @@ async fn a_file_written_in_full_takes_the_place_of_the_old_one() {
     file.file().write_all(b"new mail").await.unwrap();
     assert_eq!(file.finish().await.unwrap(), 8);
     assert_eq!(std::fs::read(&path).unwrap(), b"new mail");
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no part file left");
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        1,
+        "no part file left"
+    );
 }
 
 #[tokio::test]
@@ -141,7 +145,11 @@ async fn a_file_given_up_part_way_leaves_the_old_one() {
     file.file().write_all(b"half").await.unwrap();
     drop(file);
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no part file left");
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        1,
+        "no part file left"
+    );
 }
 
 /// A link to the file is written through: the file it names takes the new
@@ -157,7 +165,12 @@ async fn a_link_to_the_file_is_written_through() {
     let mut file = Replacing::create(&link).await.unwrap();
     file.file().write_all(b"new mail").await.unwrap();
     assert_eq!(file.finish().await.unwrap(), 8);
-    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(std::fs::read(&real).unwrap(), b"new mail");
 }
 
@@ -165,7 +178,9 @@ async fn a_link_to_the_file_is_written_through() {
 #[tokio::test]
 async fn a_special_file_is_written_straight_to() {
     use tokio::io::AsyncWriteExt;
-    let mut file = Replacing::create(std::path::Path::new("/dev/null")).await.unwrap();
+    let mut file = Replacing::create(std::path::Path::new("/dev/null"))
+        .await
+        .unwrap();
     file.file().write_all(b"new mail").await.unwrap();
     assert_eq!(file.finish().await.unwrap(), 8);
     assert!(!std::path::Path::new("/dev/null.part").exists());
@@ -182,7 +197,10 @@ async fn the_new_file_keeps_the_old_one_s_mode() {
     let mut file = Replacing::create(&path).await.unwrap();
     file.file().write_all(b"new mail").await.unwrap();
     file.finish().await.unwrap();
-    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 /// A part file already there, even a link someone planted, is no file to
@@ -263,7 +281,10 @@ mod conversations {
         let h = harness().await;
         h.fake.seed(meta("one", "t1", DAY, &["INBOX"]));
         let raw = h.sync.raw_message("one").await.unwrap();
-        let cached = h.sync.cached_raw("one").expect("a small message stays cached");
+        let cached = h
+            .sync
+            .cached_raw("one")
+            .expect("a small message stays cached");
         assert!(std::sync::Arc::ptr_eq(&raw, &cached));
     }
 
@@ -313,7 +334,10 @@ mod conversations {
         });
         let whole = String::from_utf8(h.sync.export_mbox("t1", None).await.unwrap()).unwrap();
         let mut writes = Writes::default();
-        h.sync.export_mbox_to("t1", None, &mut writes).await.unwrap();
+        h.sync
+            .export_mbox_to("t1", None, &mut writes)
+            .await
+            .unwrap();
         assert_eq!(writes.0.len(), 2, "one write per message");
         assert!(writes.0.iter().all(|w| w.starts_with(b"From ")));
         assert_eq!(String::from_utf8(writes.0.concat()).unwrap(), whole);

@@ -52,7 +52,9 @@ fn encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(char::from(byte)),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(char::from(byte))
+            }
             other => out.push_str(&format!("%{other:02X}")),
         }
     }
@@ -85,10 +87,16 @@ impl JmapClient {
     async fn blob_response(&self, url: &str) -> Result<reqwest::Response, JmapError> {
         // `endpoint` repeats a refused URL, and this one holds the account
         // id, so the refusal names the kind of URL instead.
-        let url = self.endpoint(url).map_err(|_| JmapError::BadUrl("the download URL".into()))?;
+        let url = self
+            .endpoint(url)
+            .map_err(|_| JmapError::BadUrl("the download URL".into()))?;
         let response = self
             .with_credentials(|header| {
-                let request = self.http().get(url.clone()).header(AUTHORIZATION, header).timeout(BLOB_TIMEOUT);
+                let request = self
+                    .http()
+                    .get(url.clone())
+                    .header(AUTHORIZATION, header)
+                    .timeout(BLOB_TIMEOUT);
                 async move { request.send().await.map_err(network) }
             })
             .await?;
@@ -98,14 +106,32 @@ impl JmapClient {
         }
     }
 
-    async fn download_url(&self, account_id: &str, blob_id: &str, name: &str, mime: &str) -> Result<String, JmapError> {
+    async fn download_url(
+        &self,
+        account_id: &str,
+        blob_id: &str,
+        name: &str,
+        mime: &str,
+    ) -> Result<String, JmapError> {
         let session = self.session().await?;
-        let values = [("accountId", account_id), ("blobId", blob_id), ("name", name), ("type", mime)];
+        let values = [
+            ("accountId", account_id),
+            ("blobId", blob_id),
+            ("name", name),
+            ("type", mime),
+        ];
         Ok(expand(&session.download_url, &values))
     }
 
     /// The blob's bytes, refused once they pass `limit`.
-    pub async fn download(&self, account_id: &str, blob_id: &str, name: &str, mime: &str, limit: usize) -> Result<Vec<u8>, JmapError> {
+    pub async fn download(
+        &self,
+        account_id: &str,
+        blob_id: &str,
+        name: &str,
+        mime: &str,
+        limit: usize,
+    ) -> Result<Vec<u8>, JmapError> {
         // The session first: reading it takes a permit of its own.
         let url = self.download_url(account_id, blob_id, name, mime).await?;
         let _permit = self.permit().await;
@@ -134,7 +160,10 @@ impl JmapClient {
         partial.push(".part");
         // Removes the partial file on any way out that does not rename it,
         // including the caller dropping this future.
-        let mut guard = PartFile { path: partial.into(), keep: false };
+        let mut guard = PartFile {
+            path: partial.into(),
+            keep: false,
+        };
         let mut file = tokio::fs::File::create(&guard.path).await.map_err(io)?;
         let mut written: u64 = 0;
         while let Some(chunk) = response.chunk().await.map_err(network)? {
@@ -153,26 +182,41 @@ impl JmapClient {
 
     /// Uploads `bytes` as a blob of `mime` to `account_id`, refused before
     /// it goes when it passes the session's `maxSizeUpload`.
-    pub async fn upload(&self, account_id: &str, mime: &str, bytes: Vec<u8>) -> Result<Uploaded, JmapError> {
+    pub async fn upload(
+        &self,
+        account_id: &str,
+        mime: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Uploaded, JmapError> {
         let session = self.session().await?;
         if bytes.len() as u64 > session.limits().max_size_upload {
             return Err(JmapError::RequestTooLarge);
         }
         let url = expand(&session.upload_url, &[("accountId", account_id)]);
-        let url = self.endpoint(&url).map_err(|_| JmapError::BadUrl("the upload URL".into()))?;
+        let url = self
+            .endpoint(&url)
+            .map_err(|_| JmapError::BadUrl("the upload URL".into()))?;
         let mime = HeaderValue::from_str(mime).map_err(|_| JmapError::Problem {
             status: 0,
             kind: "mime".into(),
             detail: "the type is not a valid header value".into(),
         })?;
-        let request =
-            self.http().post(url).header(CONTENT_TYPE, mime).timeout(BLOB_TIMEOUT).body(bytes).build().map_err(network)?;
+        let request = self
+            .http()
+            .post(url)
+            .header(CONTENT_TYPE, mime)
+            .timeout(BLOB_TIMEOUT)
+            .body(bytes)
+            .build()
+            .map_err(network)?;
         let _permit = self.permit().await;
         let response = self
             .with_credentials(|header| {
                 // The body sits in memory, so a second try after a refused
                 // token clones it, and the copy shares its buffer.
-                let copy = request.try_clone().ok_or_else(|| JmapError::Network("the upload cannot be sent again".into()));
+                let copy = request
+                    .try_clone()
+                    .ok_or_else(|| JmapError::Network("the upload cannot be sent again".into()));
                 async move {
                     let mut copy = copy?;
                     copy.headers_mut().insert(AUTHORIZATION, header);

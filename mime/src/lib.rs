@@ -4,18 +4,19 @@
 
 pub mod address;
 pub mod charset;
+pub mod head;
 pub mod html;
 pub mod notes;
-pub mod head;
 mod parts;
+pub mod provenance;
 mod read;
 mod receipt;
-pub mod provenance;
 pub mod snippet;
 mod summary;
 
 pub use parts::{MAX_DEPTH, Part, Parts, body, content_id, is_calendar, numbered};
 pub use read::{
-    Span, Spans, Transfer, decode_span, files, outline, outline_from, part, parts, read, undo_transfer_encoding,
+    Span, Spans, Transfer, decode_span, files, outline, outline_from, part, parts, read,
+    undo_transfer_encoding,
 };
 pub use summary::{Summary, first_recipient, summary};

@@ -27,6 +27,7 @@ fn an_imap_account_files_mail_in_folders_and_threads_it_here() {
             // stored.
             keywords: &["$seen", "$flagged", "$answered", "$draft"],
             native_search: false,
+            paged_mailboxes: true,
             renames: true,
             restates: false,
             tags: false,
@@ -145,16 +146,19 @@ async fn a_folder_dropped_into_another_is_renamed_there_and_placed_by_its_new_na
     h.sync.refresh_labels().await.unwrap();
 
     h.sync
-        .place_label("bugs", "Personal/bugs", &["bugs".into(), "Personal/bills".into()])
+        .place_label(
+            "bugs",
+            "Personal/bugs",
+            &["bugs".into(), "Personal/bills".into()],
+        )
         .await
         .unwrap();
 
     let account_id = h.account_id;
-    let order = h
-        .db
-        .read(move |c| mailrs_store::labels::positions(c, account_id))
-        .await
-        .unwrap();
+    let order =
+        h.db.read(move |c| mailrs_store::labels::positions(c, account_id))
+            .await
+            .unwrap();
     assert_eq!(order.get("Personal/bugs"), Some(&0));
     assert_eq!(order.get("Personal/bills"), Some(&1));
     assert_eq!(order.get("bugs"), None);
@@ -170,7 +174,9 @@ async fn unread_counts_keep_completed_folders_when_one_status_times_out() {
     let counting = tokio::spawn(async move { adapter.unread_counts().await.unwrap() });
     hold.reached().await;
     let counts = tokio::time::timeout(std::time::Duration::from_secs(11), counting)
-        .await.expect("one STATUS cannot hold the count forever").unwrap();
+        .await
+        .expect("one STATUS cannot hold the count forever")
+        .unwrap();
     assert_eq!(counts[&MailSet::Role(Role::Inbox)], 3);
     assert!(!counts.contains_key(&MailSet::Role(Role::Archive)));
 }

@@ -218,7 +218,8 @@ pub trait GmailApi: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Person, GmailError>> + Send;
     /// Every calendar on the account. Answers `GmailError::MissingScope`
     /// until the account grants the calendar list permission.
-    fn calendars(&self) -> impl Future<Output = Result<Vec<calendar::Calendar>, GmailError>> + Send;
+    fn calendars(&self)
+    -> impl Future<Output = Result<Vec<calendar::Calendar>, GmailError>> + Send;
 
     /// One page of changes to `calendar` since `token`, or of the whole
     /// calendar from `from` without one.
@@ -283,9 +284,15 @@ pub trait GmailApi: Send + Sync + 'static {
 
     /// Makes `email` a reader of the Drive file `file_id`, one the app
     /// uploaded, without Drive mailing them.
-    fn share_file(&self, file_id: &str, email: &str) -> impl Future<Output = Result<(), GmailError>> + Send;
+    fn share_file(
+        &self,
+        file_id: &str,
+        email: &str,
+    ) -> impl Future<Output = Result<(), GmailError>> + Send;
     /// How full the Google account's storage is. Needs `drive.file`.
-    fn drive_storage(&self) -> impl Future<Output = Result<mailrs_gmail::DriveStorage, GmailError>> + Send;
+    fn drive_storage(
+        &self,
+    ) -> impl Future<Output = Result<mailrs_gmail::DriveStorage, GmailError>> + Send;
 
     /// Moves `event` from its calendar to `destination`, and mails its
     /// guests when `notify` says so. Answers the event on `destination`.
@@ -528,7 +535,9 @@ impl GmailApi for AccountClient {
         from: EpochMillis,
     ) -> Result<calendar::EventPage, GmailError> {
         let from = rfc3339(from).unwrap_or_default();
-        self.client.event_changes(calendar, token, page, &from).await
+        self.client
+            .event_changes(calendar, token, page, &from)
+            .await
     }
 
     async fn event_range(
@@ -538,7 +547,10 @@ impl GmailApi for AccountClient {
         to: EpochMillis,
         page: Option<&str>,
     ) -> Result<calendar::EventPage, GmailError> {
-        let (from, to) = (rfc3339(from).unwrap_or_default(), rfc3339(to).unwrap_or_default());
+        let (from, to) = (
+            rfc3339(from).unwrap_or_default(),
+            rfc3339(to).unwrap_or_default(),
+        );
         self.client.event_range(calendar, &from, &to, page).await
     }
 
@@ -573,7 +585,9 @@ impl GmailApi for AccountClient {
         mime_type: &str,
         sent: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Result<calendar::Attachment, GmailError> {
-        self.client.upload_to_drive(path, name, mime_type, sent).await
+        self.client
+            .upload_to_drive(path, name, mime_type, sent)
+            .await
     }
 
     async fn share_file(&self, file_id: &str, email: &str) -> Result<(), GmailError> {
@@ -601,7 +615,9 @@ impl GmailApi for AccountClient {
         answer: Answer,
         note: Option<&str>,
     ) -> Result<calendar::Event, GmailError> {
-        self.client.answer_event(calendar, id, me, answer, note).await
+        self.client
+            .answer_event(calendar, id, me, answer, note)
+            .await
     }
 
     async fn edit_calendar_list(

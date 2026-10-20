@@ -10,10 +10,10 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk, pango};
-use mailrs_domain::{AccountId, EpochMillis};
 use mailrs_domain::calendar::{Event, Occurrence};
 use mailrs_domain::invitation::Answer;
 use mailrs_domain::translate::{fill, gettext};
+use mailrs_domain::{AccountId, EpochMillis};
 
 use crate::ui;
 use crate::ui::calendar::drag;
@@ -134,7 +134,11 @@ impl EventBlock {
             let image = gtk::Image::builder()
                 .icon_name(icon)
                 .pixel_size(12)
-                .valign(if whole_days || compact { gtk::Align::Center } else { gtk::Align::Start })
+                .valign(if whole_days || compact {
+                    gtk::Align::Center
+                } else {
+                    gtk::Align::Start
+                })
                 .css_classes(["kind-icon"])
                 .accessible_role(gtk::AccessibleRole::Presentation)
                 .build();
@@ -191,7 +195,10 @@ impl EventBlock {
         });
         button.add_controller(keys);
 
-        EventBlock { widget: button, title: row }
+        EventBlock {
+            widget: button,
+            title: row,
+        }
     }
 
     /// Lets the title wrap onto up to `lines` lines, for a block tall
@@ -316,7 +323,11 @@ mod title_row {
 
     impl Default for TitleRow {
         fn default() -> Self {
-            TitleRow { title: RefCell::default(), clock: RefCell::default(), lines: Cell::new(1) }
+            TitleRow {
+                title: RefCell::default(),
+                clock: RefCell::default(),
+                lines: Cell::new(1),
+            }
         }
     }
 
@@ -346,12 +357,20 @@ mod title_row {
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             let title = self.title.borrow().clone();
             let clock = self.clock.borrow().clone();
-            let Some(title) = title else { return (0, 0, -1, -1) };
-            let clock_nat = clock.as_ref().map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).1);
+            let Some(title) = title else {
+                return (0, 0, -1, -1);
+            };
+            let clock_nat = clock
+                .as_ref()
+                .map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).1);
             match orientation {
                 gtk::Orientation::Horizontal => {
                     let (_, title_nat, _, _) = title.measure(orientation, for_size);
-                    let beside = if clock_nat > 0 { BESIDE_GAP + clock_nat } else { 0 };
+                    let beside = if clock_nat > 0 {
+                        BESIDE_GAP + clock_nat
+                    } else {
+                        0
+                    };
                     (0, title_nat + beside, -1, -1)
                 }
                 _ => {
@@ -360,13 +379,22 @@ mod title_row {
                     // the label measures; a change made while allocating
                     // would come after the height was already settled.
                     let title_nat = title.measure(gtk::Orientation::Horizontal, -1).1;
-                    let room = if for_size >= 0 { self.room(for_size, clock_nat, title_nat) } else { -1 };
+                    let room = if for_size >= 0 {
+                        self.room(for_size, clock_nat, title_nat)
+                    } else {
+                        -1
+                    };
                     if room >= 0 {
                         self.fit_lines(&title, room);
                     }
                     let (title_min, title_nat, _, _) = title.measure(orientation, room);
                     let clock_height = clock.map_or(0, |c| c.measure(orientation, -1).1);
-                    (title_min.max(clock_height), title_nat.max(clock_height), -1, -1)
+                    (
+                        title_min.max(clock_height),
+                        title_nat.max(clock_height),
+                        -1,
+                        -1,
+                    )
                 }
             }
         }
@@ -375,16 +403,20 @@ mod title_row {
             let title = self.title.borrow().clone();
             let clock = self.clock.borrow().clone();
             let Some(title) = title else { return };
-            let clock_width = clock.as_ref().map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).1);
+            let clock_width = clock
+                .as_ref()
+                .map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).1);
             let title_width = title.measure(gtk::Orientation::Horizontal, -1).1;
-            let beside = clock.is_some() && super::beside_title(width, clock_width, title_width) == TimeShown::Start;
+            let beside = clock.is_some()
+                && super::beside_title(width, clock_width, title_width) == TimeShown::Start;
             let room = self.room(width, clock_width, title_width);
             self.fit_lines(&title, room);
             title.allocate(room, height, baseline, None);
             if let Some(clock) = clock {
                 clock.set_child_visible(beside);
                 if beside {
-                    let at = gsk::Transform::new().translate(&graphene::Point::new((width - clock_width) as f32, 0.0));
+                    let at = gsk::Transform::new()
+                        .translate(&graphene::Point::new((width - clock_width) as f32, 0.0));
                     clock.allocate(clock_width, height, baseline, Some(at));
                 }
             }
@@ -396,8 +428,13 @@ mod title_row {
         /// `clock` wide when the row has one and it fits a title whose
         /// natural width is `title`.
         fn room(&self, width: i32, clock: i32, title: i32) -> i32 {
-            let beside = self.clock.borrow().is_some() && super::beside_title(width, clock, title) == TimeShown::Start;
-            if beside { width - clock - BESIDE_GAP } else { width }
+            let beside = self.clock.borrow().is_some()
+                && super::beside_title(width, clock, title) == TimeShown::Start;
+            if beside {
+                width - clock - BESIDE_GAP
+            } else {
+                width
+            }
         }
 
         fn fit_lines(&self, title: &gtk::Label, room: i32) {
@@ -611,9 +648,10 @@ where
     // since the stripes and the icon that show it are not spoken. A
     // title that is already the type's name says it once.
     let named = match super::kinds::kind_words(&o.event.kind) {
-        Some(kind) if !kind.eq_ignore_ascii_case(o.event.title.trim()) => {
-            fill(&gettext("{title}, {kind}"), &[("title", &o.event.title), ("kind", &kind)])
-        }
+        Some(kind) if !kind.eq_ignore_ascii_case(o.event.title.trim()) => fill(
+            &gettext("{title}, {kind}"),
+            &[("title", &o.event.title), ("kind", &kind)],
+        ),
         _ => o.event.title.clone(),
     };
     let title = match day {
@@ -799,8 +837,16 @@ mod tests {
     fn an_out_of_office_block_says_what_it_is() {
         use mailrs_domain::calendar::{Decline, Kind};
         mailrs_domain::translate::set_date_locale("en_US");
-        let event = Event { kind: Kind::OutOfOffice(Decline::default()), ..event(false, None) };
-        let o = Occurrence { account_id: 1, event: std::sync::Arc::new(event), start: 9 * 3_600_000, end: 17 * 3_600_000 };
+        let event = Event {
+            kind: Kind::OutOfOffice(Decline::default()),
+            ..event(false, None)
+        };
+        let o = Occurrence {
+            account_id: 1,
+            event: std::sync::Arc::new(event),
+            start: 9 * 3_600_000,
+            end: 17 * 3_600_000,
+        };
         assert_eq!(
             accessible_name(&o, "Work", None, &Utc),
             "Quarterly review, Out of office, 09:00 to 17:00, Work"
@@ -811,26 +857,62 @@ mod tests {
     fn a_block_titled_with_its_type_says_it_once() {
         use mailrs_domain::calendar::{Decline, Kind};
         mailrs_domain::translate::set_date_locale("en_US");
-        let event = Event { kind: Kind::Focus(Decline::default()), title: "Focus time".into(), ..event(false, None) };
-        let o = Occurrence { account_id: 1, event: std::sync::Arc::new(event), start: 9 * 3_600_000, end: 11 * 3_600_000 };
-        assert_eq!(accessible_name(&o, "Work", None, &Utc), "Focus time, 09:00 to 11:00, Work");
+        let event = Event {
+            kind: Kind::Focus(Decline::default()),
+            title: "Focus time".into(),
+            ..event(false, None)
+        };
+        let o = Occurrence {
+            account_id: 1,
+            event: std::sync::Arc::new(event),
+            start: 9 * 3_600_000,
+            end: 11 * 3_600_000,
+        };
+        assert_eq!(
+            accessible_name(&o, "Work", None, &Utc),
+            "Focus time, 09:00 to 11:00, Work"
+        );
     }
 
     #[test]
     fn a_birthday_chip_says_it_is_a_birthday() {
         use mailrs_domain::calendar::Kind;
         mailrs_domain::translate::set_date_locale("en_US");
-        let event = Event { kind: Kind::Birthday, title: "Ana".into(), ..event(true, None) };
-        let o = Occurrence { account_id: 1, event: std::sync::Arc::new(event), start: 0, end: 24 * 3_600_000 };
-        assert_eq!(accessible_name(&o, "Birthdays", None, &Utc), "Ana, Birthday, all day, Birthdays");
+        let event = Event {
+            kind: Kind::Birthday,
+            title: "Ana".into(),
+            ..event(true, None)
+        };
+        let o = Occurrence {
+            account_id: 1,
+            event: std::sync::Arc::new(event),
+            start: 0,
+            end: 24 * 3_600_000,
+        };
+        assert_eq!(
+            accessible_name(&o, "Birthdays", None, &Utc),
+            "Ana, Birthday, all day, Birthdays"
+        );
     }
 
     #[test]
     fn an_out_of_office_from_midnight_to_midnight_reads_all_day() {
         use mailrs_domain::calendar::{Decline, Kind};
-        let event = Event { kind: Kind::OutOfOffice(Decline::default()), title: "Out of office".into(), ..event(false, None) };
-        let o = Occurrence { account_id: 1, event: std::sync::Arc::new(event), start: 0, end: 24 * 3_600_000 };
-        assert_eq!(accessible_name(&o, "Work", None, &Utc), "Out of office, all day, Work");
+        let event = Event {
+            kind: Kind::OutOfOffice(Decline::default()),
+            title: "Out of office".into(),
+            ..event(false, None)
+        };
+        let o = Occurrence {
+            account_id: 1,
+            event: std::sync::Arc::new(event),
+            start: 0,
+            end: 24 * 3_600_000,
+        };
+        assert_eq!(
+            accessible_name(&o, "Work", None, &Utc),
+            "Out of office, all day, Work"
+        );
     }
 
     #[test]

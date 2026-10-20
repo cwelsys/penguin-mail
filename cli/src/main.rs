@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
-use tokio::io::AsyncWriteExt;
 use mailrs_domain::{Account, AccountId, ChangeEvent, EpochMillis, MailSet, Provider};
 use mailrs_gmail::{GMAIL_API_BASE, Granted, SIGN_IN_SCOPES, authorize};
 use mailrs_store::threads::{self, ThreadFilter};
@@ -18,6 +17,7 @@ use mailrs_sync::{
     AccountServices, AccountSync, BackendError, Clients, Connected, Connector, Lacks, SyncEngine,
     TriageAction, export, now_millis,
 };
+use tokio::io::AsyncWriteExt;
 
 use mailrs_sync::config::{Config, config_path, data_dir, migrate_old_dirs, secure_dirs};
 use mailrs_sync::lock::{LockError, SyncLock};
@@ -186,7 +186,10 @@ fn connector(db: &Db, config: &Config) -> Connector {
 /// or a form to hand the sign-in to.
 async fn connect(connector: &Connector, account: &Account) -> Result<AccountServices> {
     let email = &account.email;
-    let connected = connector.connect(account).await.map_err(|err| anyhow!("{email}: {err}"))?;
+    let connected = connector
+        .connect(account)
+        .await
+        .map_err(|err| anyhow!("{email}: {err}"))?;
     match connected {
         Connected::Ready(services) => Ok(services),
         Connected::NeedsSignIn(lacks) => Err(match (account.provider, lacks) {
@@ -195,7 +198,9 @@ async fn connect(connector: &Connector, account: &Account) -> Result<AccountServ
             }
             (Provider::Gmail, Lacks::Secret) => anyhow!("{email}: {}", BackendError::NeedsReauth),
             (Provider::Microsoft, Lacks::Client) => {
-                anyhow!("{email}: this build has no Microsoft client, so it cannot sync this account")
+                anyhow!(
+                    "{email}: this build has no Microsoft client, so it cannot sync this account"
+                )
             }
             _ => anyhow!("{email}: needs to sign in again in Penguin Mail"),
         }),
@@ -230,7 +235,11 @@ async fn add_account(db: &Db) -> Result<()> {
         &authorized.email,
         &authorized.refresh_token,
         now_millis(),
-        authorized.granted.as_ref().map(Granted::to_scope).as_deref(),
+        authorized
+            .granted
+            .as_ref()
+            .map(Granted::to_scope)
+            .as_deref(),
         &SIGN_IN_SCOPES.join(" "),
         own,
     )
@@ -270,7 +279,8 @@ async fn remove_account(db: &Db, email: &str) -> Result<()> {
             Provider::Gmail => format!(
                 "Removed {email}. Revoke Google's side at https://myaccount.google.com/permissions if you want."
             ),
-            Provider::Imap | Provider::Pop3 | Provider::Jmap => format!("Removed {email} and its password or token."),
+            Provider::Imap | Provider::Pop3 | Provider::Jmap | Provider::CalDav =>
+                format!("Removed {email} and its password or token."),
             Provider::Microsoft => format!(
                 "Removed {email} and its sign-in. Revoke Microsoft's side at https://account.live.com/consent/Manage if you want."
             ),
@@ -291,20 +301,27 @@ async fn run_sync(db: &Db, dir: &Path, config: &Config) -> Result<()> {
         ),
         Err(err) => return Err(err.into()),
     };
-    let all = db.read(accounts::list_accounts).await?;
+    // This command syncs mail, so a calendar account, which has none,
+    // is left to the app.
+    let all = mailrs_domain::mail_accounts(&db.read(accounts::list_accounts).await?);
     if all.is_empty() {
-        bail!("no accounts; run `penguin-mail-cli account add` first");
+        bail!("no mail accounts; run `penguin-mail-cli account add` first");
     }
     let (engine, events) = SyncEngine::new(db.clone(), config.engine_config());
     let connector = connector(db, config);
+    // An account that could not connect said so above and is not syncing.
+    let mut started = 0;
     for account in &all {
         match connect(&connector, account).await {
-            Ok(services) => engine.start_account(account.id, services),
+            Ok(services) => {
+                engine.start_account(account.id, services);
+                started += 1;
+            }
             Err(err) => eprintln!("{err}"),
         }
     }
     let emails: HashMap<AccountId, String> = all.iter().map(|a| (a.id, a.email.clone())).collect();
-    println!("Syncing {} account(s). Press Ctrl-C to stop.", all.len());
+    println!("Syncing {started} account(s). Press Ctrl-C to stop.");
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
@@ -618,10 +635,8 @@ async fn account_sync(db: &Db, config: &Config, email: &str) -> Result<AccountSy
     let engine = config.engine_config();
     let services = connect(&connector(db, config), &account).await?;
     let (events, _) = async_channel::unbounded();
-    Ok(
-        AccountSync::new(account.id, services, db.clone(), events)
-            .with_limits(engine.window_days, engine.body_cache_bytes),
-    )
+    Ok(AccountSync::new(account.id, services, db.clone(), events)
+        .with_limits(engine.window_days, engine.body_cache_bytes))
 }
 
 async fn find_account(db: &Db, email: &str) -> Result<Account> {

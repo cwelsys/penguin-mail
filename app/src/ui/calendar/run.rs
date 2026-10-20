@@ -33,27 +33,27 @@ use std::rc::Rc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use mailrs_domain::calendar::{Event, Occurrence};
-use mailrs_domain::{AccountId, EpochMillis};
 use mailrs_domain::translate::{fill, with_reason};
+use mailrs_domain::{AccountId, EpochMillis};
 use mailrs_sync::calendar_copy::Listed;
 use mailrs_sync::calendar_copy::event_change::{EventChange, Undo};
 use mailrs_sync::{Permitted, Waiting};
 
 use super::block::{EventKey, key_of};
-use super::range::{self, Range, ViewKind};
 use super::next::{self, NextUp};
+use super::range::{self, Range, ViewKind};
 use super::{layout, scope, time_grid};
 pub use crate::wanted::Answer;
 use crate::wanted::{Screen, Wanted};
 
 #[cfg(test)]
-mod fake;
+mod change_tests;
 #[cfg(test)]
-mod tests;
+mod fake;
 #[cfg(test)]
 mod next_tests;
 #[cfg(test)]
-mod change_tests;
+mod tests;
 
 /// What `occurrences` returns at most, so a read that comes back this
 /// full is known to have been cut (`store::calendar`'s `MOST_EVENTS`).
@@ -134,18 +134,31 @@ impl Ledger {
     fn start(&self, place: Place, shows: Shows) -> Ticket {
         let number = self.mint();
         self.newest.borrow_mut().insert(place, number);
-        Ticket { place, number, shows }
+        Ticket {
+            place,
+            number,
+            shows,
+        }
     }
 
     /// The newest read for `place`, for a read that adds to what that
     /// one filled, such as the list's earlier days.
     fn current(&self, place: Place) -> Ticket {
         let number = self.newest.borrow().get(&place).copied().unwrap_or(0);
-        Ticket { place, number, shows: Shows::Anything }
+        Ticket {
+            place,
+            number,
+            shows: Shows::Anything,
+        }
     }
 
     fn is_newest(&self, ticket: &Ticket) -> bool {
-        self.newest.borrow().get(&ticket.place).copied().unwrap_or(0) == ticket.number
+        self.newest
+            .borrow()
+            .get(&ticket.place)
+            .copied()
+            .unwrap_or(0)
+            == ticket.number
     }
 
     /// Forgets a page the view took away.
@@ -243,7 +256,11 @@ pub trait Effects {
         to: EpochMillis,
     ) -> Answer<'_, Result<SidebarRead, String>>;
     /// The invitations waiting for an answer.
-    fn waiting(&self, accounts: Vec<AccountId>, now: EpochMillis) -> Answer<'_, Result<Vec<Waiting>, String>>;
+    fn waiting(
+        &self,
+        accounts: Vec<AccountId>,
+        now: EpochMillis,
+    ) -> Answer<'_, Result<Vec<Waiting>, String>>;
     /// The events on the shown calendars that mention `text`.
     fn search(
         &self,
@@ -254,9 +271,17 @@ pub trait Effects {
     /// The event `key` names, `None` once the copy has lost it.
     fn event(&self, key: EventKey) -> Answer<'_, Result<Option<Event>, String>>;
     /// Whether the copy lacks events back to `from`.
-    fn older_missing(&self, accounts: Vec<AccountId>, from: EpochMillis) -> Answer<'_, Result<bool, String>>;
+    fn older_missing(
+        &self,
+        accounts: Vec<AccountId>,
+        from: EpochMillis,
+    ) -> Answer<'_, Result<bool, String>>;
     /// Fetches the events back to `from` into the copy.
-    fn reach_back(&self, accounts: Vec<AccountId>, from: EpochMillis) -> Answer<'_, Result<(), Unreached>>;
+    fn reach_back(
+        &self,
+        accounts: Vec<AccountId>,
+        from: EpochMillis,
+    ) -> Answer<'_, Result<(), Unreached>>;
     /// Waits until the page's grid has a height to scroll in.
     fn laid_out(&self, page: PageId) -> Answer<'_, ()>;
     /// Waits until the page has been laid out after the latest change.
@@ -287,7 +312,13 @@ pub trait Effects {
     /// Puts `first` to `last` above what the list holds. `listed_from`
     /// is where the list began, which an event running across it already
     /// shows from.
-    fn prepend_list(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate, listed_from: EpochMillis);
+    fn prepend_list(
+        &self,
+        found: Vec<Occurrence>,
+        first: NaiveDate,
+        last: NaiveDate,
+        listed_from: EpochMillis,
+    );
     /// Puts `first` to `last` below what the list holds.
     fn append_list(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate);
     /// Ends the list with the line that says nothing older loads.
@@ -472,17 +503,28 @@ impl CalendarRun {
     /// Reads one page's range and draws it.
     pub fn fill(self: &Rc<Self>, page: PageId) {
         let ticket = self.start(Place::Page(page));
-        let Shows::Range(range) = ticket.shows else { return };
+        let Shows::Range(range) = ticket.shows else {
+            return;
+        };
         let accounts = self.desk.accounts();
         let this = Rc::clone(self);
         self.spawn(async move { this.fill_page(page, range, accounts, ticket).await });
     }
 
-    async fn fill_page(&self, page: PageId, range: Range, accounts: Vec<AccountId>, ticket: Ticket) {
+    async fn fill_page(
+        &self,
+        page: PageId,
+        range: Range,
+        accounts: Vec<AccountId>,
+        ticket: Ticket,
+    ) {
         let wanted = self.wanted(ticket);
         let (from, to) = range.span(&chrono::Local);
         let Some(found) = wanted
-            .ask(|e| e.occurrences(accounts, from, to), "could not read the calendar")
+            .ask(
+                |e| e.occurrences(accounts, from, to),
+                "could not read the calendar",
+            )
             .await
         else {
             return;
@@ -530,14 +572,23 @@ impl CalendarRun {
     /// The occurrence waiting to open, when `found` holds it.
     fn pending_in(&self, found: &[Occurrence]) -> Option<Occurrence> {
         let (key, start) = self.pending.borrow().clone()?;
-        found.iter().find(|o| key_of(o) == key && o.start == start).cloned()
+        found
+            .iter()
+            .find(|o| key_of(o) == key && o.start == start)
+            .cloned()
     }
 
     /// The hour a grid page scrolls to after drawing `found`: the hour of
     /// an event about to open, however far the page was scrolled before;
     /// otherwise its first event's on a range not scrolled for yet. A
     /// month has no hours.
-    fn scroll_hour(&self, page: PageId, range: Range, found: &[Occurrence], opens: Option<&Occurrence>) -> Option<f64> {
+    fn scroll_hour(
+        &self,
+        page: PageId,
+        range: Range,
+        found: &[Occurrence],
+        opens: Option<&Occurrence>,
+    ) -> Option<f64> {
         if range.kind == ViewKind::Month {
             return None;
         }
@@ -546,7 +597,9 @@ impl CalendarRun {
             .map(|o| layout::open_hour(o.start, &chrono::Local));
         match opening {
             Some(hour) => Some(hour),
-            None if self.scrolled.borrow().get(&page) != Some(&range) => Some(first_hour(found, range)),
+            None if self.scrolled.borrow().get(&page) != Some(&range) => {
+                Some(first_hour(found, range))
+            }
             None => None,
         }
     }
@@ -675,7 +728,10 @@ impl CalendarRun {
         self.spawn(async move {
             let wanted = this.wanted(ticket);
             if let Some(waiting) = wanted
-                .ask(|e| e.waiting(accounts, now), "could not read what is waiting for an answer")
+                .ask(
+                    |e| e.waiting(accounts, now),
+                    "could not read what is waiting for an answer",
+                )
                 .await
             {
                 wanted.on_screen(|e| e.draw_waiting(waiting));
@@ -713,9 +769,21 @@ impl CalendarRun {
     /// waits for no ticket: the person stays to answer the question, and a
     /// write they made counts wherever they have moved since.
     pub async fn change(self: &Rc<Self>, changing: Changing) -> Outcome {
-        let Changing { account_id, change, kept_time, shown, when, undo, said, failed } = changing;
+        let Changing {
+            account_id,
+            change,
+            kept_time,
+            shown,
+            when,
+            undo,
+            said,
+            failed,
+        } = changing;
         let title = shown.title.clone();
-        let asked = self.effects.choose(account_id, change.clone(), shown, when).await;
+        let asked = self
+            .effects
+            .choose(account_id, change.clone(), shown, when)
+            .await;
         let answer = match asked {
             Ok(Some(answer)) => answer,
             Ok(None) => return Outcome::Canceled,
@@ -732,7 +800,9 @@ impl CalendarRun {
             Ok(Permitted::Done(held)) => {
                 self.reload();
                 match held {
-                    Some(held) => self.effects.offer_undo(fill(&said, &[("title", &title)]), held),
+                    Some(held) => self
+                        .effects
+                        .offer_undo(fill(&said, &[("title", &title)]), held),
                     None if undo == Undo::Skip => self.effects.push(account_id),
                     None => {}
                 }
@@ -784,7 +854,10 @@ impl CalendarRun {
             let wanted = this.wanted(ticket);
             let (from, to) = day_span(first, last);
             if let Some(found) = wanted
-                .ask(|e| e.occurrences(accounts, from, to), "could not read the calendar")
+                .ask(
+                    |e| e.occurrences(accounts, from, to),
+                    "could not read the calendar",
+                )
                 .await
             {
                 wanted.on_screen(|e| e.redraw_list(found, first, last));
@@ -792,17 +865,29 @@ impl CalendarRun {
         });
     }
 
-    async fn list_window(&self, first: NaiveDate, last: NaiveDate, accounts: Vec<AccountId>, ticket: Ticket) {
+    async fn list_window(
+        &self,
+        first: NaiveDate,
+        last: NaiveDate,
+        accounts: Vec<AccountId>,
+        ticket: Ticket,
+    ) {
         let wanted = self.wanted(ticket);
         let (from, to) = day_span(first, last);
         let Some(found) = wanted
-            .ask(|e| e.occurrences(accounts, from, to), "could not read the calendar")
+            .ask(
+                |e| e.occurrences(accounts, from, to),
+                "could not read the calendar",
+            )
             .await
         else {
             return;
         };
         let opens = self.pending_in(&found);
-        if wanted.on_screen(|e| e.draw_list(found, first, last)).is_none() {
+        if wanted
+            .on_screen(|e| e.draw_list(found, first, last))
+            .is_none()
+        {
             return;
         }
         self.list.last.set(Some(last));
@@ -828,7 +913,9 @@ impl CalendarRun {
         }
         let cutoff = range::earliest_agenda_day(self.desk.today());
         let held_from = self.list.first.get();
-        let Some(last) = held_from.pred_opt() else { return };
+        let Some(last) = held_from.pred_opt() else {
+            return;
+        };
         if last < cutoff {
             self.list.exhausted.set(true);
             self.effects.no_earlier();
@@ -839,7 +926,10 @@ impl CalendarRun {
         let ticket = self.ledger.current(Place::List);
         let accounts = self.desk.accounts();
         let this = Rc::clone(self);
-        self.spawn(async move { this.list_earlier(first, last, cutoff, accounts, ticket).await });
+        self.spawn(async move {
+            this.list_earlier(first, last, cutoff, accounts, ticket)
+                .await
+        });
     }
 
     async fn list_earlier(
@@ -889,11 +979,15 @@ impl CalendarRun {
     /// Reads the 30 days after what the list holds once the reader scrolls
     /// near its end, up to `range::latest_agenda_day`.
     pub fn load_later(self: &Rc<Self>) {
-        let Some(held_to) = self.list.last.get() else { return };
+        let Some(held_to) = self.list.last.get() else {
+            return;
+        };
         if self.list.later.get() {
             return;
         }
-        let Some((first, last)) = range::agenda_later(held_to, self.desk.today()) else { return };
+        let Some((first, last)) = range::agenda_later(held_to, self.desk.today()) else {
+            return;
+        };
         self.list.later.set(true);
         let ticket = self.ledger.current(Place::List);
         let accounts = self.desk.accounts();
@@ -931,7 +1025,10 @@ impl CalendarRun {
         self.spawn(async move {
             let wanted = this.wanted(ticket);
             if let Some(found) = wanted
-                .ask(|e| e.search(accounts, text, now), "could not search the calendar")
+                .ask(
+                    |e| e.search(accounts, text, now),
+                    "could not search the calendar",
+                )
                 .await
             {
                 wanted.on_screen(|e| e.draw_results(found));
@@ -1025,7 +1122,8 @@ fn first_hour(found: &[Occurrence], range: Range) -> f64 {
         .iter()
         .filter(|o| !time_grid::in_strip(o) && o.start >= from && o.start < to)
         .filter_map(|o| {
-            let local = DateTime::<Utc>::from_timestamp_millis(o.start)?.with_timezone(&chrono::Local);
+            let local =
+                DateTime::<Utc>::from_timestamp_millis(o.start)?.with_timezone(&chrono::Local);
             let midnight = local.date_naive().and_hms_opt(0, 0, 0)?;
             Some(layout::wall_offset(o.start, midnight, &chrono::Local))
         })
@@ -1066,7 +1164,10 @@ impl Screen<Ticket> for NextCard {
 
 impl NextCard {
     pub fn new(card: Rc<dyn Card>) -> NextCard {
-        NextCard { card, ledger: Ledger::default() }
+        NextCard {
+            card,
+            ledger: Ledger::default(),
+        }
     }
 
     /// Reads the next event and puts it on the card, or takes the card
@@ -1074,12 +1175,17 @@ impl NextCard {
     pub fn refresh(self: &Rc<Self>) {
         let ticket = self.ledger.start(Place::Next, Shows::Anything);
         let now = self.card.now();
-        let Some(day_ends) = local_midnight_after(now) else { return };
+        let Some(day_ends) = local_midnight_after(now) else {
+            return;
+        };
         let this = Rc::clone(self);
         self.card.spawn(Box::pin(async move {
             let wanted = Wanted::new(&*this as &dyn Screen<Ticket>, &*this.card, ticket);
             let Some((found, colours)) = wanted
-                .ask(|card| card.read(now, now + next::AHEAD), "could not read the next event")
+                .ask(
+                    |card| card.read(now, now + next::AHEAD),
+                    "could not read the next event",
+                )
                 .await
             else {
                 return;

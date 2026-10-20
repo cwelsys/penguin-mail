@@ -32,7 +32,13 @@ impl RulesBeside {
 
     /// The ids of the rules that run on this computer.
     pub async fn kept_here(&self) -> Result<Vec<String>, BackendError> {
-        Ok(self.local.filters().await?.into_iter().filter_map(|f| f.id).collect())
+        Ok(self
+            .local
+            .filters()
+            .await?
+            .into_iter()
+            .filter_map(|f| f.id)
+            .collect())
     }
 
     async fn is_here(&self, id: &str) -> Result<bool, BackendError> {

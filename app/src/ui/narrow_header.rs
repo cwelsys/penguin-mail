@@ -36,7 +36,11 @@ mod tests {
     fn a_wide_header_keeps_its_subtitle_and_new() {
         assert_eq!(
             header_layout(false),
-            HeaderLayout { subtitle: true, small_title: false, new_below: false }
+            HeaderLayout {
+                subtitle: true,
+                small_title: false,
+                new_below: false
+            }
         );
     }
 
@@ -44,7 +48,11 @@ mod tests {
     fn a_narrow_header_drops_the_subtitle_shrinks_the_title_and_moves_new_down() {
         assert_eq!(
             header_layout(true),
-            HeaderLayout { subtitle: false, small_title: true, new_below: true }
+            HeaderLayout {
+                subtitle: false,
+                small_title: true,
+                new_below: true
+            }
         );
     }
 }

@@ -197,7 +197,7 @@ pub struct MailTray {
 /// that does not search it, or nothing. A snap's icons are not on the
 /// host's search path, and without them the host draws a blank.
 pub fn installed_icons() -> String {
-    std::env::current_exe()
+    crate::exe::path()
         .ok()
         .and_then(|exe| icons_beside(&exe))
         .map(|path| path.to_string_lossy().into_owned())
@@ -486,11 +486,17 @@ mod tests {
     fn one_unread_message_puts_a_dot_on_the_envelope_and_1_beside_it() {
         use ksni::Tray;
         let tray = tray(1);
-        assert_eq!(tray.icon_name(), format!("{}-unread-symbolic", crate::APP_ID));
+        assert_eq!(
+            tray.icon_name(),
+            format!("{}-unread-symbolic", crate::APP_ID)
+        );
         assert_eq!(tray.x_ayatana_label(), "1");
         assert_eq!(tray.x_ayatana_label_guide(), "1");
         assert_eq!(tray.tool_tip().title, "Penguin Mail: 1 unread message");
-        assert_eq!(tray.icon_accessible_desc(), "Penguin Mail: 1 unread message");
+        assert_eq!(
+            tray.icon_accessible_desc(),
+            "Penguin Mail: 1 unread message"
+        );
         assert!(tray.icon_pixmap().is_empty());
     }
 
@@ -498,7 +504,10 @@ mod tests {
     fn a_large_count_is_written_out_in_full() {
         use ksni::Tray;
         let tray = tray(120);
-        assert_eq!(tray.icon_name(), format!("{}-unread-symbolic", crate::APP_ID));
+        assert_eq!(
+            tray.icon_name(),
+            format!("{}-unread-symbolic", crate::APP_ID)
+        );
         assert_eq!(tray.x_ayatana_label(), "120");
         assert_eq!(tray.tool_tip().title, "Penguin Mail: 120 unread messages");
     }
@@ -534,8 +543,12 @@ mod tests {
     /// Both glyphs ship with the app, under the names the tray sends.
     #[test]
     fn the_tray_glyphs_are_in_the_icon_folder() {
-        let apps = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/icons/scalable/apps");
-        for name in ["io.github.c9dev.PenguinMail-symbolic", "io.github.c9dev.PenguinMail-unread-symbolic"] {
+        let apps =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/icons/scalable/apps");
+        for name in [
+            "io.github.c9dev.PenguinMail-symbolic",
+            "io.github.c9dev.PenguinMail-unread-symbolic",
+        ] {
             assert!(apps.join(format!("{name}.svg")).is_file(), "{name}");
         }
     }
@@ -554,7 +567,10 @@ mod tests {
             .join(format!("{}-unread-symbolic.svg", crate::APP_ID));
         std::fs::create_dir_all(glyph.parent().unwrap()).unwrap();
         std::fs::write(&glyph, "<svg/>").unwrap();
-        assert_eq!(super::icons_beside(&exe), Some(root.path().join("share/icons")));
+        assert_eq!(
+            super::icons_beside(&exe),
+            Some(root.path().join("share/icons"))
+        );
     }
 
     #[test]

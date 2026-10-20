@@ -64,6 +64,8 @@ pub struct AccountSync {
     events: crate::events::Outgoing,
     window_days: i64,
     body_cache_bytes: i64,
+    /// The engine's network monitor, shared with foreground folder loads.
+    network: Arc<std::sync::atomic::AtomicBool>,
     retry_max: Duration,
     wait_ceiling: Duration,
     /// Cached bodies read since the last write of their access times.
@@ -113,6 +115,7 @@ impl AccountSync {
             events: crate::events::Outgoing::new(events),
             window_days: DEFAULT_WINDOW_DAYS,
             body_cache_bytes: DEFAULT_BODY_CACHE_BYTES,
+            network: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             retry_max: Duration::from_secs(8),
             wait_ceiling: crate::WAIT_CEILING,
             touched: Arc::default(),
@@ -130,6 +133,16 @@ impl AccountSync {
         self.window_days = window_days;
         self.body_cache_bytes = body_cache_bytes;
         self
+    }
+
+    /// Shares the engine's network monitor with foreground folder loads.
+    pub(crate) fn with_network(mut self, network: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.network = network;
+        self
+    }
+
+    pub(crate) fn network_available(&self) -> bool {
+        self.network.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Shares `cache` with the other accounts, so all of them keep their
@@ -178,10 +191,11 @@ impl AccountSync {
         // second copy here would double them.
         let local = self.mail.capabilities().local_mailboxes;
         if !local && ((bytes.len() as i64) < RAW_LIMIT || self.small(message_id).await?) {
-            self.raw
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .put(self.account_id, message_id.to_string(), Arc::clone(&bytes));
+            self.raw.lock().unwrap_or_else(PoisonError::into_inner).put(
+                self.account_id,
+                message_id.to_string(),
+                Arc::clone(&bytes),
+            );
         }
         Ok(bytes)
     }
@@ -244,6 +258,25 @@ impl AccountSync {
             .write(move |c| accounts::set_state(c, account_id, state))
             .await?;
         self.emit(ChangeEvent::AccountStateChanged { account_id, state });
+        Ok(())
+    }
+
+    /// Says the account's state as the store keeps it, and changes
+    /// nothing. An account with no mail runs no loop to say how it is
+    /// doing, and the window reads what a started account offers when it
+    /// hears of it.
+    pub(crate) async fn restate(&self) -> Result<(), SyncError> {
+        let account_id = self.account_id;
+        let kept = self
+            .db
+            .read(move |c| accounts::account(c, account_id))
+            .await?;
+        if let Some(account) = kept {
+            self.emit(ChangeEvent::AccountStateChanged {
+                account_id,
+                state: account.state,
+            });
+        }
         Ok(())
     }
 

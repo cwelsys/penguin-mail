@@ -12,8 +12,8 @@ use std::time::Duration;
 use mailrs_discover::JmapProvider;
 use mailrs_jmap::oauth::{self, Loopback, Metadata, OAuthClient, Pkce, Tokens};
 use mailrs_jmap::{Auth, JmapClient, JmapError};
-use mailrs_store::{Db, accounts};
 use mailrs_store::jmap::{JmapAuth, JmapSaved, SavedOAuth};
+use mailrs_store::{Db, accounts};
 
 use super::{BrowserSignInError, NewJmap, SignedAs, SignedIn, jmap_signed_in};
 use crate::passwords::{PasswordStore, Secrets};
@@ -43,9 +43,23 @@ pub enum BrowserReady {
 /// The sign-in server's OAuth calls. The live one goes to the server over
 /// https only; tests answer from memory, so nothing here loosens that.
 pub(crate) trait SignInServer: Send + Sync {
-    fn metadata(&self, session_url: &str) -> impl Future<Output = Result<Metadata, JmapError>> + Send;
-    fn register(&self, metadata: &Metadata, redirect: &str, scopes: &[String]) -> impl Future<Output = Result<String, JmapError>> + Send;
-    fn exchange(&self, client: &OAuthClient, code: &str, redirect: &str, pkce: &Pkce) -> impl Future<Output = Result<Tokens, JmapError>> + Send;
+    fn metadata(
+        &self,
+        session_url: &str,
+    ) -> impl Future<Output = Result<Metadata, JmapError>> + Send;
+    fn register(
+        &self,
+        metadata: &Metadata,
+        redirect: &str,
+        scopes: &[String],
+    ) -> impl Future<Output = Result<String, JmapError>> + Send;
+    fn exchange(
+        &self,
+        client: &OAuthClient,
+        code: &str,
+        redirect: &str,
+        pkce: &Pkce,
+    ) -> impl Future<Output = Result<Tokens, JmapError>> + Send;
     /// Revokes a grant the app will not keep, on a task of its own.
     fn revoke(&self, grant: JmapGrant);
 }
@@ -57,11 +71,22 @@ impl SignInServer for Live {
         oauth::metadata(session_url).await
     }
 
-    async fn register(&self, metadata: &Metadata, redirect: &str, scopes: &[String]) -> Result<String, JmapError> {
+    async fn register(
+        &self,
+        metadata: &Metadata,
+        redirect: &str,
+        scopes: &[String],
+    ) -> Result<String, JmapError> {
         oauth::register(metadata, redirect, scopes).await
     }
 
-    async fn exchange(&self, client: &OAuthClient, code: &str, redirect: &str, pkce: &Pkce) -> Result<Tokens, JmapError> {
+    async fn exchange(
+        &self,
+        client: &OAuthClient,
+        code: &str,
+        redirect: &str,
+        pkce: &Pkce,
+    ) -> Result<Tokens, JmapError> {
         client.exchange(code, redirect, pkce).await
     }
 
@@ -95,7 +120,9 @@ fn scopes_for(offer: &JmapBrowser, metadata: &Metadata) -> Vec<String> {
 /// The host a session URL names, as the account's provider name. The
 /// metadata read already refused a URL with a user name in it.
 fn host_of(session_url: &str) -> &str {
-    let rest = session_url.split_once("://").map_or(session_url, |(_, rest)| rest);
+    let rest = session_url
+        .split_once("://")
+        .map_or(session_url, |(_, rest)| rest);
     rest.split(['/', ':', '?', '#']).next().unwrap_or_default()
 }
 
@@ -140,13 +167,29 @@ impl<S: SignInServer, O: Fn(&str)> Trip<'_, S, O> {
     /// `http://127.0.0.1/` must match exactly, and its page refuses the
     /// request. An exact redirect suits every server, so no client from an
     /// earlier sign-in, which listened on another port, is used again.
-    async fn consent(&self, canceled: impl Future<Output = ()>) -> Result<(String, Tokens), BrowserSignInError> {
+    async fn consent(
+        &self,
+        canceled: impl Future<Output = ()>,
+    ) -> Result<(String, Tokens), BrowserSignInError> {
         let loopback = Loopback::bind().await.map_err(BrowserSignInError::Jmap)?;
         let redirect = loopback.redirect_uri.clone();
-        let client_id = self.server.register(self.metadata, &redirect, self.scopes).await.map_err(BrowserSignInError::Jmap)?;
-        let (pkce, state) = (Pkce::generate(), oauth::random_token(32));
-        let url = oauth::authorize_url(self.metadata, &client_id, &redirect, self.scopes, &pkce, &state, self.session_url, Some(self.address))
+        let client_id = self
+            .server
+            .register(self.metadata, &redirect, self.scopes)
+            .await
             .map_err(BrowserSignInError::Jmap)?;
+        let (pkce, state) = (Pkce::generate(), oauth::random_token(32));
+        let url = oauth::authorize_url(
+            self.metadata,
+            &client_id,
+            &redirect,
+            self.scopes,
+            &pkce,
+            &state,
+            self.session_url,
+            Some(self.address),
+        )
+        .map_err(BrowserSignInError::Jmap)?;
         (self.open)(&url);
         let code = redirected(loopback, &state, self.metadata, canceled, self.wait).await?;
         let client = OAuthClient {
@@ -154,7 +197,11 @@ impl<S: SignInServer, O: Fn(&str)> Trip<'_, S, O> {
             token_endpoint: self.metadata.token_endpoint.clone(),
             resource: self.session_url.to_string(),
         };
-        let tokens = self.server.exchange(&client, &code, &redirect, &pkce).await.map_err(BrowserSignInError::Jmap)?;
+        let tokens = self
+            .server
+            .exchange(&client, &code, &redirect, &pkce)
+            .await
+            .map_err(BrowserSignInError::Jmap)?;
         Ok((client.client_id, tokens))
     }
 }
@@ -175,10 +222,23 @@ pub async fn jmap_in_browser(
     open: impl Fn(&str),
     canceled: impl Future<Output = ()>,
 ) -> Result<SignedIn, BrowserSignInError> {
-    signing_in(&Live, connector, offer, address, dav_password, open, canceled, BROWSER_WAIT).await
+    signing_in(
+        &Live,
+        connector,
+        offer,
+        address,
+        dav_password,
+        open,
+        canceled,
+        BROWSER_WAIT,
+    )
+    .await
 }
 
-#[expect(clippy::too_many_arguments, reason = "jmap_in_browser's arguments, plus the server and the wait tests set")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "jmap_in_browser's arguments, plus the server and the wait tests set"
+)]
 pub(crate) async fn signing_in<S: SignInServer>(
     server: &S,
     connector: &Connector,
@@ -193,14 +253,27 @@ pub(crate) async fn signing_in<S: SignInServer>(
         return Err(BrowserSignInError::NotOffered);
     };
     let scopes = scopes_for(&offer, &metadata);
-    let trip = Trip { server, metadata: &metadata, scopes: &scopes, session_url: &offer.session_url, address, open: &open, wait };
+    let trip = Trip {
+        server,
+        metadata: &metadata,
+        scopes: &scopes,
+        session_url: &offer.session_url,
+        address,
+        open: &open,
+        wait,
+    };
     let (client_id, tokens) = trip.consent(canceled).await?;
-    let refresh = tokens.refresh_token.ok_or(BrowserSignInError::NoRefreshToken)?;
+    let refresh = tokens
+        .refresh_token
+        .ok_or(BrowserSignInError::NoRefreshToken)?;
     // The check sends the access token as it came. A session here could
     // refresh and rotate the refresh token before the keyring holds it,
     // and Fastmail revokes a grant whose old refresh token comes back.
-    let api = JmapClient::new(&offer.session_url, Auth::Bearer(tokens.access_token)).map_err(BrowserSignInError::Jmap)?;
-    let checked = mailrs_jmap::check(&api).await.map_err(BrowserSignInError::Jmap)?;
+    let api = JmapClient::new(&offer.session_url, Auth::Bearer(tokens.access_token))
+        .map_err(BrowserSignInError::Jmap)?;
+    let checked = mailrs_jmap::check(&api)
+        .await
+        .map_err(BrowserSignInError::Jmap)?;
     let session = &checked.session;
     let provider_name = match &offer.provider {
         Some(provider) => provider.name.clone(),
@@ -215,24 +288,41 @@ pub(crate) async fn signing_in<S: SignInServer>(
     };
     // What revoking this grant takes, should the session turn out to be
     // someone else's.
-    let refused = JmapGrant { session_url: offer.session_url.clone(), client_id: client_id.clone(), refresh_token: refresh.clone() };
+    let refused = JmapGrant {
+        session_url: offer.session_url.clone(),
+        client_id: client_id.clone(),
+        refresh_token: refresh.clone(),
+    };
     let new = NewJmap {
         address,
         provider_name,
         saved: JmapSaved {
             labels: session.mailboxes_per_email().is_none_or(|most| most > 1),
-            capabilities: session.capabilities.keys().filter(|c| session.offers(c)).cloned().collect(),
+            capabilities: session
+                .capabilities
+                .keys()
+                .filter(|c| session.offers(c))
+                .cloned()
+                .collect(),
             session_url: offer.session_url,
             auth: JmapAuth::OAuth,
             user_name: None,
-            oauth: Some(SavedOAuth { client_id, token_endpoint: metadata.token_endpoint }),
+            oauth: Some(SavedOAuth {
+                client_id,
+                token_endpoint: metadata.token_endpoint,
+            }),
             owner: None,
         },
         secret: refresh,
         dav_password: dav_password.filter(|p| !p.is_empty()),
         signed_as: SignedAs::of(&checked),
     };
-    let Connector { db, config, secrets, .. } = connector;
+    let Connector {
+        db,
+        config,
+        secrets,
+        ..
+    } = connector;
     // The keyring takes the refresh token as the account is kept; when it
     // refuses, a new account goes again and the sign-in fails. The new
     // refresh token, and maybe a new client, need a new session:
@@ -255,14 +345,21 @@ pub(crate) async fn signing_in<S: SignInServer>(
     crate::connect::try_the_token_again(db, account.id).await?;
     let window_days = config.engine_config().window_days;
     let services = connect_jmap(db, secrets, &account, window_days).await?;
-    Ok(SignedIn { account, name: None, services })
+    Ok(SignedIn {
+        account,
+        name: None,
+        services,
+    })
 }
 
 /// Whether the account at `address` keeps `refresh_token` as its secret.
 /// A store or keyring that cannot answer says no.
 async fn held_by(db: &Db, secrets: &Secrets, address: &str, refresh_token: &str) -> bool {
     let email = address.to_string();
-    let Ok(Some(account)) = db.read(move |c| accounts::account_by_email(c, &email)).await else {
+    let Ok(Some(account)) = db
+        .read(move |c| accounts::account_by_email(c, &email))
+        .await
+    else {
         return false;
     };
     let jmap = Arc::clone(&secrets.jmap);
@@ -309,7 +406,9 @@ mod tests {
                 registered: AtomicUsize::new(0),
                 registered_for: Mutex::new(Vec::new()),
                 exchanged_for: Mutex::new(Vec::new()),
-                exchanges: Mutex::new(exchanges.into()), revoked: Mutex::new(Vec::new()) }
+                exchanges: Mutex::new(exchanges.into()),
+                revoked: Mutex::new(Vec::new()),
+            }
         }
 
         fn registrations(&self) -> usize {
@@ -326,25 +425,56 @@ mod tests {
             Ok(metadata())
         }
 
-        async fn register(&self, _metadata: &Metadata, redirect: &str, _scopes: &[String]) -> Result<String, JmapError> {
-            self.registered_for.lock().unwrap().push(redirect.to_string());
+        async fn register(
+            &self,
+            _metadata: &Metadata,
+            redirect: &str,
+            _scopes: &[String],
+        ) -> Result<String, JmapError> {
+            self.registered_for
+                .lock()
+                .unwrap()
+                .push(redirect.to_string());
             let n = self.registered.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(format!("{}-{n}", self.names))
         }
 
-        async fn exchange(&self, client: &OAuthClient, code: &str, redirect: &str, _pkce: &Pkce) -> Result<Tokens, JmapError> {
-            self.exchanged_for.lock().unwrap().push(redirect.to_string());
-            assert_eq!((code, client.token_endpoint.as_str()), ("c1", "https://api.fastmail.com/oauth/refresh"));
-            self.exchanges.lock().unwrap().pop_front().expect("an exchange the test did not expect")
+        async fn exchange(
+            &self,
+            client: &OAuthClient,
+            code: &str,
+            redirect: &str,
+            _pkce: &Pkce,
+        ) -> Result<Tokens, JmapError> {
+            self.exchanged_for
+                .lock()
+                .unwrap()
+                .push(redirect.to_string());
+            assert_eq!(
+                (code, client.token_endpoint.as_str()),
+                ("c1", "https://api.fastmail.com/oauth/refresh")
+            );
+            self.exchanges
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("an exchange the test did not expect")
         }
 
         fn revoke(&self, grant: JmapGrant) {
-            self.revoked.lock().unwrap().push((grant.client_id, grant.refresh_token));
+            self.revoked
+                .lock()
+                .unwrap()
+                .push((grant.client_id, grant.refresh_token));
         }
     }
 
     fn tokens(refresh: &str) -> Result<Tokens, JmapError> {
-        Ok(Tokens { access_token: "a1".into(), expires_in: 3600, refresh_token: Some(refresh.into()) })
+        Ok(Tokens {
+            access_token: "a1".into(),
+            expires_in: 3600,
+            refresh_token: Some(refresh.into()),
+        })
     }
 
     /// A JMAP server whose session answers only the access token `a1`,
@@ -352,15 +482,31 @@ mod tests {
     /// alias@fastmail.com.
     async fn jmap_server() -> MockServer {
         let server = MockServer::start().await;
-        mount_session(&server, "a1", "me@fastmail.com", "A1", &["me@fastmail.com", "alias@fastmail.com"]).await;
+        mount_session(
+            &server,
+            "a1",
+            "me@fastmail.com",
+            "A1",
+            &["me@fastmail.com", "alias@fastmail.com"],
+        )
+        .await;
         server
     }
 
     /// Answers the access token `bearer` with a session that belongs to
     /// `username`, with mail in `account`, whose identities send as
     /// `sends_as`.
-    async fn mount_session(server: &MockServer, bearer: &str, username: &str, account: &str, sends_as: &[&str]) {
-        let (mail, submission) = ("urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:submission");
+    async fn mount_session(
+        server: &MockServer,
+        bearer: &str,
+        username: &str,
+        account: &str,
+        sends_as: &[&str],
+    ) {
+        let (mail, submission) = (
+            "urn:ietf:params:jmap:mail",
+            "urn:ietf:params:jmap:submission",
+        );
         let session = serde_json::json!({
             "capabilities": {"urn:ietf:params:jmap:core": {}, mail: {}, submission: {}},
             "accounts": {account: {"name": username, "isPersonal": true, "isReadOnly": false,
@@ -380,7 +526,11 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(session))
             .mount(server)
             .await;
-        let list: Vec<_> = sends_as.iter().enumerate().map(|(n, email)| serde_json::json!({"id": format!("i{n}"), "email": email})).collect();
+        let list: Vec<_> = sends_as
+            .iter()
+            .enumerate()
+            .map(|(n, email)| serde_json::json!({"id": format!("i{n}"), "email": email}))
+            .collect();
         let identities = serde_json::json!({
             "methodResponses": [["Identity/get", {"accountId": account, "state": "i0", "list": list, "notFound": []}, "c0"]],
             "sessionState": "s0"
@@ -394,7 +544,12 @@ mod tests {
     }
 
     fn connector(db: &Db) -> Connector {
-        Connector { db: db.clone(), config: crate::config::Config::default(), clients: crate::Clients::default(), secrets: Secrets::memory() }
+        Connector {
+            db: db.clone(),
+            config: crate::config::Config::default(),
+            clients: crate::Clients::default(),
+            secrets: Secrets::memory(),
+        }
     }
 
     /// The value of `name` in the authorize URL's query, with the escapes
@@ -411,10 +566,15 @@ mod tests {
         move |url: &str| {
             pages.lock().unwrap().push(url.to_string());
             let (state, redirect) = (query_value(url, "state"), query_value(url, "redirect_uri"));
-            let address = redirect.trim_start_matches("http://").trim_end_matches('/').to_string();
+            let address = redirect
+                .trim_start_matches("http://")
+                .trim_end_matches('/')
+                .to_string();
             tokio::spawn(async move {
                 let mut stream = tokio::net::TcpStream::connect(&address).await.unwrap();
-                let request = format!("GET /?code=c1&state={state}&iss=https%3A%2F%2Fapi.fastmail.com HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+                let request = format!(
+                    "GET /?code=c1&state={state}&iss=https%3A%2F%2Fapi.fastmail.com HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+                );
                 stream.write_all(request.as_bytes()).await.unwrap();
                 let mut page = Vec::new();
                 let _ = stream.read_to_end(&mut page).await;
@@ -422,15 +582,39 @@ mod tests {
         }
     }
 
-    async fn sign_in(server: &FakeServer, reach: &Connector, session_url: &str, pages: &Arc<Mutex<Vec<String>>>) -> Result<SignedIn, BrowserSignInError> {
+    async fn sign_in(
+        server: &FakeServer,
+        reach: &Connector,
+        session_url: &str,
+        pages: &Arc<Mutex<Vec<String>>>,
+    ) -> Result<SignedIn, BrowserSignInError> {
         sign_in_as(server, reach, session_url, pages, "me@fastmail.com").await
     }
 
     /// A sign-in where the person typed `address`. The session names
     /// me@fastmail.com whatever the person typed.
-    async fn sign_in_as(server: &FakeServer, reach: &Connector, session_url: &str, pages: &Arc<Mutex<Vec<String>>>, address: &str) -> Result<SignedIn, BrowserSignInError> {
-        let offer = JmapBrowser { session_url: session_url.into(), provider: None };
-        signing_in(server, reach, offer, address, None, browser(Arc::clone(pages)), std::future::pending(), Duration::from_secs(5)).await
+    async fn sign_in_as(
+        server: &FakeServer,
+        reach: &Connector,
+        session_url: &str,
+        pages: &Arc<Mutex<Vec<String>>>,
+        address: &str,
+    ) -> Result<SignedIn, BrowserSignInError> {
+        let offer = JmapBrowser {
+            session_url: session_url.into(),
+            provider: None,
+        };
+        signing_in(
+            server,
+            reach,
+            offer,
+            address,
+            None,
+            browser(Arc::clone(pages)),
+            std::future::pending(),
+            Duration::from_secs(5),
+        )
+        .await
     }
 
     #[tokio::test]
@@ -441,11 +625,31 @@ mod tests {
         let reach = connector(&db);
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        let offer = JmapBrowser { session_url: format!("{}/jmap/session", jmap.uri()), provider: None };
-        let signed = signing_in(&server, &reach, offer, "me@fastmail.com", Some("app-pw".into()), browser(Arc::clone(&pages)), std::future::pending(), Duration::from_secs(5))
-            .await
-            .unwrap();
-        assert_eq!(reach.secrets.passwords.load(signed.account.id).unwrap().as_deref(), Some("app-pw"));
+        let offer = JmapBrowser {
+            session_url: format!("{}/jmap/session", jmap.uri()),
+            provider: None,
+        };
+        let signed = signing_in(
+            &server,
+            &reach,
+            offer,
+            "me@fastmail.com",
+            Some("app-pw".into()),
+            browser(Arc::clone(&pages)),
+            std::future::pending(),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reach
+                .secrets
+                .passwords
+                .load(signed.account.id)
+                .unwrap()
+                .as_deref(),
+            Some("app-pw")
+        );
     }
 
     #[tokio::test]
@@ -459,17 +663,38 @@ mod tests {
         let session_url = format!("{}/jmap/session", jmap.uri());
         let server = FakeServer::answering("client", vec![tokens("r1"), tokens("r2")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        let id = sign_in(&server, &reach, &session_url, &pages).await.unwrap().account.id;
+        let id = sign_in(&server, &reach, &session_url, &pages)
+            .await
+            .unwrap()
+            .account
+            .id;
         db.write(move |c| {
-            let row = FoundService { kind: ServiceKind::CalDav, url: "https://127.0.0.1/dav/".into(), user_name: "me@fastmail.com".into(), confirmed: true, source: "table".into() };
+            let row = FoundService {
+                kind: ServiceKind::CalDav,
+                url: "https://127.0.0.1/dav/".into(),
+                user_name: "me@fastmail.com".into(),
+                confirmed: true,
+                source: "table".into(),
+            };
             mailrs_store::services::save(c, id, &row)?;
             mailrs_store::services::save_miss(c, id, ServiceKind::CalDav, Some(Miss::Refused))
         })
         .await
         .unwrap();
-        let again = sign_in(&server, &reach, &session_url, &pages).await.unwrap();
-        assert!(db.read(mailrs_store::services::all_misses).await.unwrap().is_empty(), "the new grant clears the mark");
-        assert!(matches!(again.services.calendar, Some(crate::AnyCalendar::Dav(_))), "the calendar tries the token again");
+        let again = sign_in(&server, &reach, &session_url, &pages)
+            .await
+            .unwrap();
+        assert!(
+            db.read(mailrs_store::services::all_misses)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the new grant clears the mark"
+        );
+        assert!(
+            matches!(again.services.calendar, Some(crate::AnyCalendar::Dav(_))),
+            "the calendar tries the token again"
+        );
     }
 
     #[tokio::test]
@@ -481,7 +706,9 @@ mod tests {
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
         let session_url = format!("{}/jmap/session", jmap.uri());
-        let signed = sign_in_as(&server, &reach, &session_url, &pages, "alias@fastmail.com").await.unwrap();
+        let signed = sign_in_as(&server, &reach, &session_url, &pages, "alias@fastmail.com")
+            .await
+            .unwrap();
         assert_eq!(signed.account.email, "alias@fastmail.com");
     }
 
@@ -511,11 +738,17 @@ mod tests {
         let held = jmap_signed_in(&db, &reach.secrets, token, 1).await.unwrap();
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        let signed = sign_in_as(&server, &reach, &session_url, &pages, "alias@fastmail.com").await.unwrap();
+        let signed = sign_in_as(&server, &reach, &session_url, &pages, "alias@fastmail.com")
+            .await
+            .unwrap();
         assert_eq!(signed.account.id, held.id);
         let accounts = db.read(accounts::list_accounts).await.unwrap();
         assert_eq!(accounts.len(), 1, "{accounts:?}");
-        let saved = db.read(move |c| mailrs_store::jmap::load(c, held.id)).await.unwrap().unwrap();
+        let saved = db
+            .read(move |c| mailrs_store::jmap::load(c, held.id))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(saved.auth, JmapAuth::OAuth);
     }
 
@@ -527,13 +760,33 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open(&dir.path().join("mail.db")).unwrap();
         let reach = connector(&db);
-        let crate::passwords::Passwords::Memory(kept) = &*reach.secrets.jmap else { unreachable!("tests keep secrets in memory") };
+        let crate::passwords::Passwords::Memory(kept) = &*reach.secrets.jmap else {
+            unreachable!("tests keep secrets in memory")
+        };
         kept.refuse_saves();
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let session_url = format!("{}/jmap/session", jmap.uri());
-        let refused = sign_in(&server, &reach, &session_url, &Arc::new(Mutex::new(Vec::new()))).await;
-        assert!(matches!(refused, Err(BrowserSignInError::KeptJmap(crate::sign_in::JmapSignInError::Password(_)))), "{:?}", refused.err());
-        assert_eq!(server.revoked(), [("client-1".to_string(), "r1".to_string())]);
+        let refused = sign_in(
+            &server,
+            &reach,
+            &session_url,
+            &Arc::new(Mutex::new(Vec::new())),
+        )
+        .await;
+        assert!(
+            matches!(
+                refused,
+                Err(BrowserSignInError::KeptJmap(
+                    crate::sign_in::JmapSignInError::Password(_)
+                ))
+            ),
+            "{:?}",
+            refused.err()
+        );
+        assert_eq!(
+            server.revoked(),
+            [("client-1".to_string(), "r1".to_string())]
+        );
     }
 
     /// The account took the new refresh token before a later step failed:
@@ -547,25 +800,55 @@ mod tests {
         let session_url = format!("{}/jmap/session", jmap.uri());
         let server = FakeServer::answering("client", vec![tokens("r1"), tokens("r2")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        let id = sign_in(&server, &reach, &session_url, &pages).await.unwrap().account.id;
-        let crate::passwords::Passwords::Memory(passwords) = &*reach.secrets.passwords else { unreachable!("tests keep secrets in memory") };
+        let id = sign_in(&server, &reach, &session_url, &pages)
+            .await
+            .unwrap()
+            .account
+            .id;
+        let crate::passwords::Passwords::Memory(passwords) = &*reach.secrets.passwords else {
+            unreachable!("tests keep secrets in memory")
+        };
         passwords.refuse_saves();
-        let offer = JmapBrowser { session_url: session_url.clone(), provider: None };
-        let failed = signing_in(&server, &reach, offer, "me@fastmail.com", Some("app-pw".into()), browser(Arc::clone(&pages)), std::future::pending(), Duration::from_secs(5)).await;
+        let offer = JmapBrowser {
+            session_url: session_url.clone(),
+            provider: None,
+        };
+        let failed = signing_in(
+            &server,
+            &reach,
+            offer,
+            "me@fastmail.com",
+            Some("app-pw".into()),
+            browser(Arc::clone(&pages)),
+            std::future::pending(),
+            Duration::from_secs(5),
+        )
+        .await;
         assert!(failed.is_err());
         assert_eq!(reach.secrets.jmap.load(id).unwrap().as_deref(), Some("r2"));
         assert!(server.revoked().is_empty(), "{:?}", server.revoked());
     }
 
     async fn kept_client_id(db: &Db, id: i64) -> Option<String> {
-        db.read(move |c| mailrs_store::jmap::load(c, id)).await.unwrap().and_then(|saved| saved.oauth).map(|o| o.client_id)
+        db.read(move |c| mailrs_store::jmap::load(c, id))
+            .await
+            .unwrap()
+            .and_then(|saved| saved.oauth)
+            .map(|o| o.client_id)
     }
 
     /// The app runs the sign-in on its runtime's threads.
     #[expect(dead_code, reason = "only compiled, to check the future is Send")]
     fn the_sign_in_can_move_between_threads(connector: &Connector, offer: JmapBrowser) {
         fn sends<T: Send>(_: T) {}
-        sends(jmap_in_browser(connector, offer, "", None, |_: &str| {}, std::future::pending::<()>()));
+        sends(jmap_in_browser(
+            connector,
+            offer,
+            "",
+            None,
+            |_: &str| {},
+            std::future::pending::<()>(),
+        ));
     }
 
     #[tokio::test]
@@ -576,12 +859,30 @@ mod tests {
         let reach = connector(&db);
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        let signed = sign_in(&server, &reach, &format!("{}/jmap/session", jmap.uri()), &pages).await.unwrap();
+        let signed = sign_in(
+            &server,
+            &reach,
+            &format!("{}/jmap/session", jmap.uri()),
+            &pages,
+        )
+        .await
+        .unwrap();
         assert_eq!(server.registrations(), 1);
         assert!(pages.lock().unwrap()[0].contains("client_id=client-1"));
         assert_eq!(signed.account.email, "me@fastmail.com");
-        assert_eq!(kept_client_id(&db, signed.account.id).await.as_deref(), Some("client-1"));
-        assert_eq!(reach.secrets.jmap.load(signed.account.id).unwrap().as_deref(), Some("r1"));
+        assert_eq!(
+            kept_client_id(&db, signed.account.id).await.as_deref(),
+            Some("client-1")
+        );
+        assert_eq!(
+            reach
+                .secrets
+                .jmap
+                .load(signed.account.id)
+                .unwrap()
+                .as_deref(),
+            Some("r1")
+        );
         assert!(matches!(signed.services.mail, crate::AnyMail::Jmap(_)));
     }
 
@@ -597,11 +898,24 @@ mod tests {
         let reach = connector(&db);
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        sign_in(&server, &reach, &format!("{}/jmap/session", jmap.uri()), &pages).await.unwrap();
+        sign_in(
+            &server,
+            &reach,
+            &format!("{}/jmap/session", jmap.uri()),
+            &pages,
+        )
+        .await
+        .unwrap();
         let asked = query_value(&pages.lock().unwrap()[0], "redirect_uri");
-        let port = asked.strip_prefix("http://127.0.0.1:").and_then(|rest| rest.strip_suffix('/')).and_then(|port| port.parse::<u16>().ok());
+        let port = asked
+            .strip_prefix("http://127.0.0.1:")
+            .and_then(|rest| rest.strip_suffix('/'))
+            .and_then(|port| port.parse::<u16>().ok());
         assert!(port.is_some_and(|p| p != 0), "{asked}");
-        assert_eq!(*server.registered_for.lock().unwrap(), std::slice::from_ref(&asked));
+        assert_eq!(
+            *server.registered_for.lock().unwrap(),
+            std::slice::from_ref(&asked)
+        );
         assert_eq!(*server.exchanged_for.lock().unwrap(), [asked]);
     }
 
@@ -617,19 +931,40 @@ mod tests {
         let session_url = format!("{}/jmap/session", jmap.uri());
         let server = FakeServer::answering("client", vec![tokens("r1"), tokens("r2")]);
         let pages = Arc::new(Mutex::new(Vec::new()));
-        let first = sign_in(&server, &reach, &session_url, &pages).await.unwrap();
+        let first = sign_in(&server, &reach, &session_url, &pages)
+            .await
+            .unwrap();
         let before = reach.secrets.jmap_sessions.held(first.account.id).unwrap();
-        let again = sign_in(&server, &reach, &session_url, &pages).await.unwrap();
+        let again = sign_in(&server, &reach, &session_url, &pages)
+            .await
+            .unwrap();
         let after = reach.secrets.jmap_sessions.held(again.account.id).unwrap();
-        assert!(!Arc::ptr_eq(&before, &after), "the new refresh token gets a new session");
+        assert!(
+            !Arc::ptr_eq(&before, &after),
+            "the new refresh token gets a new session"
+        );
         assert_eq!(again.account.id, first.account.id);
         assert_eq!(server.registrations(), 2);
         let pages = pages.lock().unwrap().clone();
         assert!(pages[1].contains("client_id=client-2"), "{}", pages[1]);
-        let asked: Vec<_> = pages.iter().map(|page| query_value(page, "redirect_uri")).collect();
+        let asked: Vec<_> = pages
+            .iter()
+            .map(|page| query_value(page, "redirect_uri"))
+            .collect();
         assert_eq!(*server.registered_for.lock().unwrap(), asked);
-        assert_eq!(kept_client_id(&db, again.account.id).await.as_deref(), Some("client-2"));
-        assert_eq!(reach.secrets.jmap.load(again.account.id).unwrap().as_deref(), Some("r2"));
+        assert_eq!(
+            kept_client_id(&db, again.account.id).await.as_deref(),
+            Some("client-2")
+        );
+        assert_eq!(
+            reach
+                .secrets
+                .jmap
+                .load(again.account.id)
+                .unwrap()
+                .as_deref(),
+            Some("r2")
+        );
     }
 
     fn metadata() -> Metadata {
@@ -638,7 +973,11 @@ mod tests {
             authorization_endpoint: "https://api.fastmail.com/oauth/authorize".into(),
             token_endpoint: "https://api.fastmail.com/oauth/refresh".into(),
             registration_endpoint: Some("https://api.fastmail.com/oauth/register".into()),
-            scopes_supported: vec!["urn:ietf:params:oauth:scope:mail".into(), "offline_access".into(), "openid".into()],
+            scopes_supported: vec![
+                "urn:ietf:params:oauth:scope:mail".into(),
+                "offline_access".into(),
+                "openid".into(),
+            ],
             code_challenge_methods_supported: vec!["S256".into()],
             authorization_response_iss_parameter_supported: true,
             revocation_endpoint: None,
@@ -647,7 +986,11 @@ mod tests {
 
     /// The loopback's address, as the browser would reach it.
     fn address_of(loopback: &Loopback) -> String {
-        loopback.redirect_uri.trim_start_matches("http://").trim_end_matches('/').to_string()
+        loopback
+            .redirect_uri
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_string()
     }
 
     async fn closed(address: &str) -> bool {
@@ -665,7 +1008,14 @@ mod tests {
             let mut page = Vec::new();
             let _ = stream.read_to_end(&mut page).await;
         });
-        let code = redirected(loopback, "s1", &metadata(), std::future::pending(), Duration::from_secs(5)).await;
+        let code = redirected(
+            loopback,
+            "s1",
+            &metadata(),
+            std::future::pending(),
+            Duration::from_secs(5),
+        )
+        .await;
         assert_eq!(code.unwrap(), "c1");
         browser.await.unwrap();
     }
@@ -674,7 +1024,14 @@ mod tests {
     async fn a_canceled_sign_in_closes_the_listener() {
         let loopback = Loopback::bind().await.unwrap();
         let address = address_of(&loopback);
-        let canceled = redirected(loopback, "s1", &metadata(), std::future::ready(()), Duration::from_secs(600)).await;
+        let canceled = redirected(
+            loopback,
+            "s1",
+            &metadata(),
+            std::future::ready(()),
+            Duration::from_secs(600),
+        )
+        .await;
         assert!(matches!(canceled, Err(BrowserSignInError::Canceled)));
         assert!(closed(&address).await, "the listener outlived the sign-in");
     }
@@ -683,7 +1040,14 @@ mod tests {
     async fn a_sign_in_nobody_finishes_gives_up_and_closes_the_listener() {
         let loopback = Loopback::bind().await.unwrap();
         let address = address_of(&loopback);
-        let waited = redirected(loopback, "s1", &metadata(), std::future::pending(), Duration::from_millis(50)).await;
+        let waited = redirected(
+            loopback,
+            "s1",
+            &metadata(),
+            std::future::pending(),
+            Duration::from_millis(50),
+        )
+        .await;
         assert!(matches!(waited, Err(BrowserSignInError::GaveUp)));
         assert!(closed(&address).await, "the listener outlived the sign-in");
     }
@@ -695,28 +1059,51 @@ mod tests {
 
     #[test]
     fn a_server_outside_the_table_goes_by_its_host() {
-        assert_eq!(host_of("https://mail.example.org:8443/jmap/session"), "mail.example.org");
-        assert_eq!(host_of("https://mail.example.org/jmap/session"), "mail.example.org");
+        assert_eq!(
+            host_of("https://mail.example.org:8443/jmap/session"),
+            "mail.example.org"
+        );
+        assert_eq!(
+            host_of("https://mail.example.org/jmap/session"),
+            "mail.example.org"
+        );
     }
 
     #[test]
     fn the_table_s_scopes_win_over_the_metadata_s() {
-        let offer = JmapBrowser { session_url: "https://api.fastmail.com/jmap/session".into(), provider: mailrs_discover::jmap_named("Fastmail") };
+        let offer = JmapBrowser {
+            session_url: "https://api.fastmail.com/jmap/session".into(),
+            provider: mailrs_discover::jmap_named("Fastmail"),
+        };
         let scopes = scopes_for(&offer, &metadata());
         assert_eq!(scopes, offer.provider.unwrap().oauth_scopes);
     }
 
     #[test]
     fn a_server_outside_the_table_asks_for_the_mail_scopes_its_metadata_lists() {
-        let offer = JmapBrowser { session_url: "https://mail.example.org/jmap/session".into(), provider: None };
-        assert_eq!(scopes_for(&offer, &metadata()), ["urn:ietf:params:oauth:scope:mail", "offline_access"]);
+        let offer = JmapBrowser {
+            session_url: "https://mail.example.org/jmap/session".into(),
+            provider: None,
+        };
+        assert_eq!(
+            scopes_for(&offer, &metadata()),
+            ["urn:ietf:params:oauth:scope:mail", "offline_access"]
+        );
     }
 
     /// Reads what the store and the keyring hold for `id`: the session URL,
     /// the kept client and the refresh token.
     async fn kept(db: &Db, reach: &Connector, id: i64) -> (String, Option<String>, Option<String>) {
-        let saved = db.read(move |c| mailrs_store::jmap::load(c, id)).await.unwrap().unwrap();
-        (saved.session_url, saved.oauth.map(|o| o.client_id), reach.secrets.jmap.load(id).unwrap())
+        let saved = db
+            .read(move |c| mailrs_store::jmap::load(c, id))
+            .await
+            .unwrap()
+            .unwrap();
+        (
+            saved.session_url,
+            saved.oauth.map(|o| o.client_id),
+            reach.secrets.jmap.load(id).unwrap(),
+        )
     }
 
     #[tokio::test]
@@ -727,17 +1114,59 @@ mod tests {
         let reach = connector(&db);
         let session_url = format!("{}/jmap/session", jmap.uri());
         let first = FakeServer::answering("client", vec![tokens("r1")]);
-        let id = sign_in(&first, &reach, &session_url, &Arc::new(Mutex::new(Vec::new()))).await.unwrap().account.id;
+        let id = sign_in(
+            &first,
+            &reach,
+            &session_url,
+            &Arc::new(Mutex::new(Vec::new())),
+        )
+        .await
+        .unwrap()
+        .account
+        .id;
         let before = kept(&db, &reach, id).await;
         // The browser is signed in to someone else's account on the same
         // server: its token reaches another user's session.
-        mount_session(&jmap, "a2", "other@fastmail.com", "B2", &["other@fastmail.com"]).await;
-        let theirs = FakeServer::answering("client", vec![Ok(Tokens { access_token: "a2".into(), expires_in: 3600, refresh_token: Some("r2".into()) })]);
-        let refused = sign_in(&theirs, &reach, &session_url, &Arc::new(Mutex::new(Vec::new()))).await;
-        let Err(err) = refused else { panic!("another account's grant was kept") };
-        assert_eq!(err.to_string(), "You signed in to a different account than me@fastmail.com, so nothing changed.");
-        assert_eq!(kept(&db, &reach, id).await, before, "the account keeps its server, client and token");
-        assert_eq!(theirs.revoked(), [("client-1".to_string(), "r2".to_string())], "the other account's grant is revoked");
+        mount_session(
+            &jmap,
+            "a2",
+            "other@fastmail.com",
+            "B2",
+            &["other@fastmail.com"],
+        )
+        .await;
+        let theirs = FakeServer::answering(
+            "client",
+            vec![Ok(Tokens {
+                access_token: "a2".into(),
+                expires_in: 3600,
+                refresh_token: Some("r2".into()),
+            })],
+        );
+        let refused = sign_in(
+            &theirs,
+            &reach,
+            &session_url,
+            &Arc::new(Mutex::new(Vec::new())),
+        )
+        .await;
+        let Err(err) = refused else {
+            panic!("another account's grant was kept")
+        };
+        assert_eq!(
+            err.to_string(),
+            "You signed in to a different account than me@fastmail.com, so nothing changed."
+        );
+        assert_eq!(
+            kept(&db, &reach, id).await,
+            before,
+            "the account keeps its server, client and token"
+        );
+        assert_eq!(
+            theirs.revoked(),
+            [("client-1".to_string(), "r2".to_string())],
+            "the other account's grant is revoked"
+        );
         assert!(first.revoked().is_empty());
     }
 
@@ -749,9 +1178,28 @@ mod tests {
         let reach = connector(&db);
         let server = FakeServer::answering("client", vec![tokens("r1")]);
         let session_url = format!("{}/jmap/session", jmap.uri());
-        let refused = sign_in_as(&server, &reach, &session_url, &Arc::new(Mutex::new(Vec::new())), "boss@fastmail.com").await;
-        assert!(matches!(refused, Err(BrowserSignInError::KeptJmap(crate::sign_in::JmapSignInError::DifferentAccount { .. }))));
-        assert_eq!(server.revoked(), [("client-1".to_string(), "r1".to_string())], "the refused grant is revoked");
-        assert!(db.read(accounts::list_accounts).await.unwrap().is_empty(), "no account is added");
+        let refused = sign_in_as(
+            &server,
+            &reach,
+            &session_url,
+            &Arc::new(Mutex::new(Vec::new())),
+            "boss@fastmail.com",
+        )
+        .await;
+        assert!(matches!(
+            refused,
+            Err(BrowserSignInError::KeptJmap(
+                crate::sign_in::JmapSignInError::DifferentAccount { .. }
+            ))
+        ));
+        assert_eq!(
+            server.revoked(),
+            [("client-1".to_string(), "r1".to_string())],
+            "the refused grant is revoked"
+        );
+        assert!(
+            db.read(accounts::list_accounts).await.unwrap().is_empty(),
+            "no account is added"
+        );
     }
 }

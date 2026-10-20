@@ -157,7 +157,11 @@ macro_rules! done {
 
 impl<A: Accounts> AccountSettings<A> {
     pub fn new(accounts: Arc<A>, db: Db) -> Self {
-        AccountSettings { accounts, db, last_rules: Mutex::new(HashMap::new()) }
+        AccountSettings {
+            accounts,
+            db,
+            last_rules: Mutex::new(HashMap::new()),
+        }
     }
 
     /// The automatic reply the server holds, in whole days.
@@ -183,11 +187,20 @@ impl<A: Accounts> AccountSettings<A> {
     /// The rules, where they run, and whether the server is answering.
     pub async fn rule_list(&self, account_id: AccountId) -> Result<Permitted<RuleList>, SyncError> {
         let rules = self.rules_service(account_id)?;
-        let queued = self.db.read(move |c| rule_changes::queued(c, account_id)).await?;
+        let queued = self
+            .db
+            .read(move |c| rule_changes::queued(c, account_id))
+            .await?;
         let mut list = match rules.listing().await {
             Ok((filters, elsewhere)) => {
                 let here = rules.kept_here().await?;
-                let list = RuleList { rules: filters, elsewhere, place: rules.place(), here, waiting: false };
+                let list = RuleList {
+                    rules: filters,
+                    elsewhere,
+                    place: rules.place(),
+                    here,
+                    waiting: false,
+                };
                 self.remember_rules(account_id, Some(list.clone()));
                 list
             }
@@ -212,7 +225,9 @@ impl<A: Accounts> AccountSettings<A> {
                     list.rules.push(filter);
                 }
                 RuleChange::Create(_) => {}
-                RuleChange::Delete(id) => list.rules.retain(|r| r.id.as_deref() != Some(id.as_str())),
+                RuleChange::Delete(id) => {
+                    list.rules.retain(|r| r.id.as_deref() != Some(id.as_str()))
+                }
             }
         }
         Ok(Permitted::Done(list))
@@ -221,7 +236,10 @@ impl<A: Accounts> AccountSettings<A> {
     /// Stores `list` as the last one read, or reads it back when `list` is
     /// `None`. A poisoned lock still holds a usable map.
     fn remember_rules(&self, account_id: AccountId, list: Option<RuleList>) -> Option<RuleList> {
-        let mut held = self.last_rules.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut held = self
+            .last_rules
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match list {
             Some(list) => held.insert(account_id, list),
             None => held.get(&account_id).cloned(),
@@ -252,7 +270,9 @@ impl<A: Accounts> AccountSettings<A> {
                     ..rule
                 };
                 let queued = RuleChange::Create(waiting.clone());
-                self.db.write(move |c| rule_changes::enqueue(c, account_id, &queued).map(drop)).await?;
+                self.db
+                    .write(move |c| rule_changes::enqueue(c, account_id, &queued).map(drop))
+                    .await?;
                 Ok(Permitted::Done(waiting))
             }
             other => permitted(other),
@@ -278,7 +298,9 @@ impl<A: Accounts> AccountSettings<A> {
         match delete_filter(&service, id).await {
             Err(err) if err.is_transient() && service.queues_offline() => {
                 let queued = RuleChange::Delete(id.to_string());
-                self.db.write(move |c| rule_changes::enqueue(c, account_id, &queued).map(drop)).await?;
+                self.db
+                    .write(move |c| rule_changes::enqueue(c, account_id, &queued).map(drop))
+                    .await?;
                 Ok(Permitted::Done(()))
             }
             other => permitted(other),
@@ -291,7 +313,10 @@ impl<A: Accounts> AccountSettings<A> {
     /// change the server refused, keeping its words for the caller to show.
     pub async fn send_rule_changes(&self, account_id: AccountId) -> Result<SentRules, SyncError> {
         let service = self.rules_service(account_id)?;
-        let queued = self.db.read(move |c| rule_changes::queued(c, account_id)).await?;
+        let queued = self
+            .db
+            .read(move |c| rule_changes::queued(c, account_id))
+            .await?;
         let mut sent = SentRules::default();
         for queued in queued {
             let answer = match &queued.change {
@@ -311,7 +336,9 @@ impl<A: Accounts> AccountSettings<A> {
                 Err(err) => sent.refused.push(err.to_string()),
             }
             let seq = queued.seq;
-            self.db.write(move |c| rule_changes::dequeue(c, seq)).await?;
+            self.db
+                .write(move |c| rule_changes::dequeue(c, seq))
+                .await?;
         }
         Ok(sent)
     }
@@ -515,7 +542,10 @@ impl<A: Accounts> AccountSettings<A> {
     }
 
     /// The account's masked addresses, newest first.
-    pub async fn masked_addresses(&self, account_id: AccountId) -> Result<Vec<crate::masked::MaskedAddress>, SyncError> {
+    pub async fn masked_addresses(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<crate::masked::MaskedAddress>, SyncError> {
         Ok(self.jmap(account_id)?.masked_addresses().await?)
     }
 
@@ -613,7 +643,10 @@ pub(crate) async fn replace_via(
                 id: Some(format!("sieve-{:016x}", rand::random::<u64>())),
                 ..rule
             };
-            let (create, delete) = (RuleChange::Create(new.clone()), RuleChange::Delete(old_id.to_string()));
+            let (create, delete) = (
+                RuleChange::Create(new.clone()),
+                RuleChange::Delete(old_id.to_string()),
+            );
             db.write(move |c| {
                 rule_changes::enqueue(c, account_id, &create)?;
                 rule_changes::enqueue(c, account_id, &delete)

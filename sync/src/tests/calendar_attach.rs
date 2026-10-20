@@ -49,7 +49,11 @@ fn waiting(path: &Path) -> Attachment {
 }
 
 fn guest(email: &str, me: bool) -> Guest {
-    Guest { email: email.into(), me, ..Guest::default() }
+    Guest {
+        email: email.into(),
+        me,
+        ..Guest::default()
+    }
 }
 
 fn review(files: Vec<Attachment>) -> Event {
@@ -74,16 +78,22 @@ fn file(dir: &Path, name: &str, text: &str) -> PathBuf {
 
 async fn stored(h: &Harness, id: &str) -> Option<Event> {
     let (account, id) = (h.account_id, id.to_string());
-    h.db.read(move |c| store::event(c, account, "primary", &id)).await.unwrap()
+    h.db.read(move |c| store::event(c, account, "primary", &id))
+        .await
+        .unwrap()
 }
 
 async fn queued(h: &Harness) -> usize {
     let account = h.account_id;
-    h.db.read(move |c| store::queued(c, account)).await.unwrap().len()
+    h.db.read(move |c| store::queued(c, account))
+        .await
+        .unwrap()
+        .len()
 }
 
 fn on_google(h: &Harness, id: &str) -> Option<Event> {
-    h.fake.with(|s| s.calendar_events.iter().find(|e| e.id == id).cloned())
+    h.fake
+        .with(|s| s.calendar_events.iter().find(|e| e.id == id).cloned())
 }
 
 #[tokio::test]
@@ -92,13 +102,25 @@ async fn the_editor_s_upload_answers_the_drive_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = file(dir.path(), "Agenda.txt", "first item");
     let sent = Arc::new(AtomicU64::new(0));
-    let done = copy(&h).upload(h.account_id, waiting(&path), Arc::clone(&sent)).await.unwrap();
-    let Permitted::Done(uploaded) = done else { panic!("the upload needs no permission here") };
+    let done = copy(&h)
+        .upload(h.account_id, waiting(&path), Arc::clone(&sent))
+        .await
+        .unwrap();
+    let Permitted::Done(uploaded) = done else {
+        panic!("the upload needs no permission here")
+    };
     assert_eq!(uploaded.title, "Agenda.txt");
     assert!(uploaded.link().is_some(), "{uploaded:?}");
     assert_eq!(uploaded.waiting, None);
-    assert_eq!(uploaded.share, Some(true), "a file the app uploads is shared with the guests unless unticked");
-    assert_eq!(h.fake.with(|s| s.drive_files.clone()), vec![("Agenda.txt".to_string(), b"first item".to_vec())]);
+    assert_eq!(
+        uploaded.share,
+        Some(true),
+        "a file the app uploads is shared with the guests unless unticked"
+    );
+    assert_eq!(
+        h.fake.with(|s| s.drive_files.clone()),
+        vec![("Agenda.txt".to_string(), b"first item".to_vec())]
+    );
 }
 
 #[tokio::test]
@@ -107,7 +129,10 @@ async fn an_account_without_drive_access_is_asked_for_it_and_uploads_nothing() {
     h.fake.withhold(DRIVE_FILE_SCOPE);
     let dir = tempfile::tempdir().unwrap();
     let path = file(dir.path(), "Agenda.txt", "first item");
-    let done = copy(&h).upload(h.account_id, waiting(&path), Arc::default()).await.unwrap();
+    let done = copy(&h)
+        .upload(h.account_id, waiting(&path), Arc::default())
+        .await
+        .unwrap();
     assert!(matches!(done, Permitted::NeedsPermission));
     assert!(h.fake.with(|s| s.drive_files.is_empty()));
 }
@@ -121,8 +146,13 @@ async fn a_file_attached_offline_uploads_when_the_app_is_back_online() {
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     h.fake.with(|s| s.offline = true);
-    copy.save(h.account_id, review(vec![waiting(&path)])).await.unwrap();
-    assert!(copy.send(h.account_id).await.is_err(), "offline, the change waits");
+    copy.save(h.account_id, review(vec![waiting(&path)]))
+        .await
+        .unwrap();
+    assert!(
+        copy.send(h.account_id).await.is_err(),
+        "offline, the change waits"
+    );
     assert_eq!(queued(&h).await, 1);
     assert!(h.fake.with(|s| s.drive_files.is_empty()));
 
@@ -130,15 +160,35 @@ async fn a_file_attached_offline_uploads_when_the_app_is_back_online() {
     let turned_down = copy.send(h.account_id).await.unwrap();
     assert!(turned_down.is_empty(), "{turned_down:?}");
     assert_eq!(queued(&h).await, 0);
-    assert_eq!(h.fake.with(|s| s.drive_files.clone()), vec![("Notes.txt".to_string(), b"bring the slides".to_vec())]);
+    assert_eq!(
+        h.fake.with(|s| s.drive_files.clone()),
+        vec![("Notes.txt".to_string(), b"bring the slides".to_vec())]
+    );
     let sent = on_google(&h, "pmreview0123").unwrap().attachments.unwrap();
     assert_eq!(sent.len(), 1);
-    assert!(sent[0].link().is_some() && sent[0].waiting.is_none(), "{sent:?}");
-    let kept = stored(&h, "pmreview0123").await.unwrap().attachments.unwrap();
+    assert!(
+        sent[0].link().is_some() && sent[0].waiting.is_none(),
+        "{sent:?}"
+    );
+    let kept = stored(&h, "pmreview0123")
+        .await
+        .unwrap()
+        .attachments
+        .unwrap();
     assert_eq!(kept.len(), 1);
-    assert_eq!((kept[0].file_id.as_str(), kept[0].link()), (sent[0].file_id.as_str(), sent[0].link()));
-    assert_eq!(kept[0].waiting, None, "the copy holds the uploaded file, not the path");
-    assert_eq!(kept[0].share, Some(true), "and remembers it is shared with the guests");
+    assert_eq!(
+        (kept[0].file_id.as_str(), kept[0].link()),
+        (sent[0].file_id.as_str(), sent[0].link())
+    );
+    assert_eq!(
+        kept[0].waiting, None,
+        "the copy holds the uploaded file, not the path"
+    );
+    assert_eq!(
+        kept[0].share,
+        Some(true),
+        "and remembers it is shared with the guests"
+    );
 }
 
 #[tokio::test]
@@ -150,7 +200,9 @@ async fn a_file_moved_before_its_upload_goes_out_without_it_and_says_so() {
     let moved = file(dir.path(), "Notes.txt", "bring the slides");
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, review(vec![waiting(&kept), waiting(&moved)])).await.unwrap();
+    copy.save(h.account_id, review(vec![waiting(&kept), waiting(&moved)]))
+        .await
+        .unwrap();
     std::fs::remove_file(&moved).unwrap();
 
     let turned_down = copy.send(h.account_id).await.unwrap();
@@ -159,9 +211,20 @@ async fn a_file_moved_before_its_upload_goes_out_without_it_and_says_so() {
     assert_eq!(turned_down[0].title, "Review");
     assert_eq!(queued(&h).await, 0);
     let sent = on_google(&h, "pmreview0123").unwrap().attachments.unwrap();
-    assert_eq!(sent.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(), ["Agenda.txt"]);
-    let stored = stored(&h, "pmreview0123").await.unwrap().attachments.unwrap();
-    assert_eq!(stored.len(), 2, "the moved file stays on the event here, marked");
+    assert_eq!(
+        sent.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(),
+        ["Agenda.txt"]
+    );
+    let stored = stored(&h, "pmreview0123")
+        .await
+        .unwrap()
+        .attachments
+        .unwrap();
+    assert_eq!(
+        stored.len(),
+        2,
+        "the moved file stays on the event here, marked"
+    );
     assert_eq!(stored[0].file_id, sent[0].file_id);
     assert_eq!(stored[1].title, "Notes.txt");
     assert_eq!(stored[1].problem, Some(UploadProblem::NotFound));
@@ -178,15 +241,28 @@ async fn a_file_uploaded_before_the_write_failed_does_not_upload_again() {
     let path = file(dir.path(), "Notes.txt", "bring the slides");
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, review(vec![waiting(&path)])).await.unwrap();
-    h.fake.fail_call("calendar.events.insert", 0, GmailError::Network("dropped".into()));
+    copy.save(h.account_id, review(vec![waiting(&path)]))
+        .await
+        .unwrap();
+    h.fake.fail_call(
+        "calendar.events.insert",
+        0,
+        GmailError::Network("dropped".into()),
+    );
     assert!(copy.send(h.account_id).await.is_err());
     // The file is on Drive now, and the queued change links to it.
     std::fs::remove_file(&path).unwrap();
     let turned_down = copy.send(h.account_id).await.unwrap();
     assert!(turned_down.is_empty(), "{turned_down:?}");
     assert_eq!(h.fake.with(|s| s.drive_files.len()), 1);
-    assert_eq!(on_google(&h, "pmreview0123").unwrap().attachments.unwrap().len(), 1);
+    assert_eq!(
+        on_google(&h, "pmreview0123")
+            .unwrap()
+            .attachments
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -197,14 +273,23 @@ async fn removing_an_attachment_takes_it_off_the_event_and_leaves_drive_alone() 
     let path = file(dir.path(), "Notes.txt", "bring the slides");
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, review(vec![waiting(&path)])).await.unwrap();
+    copy.save(h.account_id, review(vec![waiting(&path)]))
+        .await
+        .unwrap();
     copy.send(h.account_id).await.unwrap();
     let mut event = stored(&h, "pmreview0123").await.unwrap();
     event.attachments = Some(Vec::new());
     copy.save(h.account_id, event).await.unwrap();
     copy.send(h.account_id).await.unwrap();
-    assert_eq!(on_google(&h, "pmreview0123").unwrap().attachments, Some(Vec::new()));
-    assert_eq!(h.fake.with(|s| s.drive_files.len()), 1, "the Drive file stays");
+    assert_eq!(
+        on_google(&h, "pmreview0123").unwrap().attachments,
+        Some(Vec::new())
+    );
+    assert_eq!(
+        h.fake.with(|s| s.drive_files.len()),
+        1,
+        "the Drive file stays"
+    );
 }
 
 #[tokio::test]
@@ -239,13 +324,19 @@ async fn a_change_to_an_event_whose_attachments_are_unknown_keeps_googles() {
 async fn a_queued_edit_behind_a_refused_upload_still_reaches_google() {
     let h = harness().await;
     h.fake.with(|s| s.calendars = vec![primary()]);
-    h.fake.put_calendar_event(Event { id: "standup".into(), title: "Standup".into(), ..review(Vec::new()) });
+    h.fake.put_calendar_event(Event {
+        id: "standup".into(),
+        title: "Standup".into(),
+        ..review(Vec::new())
+    });
     h.fake.withhold(DRIVE_FILE_SCOPE);
     let dir = tempfile::tempdir().unwrap();
     let path = file(dir.path(), "Notes.txt", "bring the slides");
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    copy.save(h.account_id, review(vec![waiting(&path)])).await.unwrap();
+    copy.save(h.account_id, review(vec![waiting(&path)]))
+        .await
+        .unwrap();
     let mut standup = stored(&h, "standup").await.unwrap();
     standup.title = "Standup, moved".into();
     copy.save(h.account_id, standup).await.unwrap();
@@ -254,8 +345,15 @@ async fn a_queued_edit_behind_a_refused_upload_still_reaches_google() {
     assert!(turned_down.is_empty(), "{turned_down:?}");
     assert_eq!(queued(&h).await, 0, "nothing waits in the queue");
     assert_eq!(on_google(&h, "standup").unwrap().title, "Standup, moved");
-    assert_eq!(on_google(&h, "pmreview0123").unwrap().attachments, Some(Vec::new()));
-    let kept = stored(&h, "pmreview0123").await.unwrap().attachments.unwrap();
+    assert_eq!(
+        on_google(&h, "pmreview0123").unwrap().attachments,
+        Some(Vec::new())
+    );
+    let kept = stored(&h, "pmreview0123")
+        .await
+        .unwrap()
+        .attachments
+        .unwrap();
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].problem, Some(UploadProblem::NeedsAccess));
 
@@ -266,7 +364,11 @@ async fn a_queued_edit_behind_a_refused_upload_still_reaches_google() {
     let linked = on_google(&h, "pmreview0123").unwrap().attachments.unwrap();
     assert_eq!(linked.len(), 1);
     assert!(linked[0].link().is_some());
-    let kept = stored(&h, "pmreview0123").await.unwrap().attachments.unwrap();
+    let kept = stored(&h, "pmreview0123")
+        .await
+        .unwrap()
+        .attachments
+        .unwrap();
     assert_eq!(kept[0].problem, None);
     assert_eq!(kept[0].waiting, None);
 }
@@ -282,7 +384,11 @@ async fn the_guests_can_open_an_uploaded_file() {
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
     let meeting = Event {
-        guests: vec![guest("me@example.com", true), guest("ana@example.com", false), guest("bo@example.com", false)],
+        guests: vec![
+            guest("me@example.com", true),
+            guest("ana@example.com", false),
+            guest("bo@example.com", false),
+        ],
         ..review(vec![waiting(&path)])
     };
     copy.save(h.account_id, meeting).await.unwrap();
@@ -302,7 +408,10 @@ async fn the_guests_can_open_an_uploaded_file() {
     copy.send(h.account_id).await.unwrap();
     let shares = h.fake.with(|s| s.drive_shares.clone());
     assert_eq!(shares.len(), 3, "{shares:?}");
-    assert_eq!(shares[2], ("drive1".to_string(), "cy@example.com".to_string(), 1));
+    assert_eq!(
+        shares[2],
+        ("drive1".to_string(), "cy@example.com".to_string(), 1)
+    );
 }
 
 #[tokio::test]
@@ -313,10 +422,23 @@ async fn a_file_the_person_keeps_to_themselves_is_not_shared() {
     let path = file(dir.path(), "Notes.txt", "bring the slides");
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
-    let private = Attachment { share: Some(false), ..waiting(&path) };
-    let meeting = Event { guests: vec![guest("ana@example.com", false)], ..review(vec![private]) };
+    let private = Attachment {
+        share: Some(false),
+        ..waiting(&path)
+    };
+    let meeting = Event {
+        guests: vec![guest("ana@example.com", false)],
+        ..review(vec![private])
+    };
     copy.save(h.account_id, meeting).await.unwrap();
     copy.send(h.account_id).await.unwrap();
     assert!(h.fake.with(|s| s.drive_shares.is_empty()));
-    assert_eq!(on_google(&h, "pmreview0123").unwrap().attachments.unwrap().len(), 1);
+    assert_eq!(
+        on_google(&h, "pmreview0123")
+            .unwrap()
+            .attachments
+            .unwrap()
+            .len(),
+        1
+    );
 }

@@ -80,11 +80,7 @@ async fn mute_takes_a_thread_out_of_the_inbox_and_back() {
 
     h.ok("mute", json!({"targets": [target("t1")], "mute": false}))
         .await;
-    assert!(
-        !h.labels_of("m1")
-            .await
-            .contains(&gmail::MUTE.to_string())
-    );
+    assert!(!h.labels_of("m1").await.contains(&gmail::MUTE.to_string()));
 }
 
 /// A message filed under the person's own label, unread and flagged, one
@@ -95,12 +91,7 @@ async fn reading_mail_names_its_labels_and_marks_not_gmail_ids() {
     let mut mail = mail();
     mail.push(labelled(
         meta("m5", "t5", "kai@example.com", "Flagged kite", NOW),
-        &[
-            gmail::INBOX,
-            gmail::UNREAD,
-            gmail::STARRED,
-            "Label_kites",
-        ],
+        &[gmail::INBOX, gmail::UNREAD, gmail::STARRED, "Label_kites"],
     ));
     mail.push(labelled(
         meta("m6", "t6", "kai@example.com", "Old kite plans", NOW),
@@ -225,7 +216,9 @@ async fn delete_forever_on_a_server_that_cannot_says_why_and_asks_nothing() {
         *services = AccountServices::fake_with_capabilities(Arc::clone(gmail), caps);
     })
     .await;
-    let answer = h.run("delete_forever", json!({"targets": [target("t1")]})).await;
+    let answer = h
+        .run("delete_forever", json!({"targets": [target("t1")]}))
+        .await;
     assert_eq!(
         answer,
         Ok(json!({
@@ -288,7 +281,10 @@ async fn labelling_on_a_folder_account_moves_the_mail_into_the_folder() {
     // The store holds no thread t1, so the move fails; the action it
     // tried is what counts.
     let _ = h
-        .run("label", json!({"targets": [target("t1")], "add": ["kites"]}))
+        .run(
+            "label",
+            json!({"targets": [target("t1")], "add": ["kites"]}),
+        )
         .await;
     assert_eq!(
         h.asked().mail_changed[0].0,
@@ -321,7 +317,10 @@ async fn a_label_change_a_folder_account_cannot_make_says_why() {
 async fn a_remove_only_change_on_a_folder_account_points_to_organize() {
     let h = folder_account().await;
     let answer = h
-        .run("label", json!({"targets": [target("t1")], "remove": ["Kites"]}))
+        .run(
+            "label",
+            json!({"targets": [target("t1")], "remove": ["Kites"]}),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -361,22 +360,20 @@ async fn work_and_travel() -> (Harness, String, String, String) {
         sync.follow_mailbox(folder).await.expect("the folder syncs");
     }
     let folder = |name: &str| Label {
-            role: None,
+        role: None,
         account_id: h.account_id,
         id: name.into(),
         name: name.into(),
         kind: LabelKind::User,
         color: None,
     };
-    h.desk
-        .0
-        .borrow_mut()
-        .labels
-        .insert(h.account_id, vec![folder("Work"), folder("Travel"), folder("Later")]);
+    h.desk.0.borrow_mut().labels.insert(
+        h.account_id,
+        vec![folder("Work"), folder("Travel"), folder("Later")],
+    );
     let account_id = h.account_id;
-    let stored = h
-        .db
-        .read(move |c| {
+    let stored =
+        h.db.read(move |c| {
             let mut stmt = c.prepare("SELECT thread_id, id FROM messages WHERE account_id = ?1")?;
             let rows = stmt
                 .query_map([account_id], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -435,8 +432,11 @@ async fn organizing_mail_listed_from_a_folder_moves_only_what_sits_there() {
 async fn organizing_mail_from_nowhere_in_particular_moves_the_whole_thread() {
     let (h, thread, work, travel) = work_and_travel().await;
 
-    h.ok("organize", json!({"targets": [target(&thread)], "action": "archive"}))
-        .await;
+    h.ok(
+        "organize",
+        json!({"targets": [target(&thread)], "action": "archive"}),
+    )
+    .await;
 
     assert_eq!(places(&h, &work).await, ["Archive"]);
     assert_eq!(places(&h, &travel).await, ["Archive"]);
@@ -513,10 +513,7 @@ async fn send_later_schedules_a_new_message_once_the_user_agrees() {
 
 #[tokio::test]
 async fn send_later_takes_a_saved_draft_as_it_stands() {
-    let draft = labelled(
-        meta("d1", "t7", ME, "Fern swap", NOW),
-        &[gmail::DRAFT],
-    );
+    let draft = labelled(meta("d1", "t7", ME, "Fern swap", NOW), &[gmail::DRAFT]);
     let h = Harness::with(vec![draft]).await;
     h.gmail.with(|i| {
         i.bodies.insert(
@@ -545,10 +542,7 @@ async fn send_later_takes_a_saved_draft_as_it_stands() {
 
 #[tokio::test]
 async fn send_later_keeps_a_saved_drafts_blind_copy_and_files() {
-    let draft = labelled(
-        meta("d1", "t7", ME, "Fern swap", NOW),
-        &[gmail::DRAFT],
-    );
+    let draft = labelled(meta("d1", "t7", ME, "Fern swap", NOW), &[gmail::DRAFT]);
     let h = Harness::with(vec![draft]).await;
     let mut written = crate::compose::Draft::new(
         1,
@@ -595,10 +589,7 @@ async fn send_later_keeps_a_saved_drafts_blind_copy_and_files() {
 
 #[tokio::test]
 async fn send_later_leaves_an_encrypted_draft_to_the_composer() {
-    let draft = labelled(
-        meta("d1", "t7", ME, "Fern swap", NOW),
-        &[gmail::DRAFT],
-    );
+    let draft = labelled(meta("d1", "t7", ME, "Fern swap", NOW), &[gmail::DRAFT]);
     let h = Harness::with(vec![draft]).await;
     h.gmail.with(|i| {
         i.raws.insert(

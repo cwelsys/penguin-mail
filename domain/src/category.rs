@@ -133,8 +133,14 @@ impl Category {
             Category::Updates => gmail(UPDATES),
             Category::Promotions => gmail(PROMOTIONS),
             Category::Social => gmail(SOCIAL),
-            Category::Focused => Sorting { gains: None, loses: vec![OTHER] },
-            Category::Other => Sorting { gains: Some(OTHER), loses: Vec::new() },
+            Category::Focused => Sorting {
+                gains: None,
+                loses: vec![OTHER],
+            },
+            Category::Other => Sorting {
+                gains: Some(OTHER),
+                loses: Vec::new(),
+            },
         }
     }
 }
@@ -196,7 +202,10 @@ mod tests {
     fn gmails_slices_never_name_other() {
         for category in Category::ALL {
             let (any, none) = category.categories();
-            assert!(!any.contains(&OTHER) && !none.contains(&OTHER), "{category:?}");
+            assert!(
+                !any.contains(&OTHER) && !none.contains(&OTHER),
+                "{category:?}"
+            );
         }
     }
 
@@ -205,7 +214,10 @@ mod tests {
         for category in Category::COUNTED {
             assert_eq!(Category::from_key(category.key()), Some(category));
         }
-        assert_eq!(Category::COUNTED.len(), Category::ALL.len() + Category::FOCUS.len());
+        assert_eq!(
+            Category::COUNTED.len(),
+            Category::ALL.len() + Category::FOCUS.len()
+        );
     }
 
     #[test]

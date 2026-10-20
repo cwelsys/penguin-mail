@@ -26,8 +26,13 @@ fn flag_colours_filter_and_default_to_red() {
     assert_eq!(ids(list_threads(&conn, &blue, 0, 10).unwrap()), ["t2"]);
     let red = ThreadFilter::everything().with_flag(FlagColor::Red);
     assert_eq!(ids(list_threads(&conn, &red, 0, 10).unwrap()), ["t1"]);
-    let all = list_threads(&conn, &ThreadFilter::unified(MailSet::Role(Role::Inbox)), 0, 10)
-        .unwrap();
+    let all = list_threads(
+        &conn,
+        &ThreadFilter::unified(MailSet::Role(Role::Inbox)),
+        0,
+        10,
+    )
+    .unwrap();
     assert_eq!(all[1].flag_color, Some(FlagColor::Blue));
     assert_eq!(all[0].flag_color, None);
     let counts = flags::counts(&conn).unwrap();
@@ -85,10 +90,15 @@ fn a_thread_row_carries_the_flag_colour_and_the_newest_sender() {
     let row = threads::get_thread(&conn, b, "tb2").unwrap().unwrap();
     assert_eq!(row.from_email, "b9@example.com");
     assert_eq!(
-        threads::list_threads(&conn, &ThreadFilter::account(b, MailSet::Role(Role::Inbox)), 0, 10)
-            .unwrap()
-            .first()
-            .map(|t| t.from_email.clone()),
+        threads::list_threads(
+            &conn,
+            &ThreadFilter::account(b, MailSet::Role(Role::Inbox)),
+            0,
+            10
+        )
+        .unwrap()
+        .first()
+        .map(|t| t.from_email.clone()),
         Some("b9@example.com".to_string())
     );
 }

@@ -58,6 +58,9 @@ pub struct Jail<'a> {
 /// PATH, which could point into their home folder.
 const PATH: &str = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
+/// Nix supplies a fixed tool set at build time, never the person's PATH.
+const NIX_RUNTIME: Option<&str> = option_env!("PENGUIN_MAIL_SKILL_RUNTIME");
+
 /// The top-level folders that merged-usr systems such as Ubuntu keep as
 /// links into `/usr`.
 const USR_LINKS: &[&str] = &["bin", "sbin", "lib", "lib32", "lib64", "libx32"];
@@ -81,29 +84,46 @@ pub fn arguments(jail: &Jail) -> Vec<OsString> {
         push(&["--share-net"]);
     }
     push(&["--die-with-parent", "--new-session", "--clearenv"]);
-    push(&["--setenv", "PATH", PATH]);
     push(&["--setenv", "HOME", "/work"]);
     push(&["--setenv", "LANG", "C.UTF-8"]);
-    push(&["--ro-bind", "/usr", "/usr"]);
-    for name in USR_LINKS {
-        let top = Path::new("/").join(name);
-        match std::fs::read_link(&top) {
-            Ok(target) => {
-                let target = target.to_string_lossy().into_owned();
-                push(&["--symlink", &target, &format!("/{name}")]);
-            }
-            // A system that is not merged-usr keeps real folders here.
-            Err(_) if top.is_dir() => {
-                let top = top.to_string_lossy().into_owned();
-                push(&["--ro-bind", &top, &top]);
-            }
-            Err(_) => {}
+    if let Some(runtime) = NIX_RUNTIME {
+        // Store programs name their loaders and libraries by absolute
+        // store paths. Profiles and the rest of /nix stay outside.
+        push(&["--ro-bind", "/nix/store", "/nix/store"]);
+        push(&["--setenv", "PATH", &format!("{runtime}/bin")]);
+        push(&["--symlink", &format!("{runtime}/bin"), "/bin"]);
+        push(&["--dir", "/usr/bin"]);
+        push(&["--symlink", &format!("{runtime}/bin/env"), "/usr/bin/env"]);
+        if jail.network {
+            push(&[
+                "--setenv",
+                "SSL_CERT_FILE",
+                &format!("{runtime}/etc/ssl/certs/ca-bundle.crt"),
+            ]);
         }
-    }
-    // Debian points commands such as awk at their chosen program through
-    // here, so without it they would not start.
-    if Path::new("/etc/alternatives").is_dir() {
-        push(&["--ro-bind", "/etc/alternatives", "/etc/alternatives"]);
+    } else {
+        push(&["--setenv", "PATH", PATH]);
+        push(&["--ro-bind", "/usr", "/usr"]);
+        for name in USR_LINKS {
+            let top = Path::new("/").join(name);
+            match std::fs::read_link(&top) {
+                Ok(target) => {
+                    let target = target.to_string_lossy().into_owned();
+                    push(&["--symlink", &target, &format!("/{name}")]);
+                }
+                // A system that is not merged-usr keeps real folders here.
+                Err(_) if top.is_dir() => {
+                    let top = top.to_string_lossy().into_owned();
+                    push(&["--ro-bind", &top, &top]);
+                }
+                Err(_) => {}
+            }
+        }
+        // Debian points commands such as awk at their chosen program through
+        // here, so without it they would not start.
+        if Path::new("/etc/alternatives").is_dir() {
+            push(&["--ro-bind", "/etc/alternatives", "/etc/alternatives"]);
+        }
     }
     if jail.network {
         for path in NETWORK_ETC {

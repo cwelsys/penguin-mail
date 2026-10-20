@@ -30,15 +30,26 @@ fn with_a_pdf() -> MessageBody {
 async fn the_structure_gives_the_body_the_raw_message_gives() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let mail = &h.sync.services().mail;
     let from_structure = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
-    let raw = mail.fetch_raw(&["m1".into()]).await.unwrap().remove(0).bytes;
+    let raw = mail
+        .fetch_raw(&["m1".into()])
+        .await
+        .unwrap()
+        .remove(0)
+        .bytes;
     assert_eq!(from_structure, mailrs_mime::read(&raw));
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.messages.attachments.get")), 0);
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.messages.attachments.get")),
+        0
+    );
 }
 
 #[tokio::test]
@@ -46,40 +57,61 @@ async fn an_invitation_sent_by_reference_arrives_with_its_calendar() {
     let h = harness().await;
     let ics = super::invitations::invite(0, "20260310T090000Z");
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
-        s.raws.insert("m1".into(), super::invitations::google_invitation(&ics));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.raws
+            .insert("m1".into(), super::invitations::google_invitation(&ics));
     });
     let body = mailrs_mime::body(&h.sync.services().mail.fetch_structure("m1").await.unwrap());
     assert_eq!(body.calendar.as_deref(), Some(ics.as_str()));
-    let files: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    let files: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(files, ["invite.ics"]);
     // The calendar text, and not the file beside it.
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.messages.attachments.get")), 1);
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.messages.attachments.get")),
+        1
+    );
 }
 
 #[tokio::test]
 async fn a_file_fetched_after_its_structure_costs_one_call() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let mail = &h.sync.services().mail;
     let body = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
     let path = body.attachments[0].part_id.clone();
     assert_eq!(mail.fetch_part("m1", &path).await.unwrap(), vec![1, 2, 3]);
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (1, 0));
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.messages.attachments.get")), 1);
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (1, 0)
+    );
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.messages.attachments.get")),
+        1
+    );
 }
 
 #[tokio::test]
 async fn a_file_fetched_cold_reads_the_structure_first() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let bytes = h
         .sync
@@ -89,7 +121,10 @@ async fn a_file_fetched_cold_reads_the_structure_first() {
         .await
         .unwrap();
     assert_eq!(bytes, vec![1, 2, 3]);
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (1, 0));
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (1, 0)
+    );
 }
 
 /// Gmail's attachment ids can change between fetches; a remembered one
@@ -99,16 +134,22 @@ async fn a_file_fetched_cold_reads_the_structure_first() {
 async fn a_stale_handle_is_retried_through_a_fresh_structure_fetch() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let mail = &h.sync.services().mail;
     let body = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
     let path = body.attachments[0].part_id.clone();
     h.fake.fail_next(GmailError::NotFound);
     assert_eq!(mail.fetch_part("m1", &path).await.unwrap(), vec![1, 2, 3]);
-    assert_eq!(h.fake.with(|s| s.structure_fetches), 2, "one retry, one fresh structure fetch");
+    assert_eq!(
+        h.fake.with(|s| s.structure_fetches),
+        2,
+        "one retry, one fresh structure fetch"
+    );
 }
 
 /// A second refusal, right after the retry's own fresh structure fetch,
@@ -117,9 +158,11 @@ async fn a_stale_handle_is_retried_through_a_fresh_structure_fetch() {
 async fn a_second_refusal_after_the_retry_gives_up_rather_than_looping() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let mail = &h.sync.services().mail;
     let body = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
@@ -127,10 +170,17 @@ async fn a_second_refusal_after_the_retry_gives_up_rather_than_looping() {
     h.fake.fail_next(GmailError::NotFound);
     h.fake.fail_next(GmailError::NotFound);
     let calls_before = h.fake.with(|s| s.usage.calls);
-    assert!(matches!(mail.fetch_part("m1", &path).await, Err(BackendError::NotFound)));
+    assert!(matches!(
+        mail.fetch_part("m1", &path).await,
+        Err(BackendError::NotFound)
+    ));
     // The stale handle's own call, and the retry's fresh structure
     // fetch, which also fails: two calls, not a third attempt after it.
-    assert_eq!(h.fake.with(|s| s.usage.calls), calls_before + 2, "one retry, not a loop");
+    assert_eq!(
+        h.fake.with(|s| s.usage.calls),
+        calls_before + 2,
+        "one retry, not a loop"
+    );
 }
 
 /// A rate limit or a network error is not a stale handle: retrying it
@@ -140,32 +190,51 @@ async fn a_second_refusal_after_the_retry_gives_up_rather_than_looping() {
 async fn a_rate_limit_is_not_treated_as_a_stale_handle() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let mail = &h.sync.services().mail;
     let body = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
     let path = body.attachments[0].part_id.clone();
-    h.fake.fail_next(GmailError::RateLimited { retry_after: None });
-    assert!(matches!(mail.fetch_part("m1", &path).await, Err(BackendError::RateLimited(_))));
-    assert_eq!(h.fake.with(|s| s.structure_fetches), 1, "no retry structure fetch");
+    h.fake
+        .fail_next(GmailError::RateLimited { retry_after: None });
+    assert!(matches!(
+        mail.fetch_part("m1", &path).await,
+        Err(BackendError::RateLimited(_))
+    ));
+    assert_eq!(
+        h.fake.with(|s| s.structure_fetches),
+        1,
+        "no retry structure fetch"
+    );
 }
 
 #[tokio::test]
 async fn a_network_error_is_not_treated_as_a_stale_handle() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert("m1".into(), with_a_pdf());
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     let mail = &h.sync.services().mail;
     let body = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
     let path = body.attachments[0].part_id.clone();
     h.fake.fail_next(GmailError::Network("offline".into()));
-    assert!(matches!(mail.fetch_part("m1", &path).await, Err(BackendError::Offline(_))));
-    assert_eq!(h.fake.with(|s| s.structure_fetches), 1, "no retry structure fetch");
+    assert!(matches!(
+        mail.fetch_part("m1", &path).await,
+        Err(BackendError::Offline(_))
+    ));
+    assert_eq!(
+        h.fake.with(|s| s.structure_fetches),
+        1,
+        "no retry structure fetch"
+    );
 }
 
 /// A forwarded message arrives as `message/rfc822`, which Gmail expands
@@ -206,12 +275,18 @@ async fn a_file_inside_a_forwarded_message_reads_the_same_on_both_paths() {
     )
     .into_bytes();
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.raws.insert("m1".into(), raw);
     });
     let mail = &h.sync.services().mail;
     let from_structure = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
-    let raw = mail.fetch_raw(&["m1".into()]).await.unwrap().remove(0).bytes;
+    let raw = mail
+        .fetch_raw(&["m1".into()])
+        .await
+        .unwrap()
+        .remove(0)
+        .bytes;
     let from_raw = mailrs_mime::read(&raw);
     assert_eq!(from_structure, from_raw);
     let names: Vec<(&str, &str)> = from_raw
@@ -262,15 +337,25 @@ const FORWARDED_LUNCH: &str = "Subject: Lunch\r\n\
 async fn a_forwarded_message_reads_the_same_on_both_paths() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
-        s.raws.insert("m1".into(), note_with_a_forwarded_message(FORWARDED_LUNCH));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.raws
+            .insert("m1".into(), note_with_a_forwarded_message(FORWARDED_LUNCH));
     });
     let mail = &h.sync.services().mail;
     let from_structure = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
-    let raw = mail.fetch_raw(&["m1".into()]).await.unwrap().remove(0).bytes;
+    let raw = mail
+        .fetch_raw(&["m1".into()])
+        .await
+        .unwrap()
+        .remove(0)
+        .bytes;
     assert_eq!(from_structure, mailrs_mime::read(&raw));
     assert_eq!(
-        (from_structure.text.as_deref(), from_structure.html.as_deref()),
+        (
+            from_structure.text.as_deref(),
+            from_structure.html.as_deref()
+        ),
         (Some("See below."), None)
     );
     let names: Vec<(&str, &str)> = from_structure
@@ -288,7 +373,8 @@ async fn a_forwarded_messages_file_is_cut_from_the_raw_message() {
     let h = harness().await;
     let raw = note_with_a_forwarded_message(FORWARDED_LUNCH);
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.raws.insert("m1".into(), raw.clone());
     });
     let eml = h.sync.services().mail.fetch_part("m1", "2").await.unwrap();
@@ -303,12 +389,18 @@ async fn a_forwarded_invitation_draws_no_card_on_the_structure_path() {
     let ics = super::invitations::invite(0, "20260310T090000Z");
     let invitation = String::from_utf8(super::invitations::google_invitation(&ics)).unwrap();
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
-        s.raws.insert("m1".into(), note_with_a_forwarded_message(&invitation));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.raws
+            .insert("m1".into(), note_with_a_forwarded_message(&invitation));
     });
     let body = mailrs_mime::body(&h.sync.services().mail.fetch_structure("m1").await.unwrap());
     assert_eq!(body.calendar, None);
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.messages.attachments.get")), 0);
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.messages.attachments.get")),
+        0
+    );
 }
 
 /// A forwarded message mail-parser cannot read, the fourth of four
@@ -332,14 +424,18 @@ async fn an_unreadable_forwarded_message_is_an_eml_file_on_both_paths() {
     raw.extend_from_slice(&message);
     raw.extend_from_slice(b"\r\n--b--\r\n");
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.raws.insert("m1".into(), raw.clone());
     });
     let mail = &h.sync.services().mail;
     let from_structure = mailrs_mime::body(&mail.fetch_structure("m1").await.unwrap());
     assert_eq!(from_structure, mailrs_mime::read(&raw));
     let leaf = from_structure.attachments.last().unwrap();
-    assert_eq!((leaf.filename.as_str(), leaf.part_id.as_str()), ("message.eml", "2.1.1.1"));
+    assert_eq!(
+        (leaf.filename.as_str(), leaf.part_id.as_str()),
+        ("message.eml", "2.1.1.1")
+    );
     assert_eq!(
         mail.fetch_part("m1", "2.1.1.1").await.unwrap(),
         b"Subject: Deepest\r\n\r\nHello"
@@ -372,12 +468,21 @@ async fn an_outlook_style_invitation_is_fetched_from_its_ics_file() {
     )
     .into_bytes();
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.raws.insert("m1".into(), raw);
     });
     let body = mailrs_mime::body(&h.sync.services().mail.fetch_structure("m1").await.unwrap());
-    assert!(body.calendar.as_deref().is_some_and(|c| c.contains("UID:abc@outlook.com")));
-    let files: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    assert!(
+        body.calendar
+            .as_deref()
+            .is_some_and(|c| c.contains("UID:abc@outlook.com"))
+    );
+    let files: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(files, ["invite.ics"]);
 }
 
@@ -388,7 +493,8 @@ async fn a_seeded_protection_reads_back_on_the_raw_message() {
     let h = harness().await;
     for protection in Protection::ALL {
         h.fake.with(|s| {
-            s.messages.insert("p1".into(), meta("p1", "t1", 1, &["INBOX"]));
+            s.messages
+                .insert("p1".into(), meta("p1", "t1", 1, &["INBOX"]));
             s.bodies.insert(
                 "p1".into(),
                 MessageBody {
@@ -399,7 +505,11 @@ async fn a_seeded_protection_reads_back_on_the_raw_message() {
             );
         });
         let raw = h.fake.raw_message("p1").await.unwrap();
-        assert_eq!(mailrs_mime::read(&raw).protection, Some(protection), "{protection:?}");
+        assert_eq!(
+            mailrs_mime::read(&raw).protection,
+            Some(protection),
+            "{protection:?}"
+        );
     }
 }
 
@@ -411,7 +521,8 @@ fn seed(h: &super::Harness, id: &str, size: i64) {
     h.fake.with(|s| {
         s.messages.insert(id.into(), m);
         s.bodies.insert(id.into(), with_a_pdf());
-        s.attachments.insert((id.into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert((id.into(), "h1".into()), vec![1, 2, 3]);
     });
 }
 
@@ -424,7 +535,11 @@ async fn a_large_message_shows_its_text_without_fetching_its_file() {
     assert_eq!(body.text.as_deref(), Some("See the plan"));
     assert_eq!(body.attachments[0].filename, "plan.pdf");
     h.fake.with(|s| {
-        assert_eq!(s.usage.calls_to("users.threads.get") as usize + s.metadata_fetches, 1, "one metadata fetch");
+        assert_eq!(
+            s.usage.calls_to("users.threads.get") as usize + s.metadata_fetches,
+            1,
+            "one metadata fetch"
+        );
         assert_eq!(s.structure_fetches, 1);
         assert_eq!(s.raw_fetches, 0);
         assert_eq!(s.usage.calls_to("users.messages.attachments.get"), 0);
@@ -451,7 +566,10 @@ async fn a_message_of_unknown_size_takes_the_structure_path() {
     seed(&h, "m1", 0);
     h.sync.ensure_thread("t-m1").await.unwrap();
     h.sync.body("m1").await.unwrap();
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (1, 0));
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (1, 0)
+    );
 }
 
 #[tokio::test]
@@ -463,9 +581,15 @@ async fn the_limit_decides_the_path() {
         h.sync.ensure_thread(&format!("t-{id}")).await.unwrap();
     }
     h.sync.body("under").await.unwrap();
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (0, 1));
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (0, 1)
+    );
     h.sync.body("at").await.unwrap();
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (1, 1));
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (1, 1)
+    );
 }
 
 /// The fake writes a fixture's provenance into the raw message's headers,
@@ -479,7 +603,8 @@ async fn a_seeded_provenance_reads_back_on_the_raw_message() {
         encrypted: Some(false),
     };
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert(
             "m1".into(),
             MessageBody {
@@ -504,7 +629,8 @@ async fn a_body_missing_a_part_that_failed_to_arrive_is_not_kept() {
     m.size = 25 * 1024 * 1024;
     h.fake.with(|s| {
         s.messages.insert("m1".into(), m);
-        s.raws.insert("m1".into(), super::invitations::google_invitation(&ics));
+        s.raws
+            .insert("m1".into(), super::invitations::google_invitation(&ics));
     });
     h.sync.ensure_thread("t1").await.unwrap();
     let mut held = h.fake.hold("users.messages.attachments.get");
@@ -532,7 +658,8 @@ async fn a_path_the_cached_raw_message_lacks_is_fetched_by_itself() {
     let path = body.attachments[0].part_id.clone();
     // View Source caches a raw message whose parts do not include `path`.
     h.fake.with(|s| {
-        s.raws.insert("m1".into(), b"Subject: Plan\r\n\r\nSee the plan".to_vec());
+        s.raws
+            .insert("m1".into(), b"Subject: Plan\r\n\r\nSee the plan".to_vec());
     });
     h.sync.raw_message("m1").await.unwrap();
     assert!(h.sync.cached_raw("m1").is_some());
@@ -546,7 +673,8 @@ async fn a_path_the_cached_raw_message_lacks_is_fetched_by_itself() {
 async fn a_message_read_raw_stays_cached_whatever_its_real_size() {
     use base64::Engine;
     let h = harness().await;
-    let pdf = base64::engine::general_purpose::STANDARD.encode(vec![7u8; crate::RAW_LIMIT as usize]);
+    let pdf =
+        base64::engine::general_purpose::STANDARD.encode(vec![7u8; crate::RAW_LIMIT as usize]);
     let raw = format!(
         "Subject: Plan\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n\
          --b\r\nContent-Type: text/plain\r\n\r\nSee the plan\r\n\
@@ -561,7 +689,14 @@ async fn a_message_read_raw_stays_cached_whatever_its_real_size() {
     });
     h.sync.ensure_thread("t1").await.unwrap();
     let body = h.sync.body("m1").await.unwrap();
-    let file = h.sync.attachment("m1", &body.attachments[0].part_id).await.unwrap();
+    let file = h
+        .sync
+        .attachment("m1", &body.attachments[0].part_id)
+        .await
+        .unwrap();
     assert_eq!(file.len(), crate::RAW_LIMIT as usize);
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (0, 1));
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (0, 1)
+    );
 }

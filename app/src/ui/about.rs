@@ -360,6 +360,9 @@ mod tests {
 
     #[test]
     fn a_path_keeps_every_separator_once() {
-        assert_eq!(path_markup("a//b/"), "<span allow_breaks=\"false\">a</span>//<span allow_breaks=\"false\">b</span>/");
+        assert_eq!(
+            path_markup("a//b/"),
+            "<span allow_breaks=\"false\">a</span>//<span allow_breaks=\"false\">b</span>/"
+        );
     }
 }

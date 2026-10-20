@@ -280,8 +280,9 @@ impl<A: Accounts> Tools<A> {
         }))
     }
 
-    /// Counts the label's conversations in Gmail before asking, so the
-    /// question says what the label is on.
+    /// Counts the label's conversations before asking, so the question
+    /// says what the label is on. A folder account deletes the mail with
+    /// the folder, which the question says.
     pub(super) async fn delete_label<'a>(&'a self, input: &'a Value) -> Result<Plan<'a>, String> {
         let (account, settings) = self.settings_for(&required(input, "account")?)?;
         let label = self.user_label(&account, &required(input, "label")?)?;
@@ -292,16 +293,46 @@ impl<A: Accounts> Tools<A> {
             })
             .await?
         };
-        let question = fill_plural(
-            "Delete the label “{label}” from {account}? {count} conversation carries it. The mail stays in Gmail, without the label.",
-            "Delete the label “{label}” from {account}? {count} conversations carry it. The mail stays in Gmail, without the label.",
-            count as usize,
-            &[
-                ("label", &label.name),
-                ("account", &account.email),
-                ("count", &count.to_string()),
-            ],
-        );
+        let provider = mailrs_discover::resolved_provider_name(account.provider_name());
+        let question = if self.offers(account.id).labels {
+            // A blank stored name has nothing to put in {provider}. The
+            // window's delete says "the account" in that case.
+            if provider.is_empty() {
+                fill_plural(
+                    "Delete the label “{label}” from {account}? {count} conversation carries it. The mail stays in the account, without the label.",
+                    "Delete the label “{label}” from {account}? {count} conversations carry it. The mail stays in the account, without the label.",
+                    count as usize,
+                    &[
+                        ("label", &label.name),
+                        ("account", &account.email),
+                        ("count", &count.to_string()),
+                    ],
+                )
+            } else {
+                fill_plural(
+                    "Delete the label “{label}” from {account}? {count} conversation carries it. The mail stays in {provider}, without the label.",
+                    "Delete the label “{label}” from {account}? {count} conversations carry it. The mail stays in {provider}, without the label.",
+                    count as usize,
+                    &[
+                        ("label", &label.name),
+                        ("account", &account.email),
+                        ("count", &count.to_string()),
+                        ("provider", &provider),
+                    ],
+                )
+            }
+        } else {
+            fill_plural(
+                "Delete the folder “{label}” from {account}? {count} conversation is in it. The mail in the folder is deleted with it.",
+                "Delete the folder “{label}” from {account}? {count} conversations are in it. The mail in the folder is deleted with it.",
+                count as usize,
+                &[
+                    ("label", &label.name),
+                    ("account", &account.email),
+                    ("count", &count.to_string()),
+                ],
+            )
+        };
         Ok(Plan::ask(question, async move {
             let (account_id, id) = (account.id, label.id.clone());
             self.permitted(&account, Permission::Settings, async move {

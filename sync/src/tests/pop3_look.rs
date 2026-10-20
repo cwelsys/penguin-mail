@@ -20,7 +20,11 @@ async fn look(mail: &crate::AnyMail) -> Looked {
 
 #[tokio::test]
 async fn a_look_stores_new_mail_and_hands_it_to_the_caller_to_announce() {
-    let h = pop3_harness(FakePop3::default().with_message("u1", &pop3_mail(1)), RemoveSetting::Never).await;
+    let h = pop3_harness(
+        FakePop3::default().with_message("u1", &pop3_mail(1)),
+        RemoveSetting::Never,
+    )
+    .await;
     let mail = &h.sync.services().mail;
     // What listing the role mailboxes announced.
     while h.events.try_recv().is_ok() {}
@@ -32,13 +36,21 @@ async fn a_look_stores_new_mail_and_hands_it_to_the_caller_to_announce() {
     h.fake.add("u2", &pop3_mail(2));
     let second = look(mail).await;
     assert_eq!(second.new_mail, ["pop3/u2"]);
-    assert_eq!(h.ids_in(MailSet::Role(Role::Inbox)).await, ["pop3/u1", "pop3/u2"]);
-    assert!(h.events.try_recv().is_err(), "the adapter announces nothing itself");
+    assert_eq!(
+        h.ids_in(MailSet::Role(Role::Inbox)).await,
+        ["pop3/u1", "pop3/u2"]
+    );
+    assert!(
+        h.events.try_recv().is_err(),
+        "the adapter announces nothing itself"
+    );
 }
 
 #[tokio::test]
 async fn a_second_look_fetches_nothing_twice() {
-    let fake = FakePop3::default().with_message("u1", &pop3_mail(1)).with_message("u2", &pop3_mail(2));
+    let fake = FakePop3::default()
+        .with_message("u1", &pop3_mail(1))
+        .with_message("u2", &pop3_mail(2));
     let h = pop3_harness(fake, RemoveSetting::Never).await;
     look(&h.sync.services().mail).await;
     let again = look(&h.again().services().mail).await;
@@ -49,12 +61,27 @@ async fn a_second_look_fetches_nothing_twice() {
 
 #[tokio::test]
 async fn a_look_cut_short_keeps_what_it_stored_and_the_next_carries_on_from_there() {
-    let five = || (1..=5).fold(FakePop3::default(), |fake, n| fake.with_message(&format!("u{n}"), &pop3_mail(n)));
+    let five = || {
+        (1..=5).fold(FakePop3::default(), |fake, n| {
+            fake.with_message(&format!("u{n}"), &pop3_mail(n))
+        })
+    };
     let h = pop3_harness(five().going_away_after_retrs(2), RemoveSetting::Never).await;
     let cut = look(&h.sync.services().mail).await;
-    assert!(matches!(cut.failed, Some(BackendError::Offline(_))), "{:?}", cut.failed);
-    assert_eq!(cut.threads.len(), 2, "the two messages stored before the drop");
-    assert_eq!(h.ids_in(MailSet::Role(Role::Inbox)).await, ["pop3/u1", "pop3/u2"]);
+    assert!(
+        matches!(cut.failed, Some(BackendError::Offline(_))),
+        "{:?}",
+        cut.failed
+    );
+    assert_eq!(
+        cut.threads.len(),
+        2,
+        "the two messages stored before the drop"
+    );
+    assert_eq!(
+        h.ids_in(MailSet::Role(Role::Inbox)).await,
+        ["pop3/u1", "pop3/u2"]
+    );
 
     let rest = Arc::new(five());
     let next = look(&h.with_server(Arc::clone(&rest)).services().mail).await;
@@ -67,6 +94,10 @@ async fn a_look_cut_short_keeps_what_it_stored_and_the_next_carries_on_from_ther
 async fn a_refused_sign_in_comes_back_as_the_looks_failure() {
     let h = pop3_harness(FakePop3::default().refusing_sign_in(), RemoveSetting::Never).await;
     let refused = look(&h.sync.services().mail).await;
-    assert!(matches!(refused.failed, Some(BackendError::NeedsReauth)), "{:?}", refused.failed);
+    assert!(
+        matches!(refused.failed, Some(BackendError::NeedsReauth)),
+        "{:?}",
+        refused.failed
+    );
     assert!(refused.threads.is_empty());
 }

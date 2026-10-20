@@ -58,11 +58,16 @@ impl JmapClient {
         let said: Answer = answer.take(&sent, "MDN/send")?;
         if let Some(refused) = said.not_sent.as_ref().and_then(|n| n.get("k")) {
             // The server's description is its own English; keep only the kind.
-            return Err(JmapError::Method { kind: refused.kind.clone(), description: String::new() });
+            return Err(JmapError::Method {
+                kind: refused.kind.clone(),
+                description: String::new(),
+            });
         }
         match said.sent.as_ref().is_some_and(|s| s.contains_key("k")) {
             true => Ok(()),
-            false => Err(JmapError::Decode("the server said nothing about the receipt".into())),
+            false => Err(JmapError::Decode(
+                "the server said nothing about the receipt".into(),
+            )),
         }
     }
 }

@@ -120,8 +120,14 @@ mod tests {
         cache.put(1, "m".into(), bytes(6));
         cache.put(2, "m".into(), bytes(6));
         assert!(cache.used() <= 10, "two accounts, one cap");
-        assert!(cache.get(1, "m").is_none(), "the older account's message made room");
-        assert!(cache.get(2, "m").is_some(), "the same id in another account is its own entry");
+        assert!(
+            cache.get(1, "m").is_none(),
+            "the older account's message made room"
+        );
+        assert!(
+            cache.get(2, "m").is_some(),
+            "the same id in another account is its own entry"
+        );
     }
 
     #[test]

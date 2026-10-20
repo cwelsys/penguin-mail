@@ -11,9 +11,9 @@ use crate::translate::gettext;
 pub mod calendar;
 pub mod category;
 mod folder;
-pub mod mailbox;
 pub mod invitation;
 mod location;
+pub mod mailbox;
 pub mod query;
 pub mod sign_in_page;
 pub mod smart;
@@ -23,12 +23,12 @@ pub mod translate;
 
 pub use category::Category;
 pub use folder::Folder;
+pub use invitation::Invitation;
+pub use location::Location;
 pub use mailbox::{
     Applied, MailSet, MailboxKind, Membership, Memberships, Provider, RemoteMailbox, RemoveSetting,
     Role,
 };
-pub use invitation::Invitation;
-pub use location::Location;
 pub use smart::SmartMailbox;
 pub use target::Target;
 
@@ -125,6 +125,18 @@ impl Account {
             .as_deref()
             .unwrap_or(self.provider.name())
     }
+}
+
+/// The accounts with mail, in the order given: what every mail path
+/// reads, from the mail sidebar and the From list to the assistant's mail
+/// tools and the command line. A calendar account has none
+/// ([`Provider::serves_mail`]); the calendar is built from every account.
+pub fn mail_accounts(accounts: &[Account]) -> Vec<Account> {
+    accounts
+        .iter()
+        .filter(|account| account.provider.serves_mail())
+        .cloned()
+        .collect()
 }
 
 /// Which Google client an account signed in with. A refresh token only
@@ -677,7 +689,10 @@ pub(crate) mod tests {
     fn a_read_only_rule_says_so_in_json_and_an_ordinary_one_says_nothing() {
         let plain = crate::Filter::block("pest@example.com");
         assert!(!serde_json::to_string(&plain).unwrap().contains("readOnly"));
-        let held = crate::Filter { read_only: true, ..plain };
+        let held = crate::Filter {
+            read_only: true,
+            ..plain
+        };
         let text = serde_json::to_string(&held).unwrap();
         assert!(text.contains("\"readOnly\":true"));
         let back: crate::Filter = serde_json::from_str(&text).unwrap();
@@ -765,7 +780,11 @@ pub(crate) mod tests {
     #[test]
     fn a_message_names_its_category() {
         let primary = in_category("m1", category::PERSONAL);
-        assert_eq!(primary.category(), None, "Primary carries no category worth naming");
+        assert_eq!(
+            primary.category(),
+            None,
+            "Primary carries no category worth naming"
+        );
         let social = in_category("m2", category::SOCIAL);
         assert_eq!(social.category(), Some(Category::Social));
         let forums = in_category("m3", category::FORUMS);
@@ -797,6 +816,25 @@ pub(crate) mod tests {
         assert_eq!(gmail.provider_name(), "Gmail");
         assert_eq!(fastmail.provider_name(), "Fastmail");
         assert_eq!(unnamed.provider_name(), "IMAP");
+    }
+
+    #[test]
+    fn mail_accounts_leave_out_a_calendar_account_and_keep_the_order() {
+        let account = |id, provider| crate::Account {
+            id,
+            email: format!("{id}@example.org"),
+            state: crate::AccountState::Ok,
+            provider,
+            provider_name: None,
+        };
+        let all = [
+            account(1, crate::Provider::Imap),
+            account(2, crate::Provider::CalDav),
+            account(3, crate::Provider::Gmail),
+        ];
+        let ids = |accounts: Vec<crate::Account>| accounts.iter().map(|a| a.id).collect::<Vec<_>>();
+        assert_eq!(ids(crate::mail_accounts(&all)), [1, 3]);
+        assert!(crate::mail_accounts(&all[1..2]).is_empty());
     }
 }
 

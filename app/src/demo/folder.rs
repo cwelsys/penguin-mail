@@ -110,7 +110,9 @@ mod tests {
     fn a_stale_folder_from_the_same_process_id_starts_empty() {
         let base = tempfile::tempdir().unwrap();
         let n = OPENED.load(Ordering::Relaxed);
-        let stale = base.path().join(format!("{PREFIX}{}-{n}", std::process::id()));
+        let stale = base
+            .path()
+            .join(format!("{PREFIX}{}-{n}", std::process::id()));
         std::fs::create_dir_all(&stale).unwrap();
         std::fs::write(stale.join("mailrs.db-wal"), b"old pages").unwrap();
 
@@ -124,7 +126,9 @@ mod tests {
         let dead_new = base.path().join(format!("{PREFIX}{DEAD}-0"));
         let dead_old = base.path().join(format!("{PREFIX}{DEAD}"));
         let dead_settings = base.path().join(format!("{PREFIX}{DEAD}-settings.toml"));
-        let live = base.path().join(format!("{PREFIX}{}-other", std::process::id()));
+        let live = base
+            .path()
+            .join(format!("{PREFIX}{}-other", std::process::id()));
         let unrelated = base.path().join("penguin-mail-demonstration");
         for dir in [&dead_new, &dead_old, &live, &unrelated] {
             std::fs::create_dir_all(dir).unwrap();

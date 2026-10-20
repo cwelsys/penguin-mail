@@ -9,8 +9,8 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use super::{Event, Status, expand};
-use crate::invitation::Answer;
 use crate::EpochMillis;
+use crate::invitation::Answer;
 
 /// Which occurrences of a series a change covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +44,11 @@ pub enum Step {
     /// Move the event, a series with its changed occurrences, from one of
     /// the account's calendars to another. The steps after it write the
     /// event on `to`.
-    Move { from: String, to: String, id: String },
+    Move {
+        from: String,
+        to: String,
+        id: String,
+    },
 }
 
 impl Step {
@@ -52,7 +56,10 @@ impl Step {
     pub fn key(&self) -> (String, String) {
         match self {
             Step::Save(e) | Step::Cancel(e) => (e.calendar.clone(), e.id.clone()),
-            Step::Remove { calendar, id } | Step::Move { to: calendar, id, .. } => (calendar.clone(), id.clone()),
+            Step::Remove { calendar, id }
+            | Step::Move {
+                to: calendar, id, ..
+            } => (calendar.clone(), id.clone()),
         }
     }
 }
@@ -66,13 +73,27 @@ pub fn to_calendar(steps: Vec<Step>, from: &str, to: &str, id: &str) -> Vec<Step
         return steps;
     }
     let there = |event: Event| {
-        if event.calendar == from { Event { calendar: to.to_string(), ..event } } else { event }
+        if event.calendar == from {
+            Event {
+                calendar: to.to_string(),
+                ..event
+            }
+        } else {
+            event
+        }
     };
-    let mut moved = vec![Step::Move { from: from.to_string(), to: to.to_string(), id: id.to_string() }];
+    let mut moved = vec![Step::Move {
+        from: from.to_string(),
+        to: to.to_string(),
+        id: id.to_string(),
+    }];
     moved.extend(steps.into_iter().map(|step| match step {
         Step::Save(event) => Step::Save(there(event)),
         Step::Cancel(event) => Step::Cancel(there(event)),
-        Step::Remove { calendar, id } if calendar == from => Step::Remove { calendar: to.to_string(), id },
+        Step::Remove { calendar, id } if calendar == from => Step::Remove {
+            calendar: to.to_string(),
+            id,
+        },
         other => other,
     }));
     moved
@@ -108,7 +129,13 @@ pub fn answer_scopes(event: &Event) -> Vec<RepeatScope> {
 /// The row a guest's answer writes to the copy. `This` answers the picked
 /// occurrence alone, as a changed occurrence of its own, which is how
 /// Google keeps it; any other scope answers the series.
-pub fn answered(series: &Event, changed: &[Event], picked: Picked, scope: RepeatScope, answer: Answer) -> Event {
+pub fn answered(
+    series: &Event,
+    changed: &[Event],
+    picked: Picked,
+    scope: RepeatScope,
+    answer: Answer,
+) -> Event {
     let mut row = match scope {
         RepeatScope::This => one(series, changed, picked, shown(series, changed, picked)),
         RepeatScope::Following | RepeatScope::All => series.clone(),
@@ -132,7 +159,9 @@ pub fn change(
     new_id: &str,
 ) -> Vec<Step> {
     if series.limited() {
-        return vec![Step::Save(own_fields(series, changed, picked, &edited, scope))];
+        return vec![Step::Save(own_fields(
+            series, changed, picked, &edited, scope,
+        ))];
     }
     match scope {
         RepeatScope::This => vec![Step::Save(one(series, changed, picked, edited))],
@@ -299,7 +328,12 @@ fn split(
 /// plain weekly rule itself; one with an interval, a count or an end,
 /// which every series a split ended carries, comes here unchanged and
 /// would keep the old day. A move by whole weeks changes nothing.
-fn follow_weekday(rules: &[String], series: &Event, from: EpochMillis, to: EpochMillis) -> Vec<String> {
+fn follow_weekday(
+    rules: &[String],
+    series: &Event,
+    from: EpochMillis,
+    to: EpochMillis,
+) -> Vec<String> {
     let zone: Tz = if series.all_day {
         chrono_tz::UTC
     } else {
@@ -645,8 +679,16 @@ mod tests {
     fn invited(rules: &[&str]) -> Event {
         Event {
             guests: vec![
-                super::super::Guest { email: "priya@example.com".into(), organizer: true, ..Default::default() },
-                super::super::Guest { email: "me@example.com".into(), me: true, ..Default::default() },
+                super::super::Guest {
+                    email: "priya@example.com".into(),
+                    organizer: true,
+                    ..Default::default()
+                },
+                super::super::Guest {
+                    email: "me@example.com".into(),
+                    me: true,
+                    ..Default::default()
+                },
             ],
             ..standup(rules)
         }
@@ -659,8 +701,14 @@ mod tests {
             answer_scopes(&invited(&["RRULE:FREQ=DAILY"])),
             vec![RepeatScope::This, RepeatScope::All]
         );
-        let changed = Event { series: Some("standup".into()), ..invited(&[]) };
-        assert_eq!(answer_scopes(&changed), vec![RepeatScope::This, RepeatScope::All]);
+        let changed = Event {
+            series: Some("standup".into()),
+            ..invited(&[])
+        };
+        assert_eq!(
+            answer_scopes(&changed),
+            vec![RepeatScope::This, RepeatScope::All]
+        );
     }
 
     #[test]
@@ -668,8 +716,20 @@ mod tests {
         let series = invited(&["RRULE:FREQ=DAILY"]);
         let one = answered(&series, &[], thursday(), RepeatScope::This, Answer::No);
         assert_eq!(
-            (one.id.as_str(), one.series.as_deref(), one.original_start, one.start, one.etag.as_str()),
-            ("standup_20260924T080000Z", Some("standup"), Some(thursday().original_start), thursday().start, "")
+            (
+                one.id.as_str(),
+                one.series.as_deref(),
+                one.original_start,
+                one.start,
+                one.etag.as_str()
+            ),
+            (
+                "standup_20260924T080000Z",
+                Some("standup"),
+                Some(thursday().original_start),
+                thursday().start,
+                ""
+            )
         );
         assert!(one.rules.is_empty());
         assert_eq!(one.my_answer, Some(Answer::No));
@@ -692,7 +752,13 @@ mod tests {
             rules: Vec::new(),
             ..series.clone()
         };
-        let one = answered(&series, std::slice::from_ref(&changed), thursday(), RepeatScope::This, Answer::Maybe);
+        let one = answered(
+            &series,
+            std::slice::from_ref(&changed),
+            thursday(),
+            RepeatScope::This,
+            Answer::Maybe,
+        );
         assert_eq!((one.etag.as_str(), one.start), ("\"9\"", changed.start));
         assert_eq!(one.my_answer, Some(Answer::Maybe));
     }
@@ -701,14 +767,27 @@ mod tests {
     fn answering_all_events_answers_the_series() {
         let series = invited(&["RRULE:FREQ=DAILY"]);
         let whole = answered(&series, &[], thursday(), RepeatScope::All, Answer::Yes);
-        assert_eq!((whole.id.as_str(), whole.series.as_deref(), whole.start), ("standup", None, series.start));
+        assert_eq!(
+            (whole.id.as_str(), whole.series.as_deref(), whole.start),
+            ("standup", None, series.start)
+        );
         assert_eq!(whole.my_answer, Some(Answer::Yes));
     }
 
     #[test]
     fn a_changed_occurrence_carries_the_version_of_its_series() {
-        let series = Event { etag: "\"7\"".into(), ..standup(&["RRULE:FREQ=DAILY;COUNT=10"]) };
-        let steps = change(&series, &[], thursday(), moved(&series, thursday(), 1), RepeatScope::This, "pmnew");
+        let series = Event {
+            etag: "\"7\"".into(),
+            ..standup(&["RRULE:FREQ=DAILY;COUNT=10"])
+        };
+        let steps = change(
+            &series,
+            &[],
+            thursday(),
+            moved(&series, thursday(), 1),
+            RepeatScope::This,
+            "pmnew",
+        );
         let [Step::Save(one)] = steps.as_slice() else {
             panic!("{steps:?}")
         };
@@ -1099,7 +1178,12 @@ mod tests {
     fn an_end_does_not_change_how_a_series_days_move() {
         let until = ";UNTIL=20261231T235959Z";
         // Each day set, and the day of September 2026 its series starts on.
-        for (days, first) in [("MO,TU,WE,TH,FR", 21), ("MO,WE,FR", 21), ("TU", 22), ("SA,SU", 26)] {
+        for (days, first) in [
+            ("MO,TU,WE,TH,FR", 21),
+            ("MO,WE,FR", 21),
+            ("TU", 22),
+            ("SA,SU", 26),
+        ] {
             let moved_rule = |end: &str| {
                 let series = Event {
                     start: lisbon(9, first, 9, 0),
@@ -1111,7 +1195,14 @@ mod tests {
                     original_start: lisbon(10, first - 9, 9, 0),
                     start: lisbon(10, first - 9, 9, 0),
                 };
-                let steps = change(&series, &[], picked, moved(&series, picked, 24), RepeatScope::All, "new");
+                let steps = change(
+                    &series,
+                    &[],
+                    picked,
+                    moved(&series, picked, 24),
+                    RepeatScope::All,
+                    "new",
+                );
                 with_end(&saved(&steps)[0].rules[0], None)
             };
             assert_eq!(moved_rule(until), moved_rule(""), "BYDAY={days}");
@@ -1124,8 +1215,16 @@ mod tests {
         use crate::calendar::Guest;
         Event {
             guests: vec![
-                Guest { email: "rita@example.com".into(), organizer: true, ..Guest::default() },
-                Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
+                Guest {
+                    email: "rita@example.com".into(),
+                    organizer: true,
+                    ..Guest::default()
+                },
+                Guest {
+                    email: "me@example.com".into(),
+                    me: true,
+                    ..Guest::default()
+                },
             ],
             ..standup(&[
                 "RRULE:FREQ=DAILY;COUNT=10",
@@ -1140,7 +1239,10 @@ mod tests {
     fn own_fields_changed(opened: &Event) -> Event {
         use crate::calendar::{Reminder, ReminderMethod};
         Event {
-            reminders: Some(vec![Reminder { minutes: 30, method: ReminderMethod::Notification }]),
+            reminders: Some(vec![Reminder {
+                minutes: 30,
+                method: ReminderMethod::Notification,
+            }]),
             color: Some("#f4511e".into()),
             busy: false,
             ..opened.clone()
@@ -1165,8 +1267,17 @@ mod tests {
         let series = attended();
         // The editor opens Thursday on the series itself, whose start is
         // Monday's.
-        let steps = change(&series, &[], thursday(), own_fields_changed(&series), RepeatScope::This, "new");
-        let [Step::Save(saved)] = steps.as_slice() else { panic!("one save: {steps:?}") };
+        let steps = change(
+            &series,
+            &[],
+            thursday(),
+            own_fields_changed(&series),
+            RepeatScope::This,
+            "new",
+        );
+        let [Step::Save(saved)] = steps.as_slice() else {
+            panic!("one save: {steps:?}")
+        };
         let expected = Event {
             id: occurrence_id(&series, thursday().original_start),
             etag: String::new(),
@@ -1184,8 +1295,17 @@ mod tests {
     #[test]
     fn a_guest_changing_all_events_keeps_the_series_times_and_dates() {
         let series = attended();
-        let steps = change(&series, &[], thursday(), own_fields_changed(&series), RepeatScope::All, "new");
-        let [Step::Save(saved)] = steps.as_slice() else { panic!("one save: {steps:?}") };
+        let steps = change(
+            &series,
+            &[],
+            thursday(),
+            own_fields_changed(&series),
+            RepeatScope::All,
+            "new",
+        );
+        let [Step::Save(saved)] = steps.as_slice() else {
+            panic!("one save: {steps:?}")
+        };
         keeps_only_own_fields_changed(saved, &series);
     }
 
@@ -1204,34 +1324,68 @@ mod tests {
             original_start: Some(thursday().original_start),
             ..series.clone()
         };
-        let picked = Picked { original_start: thursday().original_start, start: moved.start };
+        let picked = Picked {
+            original_start: thursday().original_start,
+            start: moved.start,
+        };
         let changed = [moved.clone()];
-        let this = change(&series, &changed, picked, own_fields_changed(&moved), RepeatScope::This, "new");
-        let [Step::Save(saved)] = this.as_slice() else { panic!("one save: {this:?}") };
+        let this = change(
+            &series,
+            &changed,
+            picked,
+            own_fields_changed(&moved),
+            RepeatScope::This,
+            "new",
+        );
+        let [Step::Save(saved)] = this.as_slice() else {
+            panic!("one save: {this:?}")
+        };
         keeps_only_own_fields_changed(saved, &moved);
         // All events, opened on the moved occurrence, leaves the series'
         // rules and times alone.
-        let all = change(&series, &changed, picked, own_fields_changed(&moved), RepeatScope::All, "new");
-        let [Step::Save(saved)] = all.as_slice() else { panic!("one save: {all:?}") };
+        let all = change(
+            &series,
+            &changed,
+            picked,
+            own_fields_changed(&moved),
+            RepeatScope::All,
+            "new",
+        );
+        let [Step::Save(saved)] = all.as_slice() else {
+            panic!("one save: {all:?}")
+        };
         keeps_only_own_fields_changed(saved, &series);
     }
 
     #[test]
     fn a_move_to_another_calendar_goes_first_and_the_edit_follows_it_there() {
         let series = standup(&["RRULE:FREQ=DAILY;COUNT=5"]);
-        let edited = Event { title: "Stand-up, renamed".into(), ..series.clone() };
+        let edited = Event {
+            title: "Stand-up, renamed".into(),
+            ..series.clone()
+        };
         let steps = change(&series, &[], thursday(), edited, RepeatScope::All, "new");
         let moved = to_calendar(steps, &series.calendar, "home", &series.id);
         let [Step::Move { from, to, id }, Step::Save(saved)] = moved.as_slice() else {
             panic!("a move, then the save: {moved:?}")
         };
-        assert_eq!((from.as_str(), to.as_str(), id.as_str()), (series.calendar.as_str(), "home", "standup"));
-        assert_eq!((saved.calendar.as_str(), saved.title.as_str()), ("home", "Stand-up, renamed"));
+        assert_eq!(
+            (from.as_str(), to.as_str(), id.as_str()),
+            (series.calendar.as_str(), "home", "standup")
+        );
+        assert_eq!(
+            (saved.calendar.as_str(), saved.title.as_str()),
+            ("home", "Stand-up, renamed")
+        );
     }
 
     #[test]
     fn a_move_writes_where_the_event_lands() {
-        let step = Step::Move { from: "work".into(), to: "home".into(), id: "standup".into() };
+        let step = Step::Move {
+            from: "work".into(),
+            to: "home".into(),
+            id: "standup".into(),
+        };
         assert_eq!(step.key(), ("home".to_string(), "standup".to_string()));
     }
 
@@ -1239,6 +1393,14 @@ mod tests {
     fn staying_on_the_same_calendar_moves_nothing() {
         let series = standup(&[]);
         let steps = vec![Step::Save(series.clone())];
-        assert_eq!(to_calendar(steps.clone(), &series.calendar, &series.calendar, &series.id), steps);
+        assert_eq!(
+            to_calendar(
+                steps.clone(),
+                &series.calendar,
+                &series.calendar,
+                &series.id
+            ),
+            steps
+        );
     }
 }

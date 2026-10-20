@@ -181,7 +181,10 @@ fn a_staged_tree_installs_from_the_tarball_folder() {
         "{launcher}"
     );
     assert!(!launcher.contains("Exec=penguin-mail"), "{launcher}");
-    assert!(mime_types(&launcher).contains(&"text/calendar"), "{launcher}");
+    assert!(
+        mime_types(&launcher).contains(&"text/calendar"),
+        "{launcher}"
+    );
     let login =
         std::fs::read_to_string(home.join(format!(".config/autostart/{ID}.desktop"))).unwrap();
     assert!(
@@ -235,14 +238,20 @@ fn a_flatpak_tree_installs_under_flathubs_id() {
     }
     let launcher =
         std::fs::read_to_string(share.join(format!("applications/{FLATHUB_ID}.desktop"))).unwrap();
-    assert!(launcher.contains(&format!("\nIcon={FLATHUB_ID}\n")), "{launcher}");
+    assert!(
+        launcher.contains(&format!("\nIcon={FLATHUB_ID}\n")),
+        "{launcher}"
+    );
     assert!(
         launcher.contains(&format!("\nStartupWMClass={FLATHUB_ID}\n")),
         "{launcher}"
     );
     let metainfo =
         std::fs::read_to_string(share.join(format!("metainfo/{FLATHUB_ID}.metainfo.xml"))).unwrap();
-    assert!(metainfo.contains(&format!("<id>{FLATHUB_ID}</id>")), "{metainfo}");
+    assert!(
+        metainfo.contains(&format!("<id>{FLATHUB_ID}</id>")),
+        "{metainfo}"
+    );
     assert!(
         metainfo.contains(&format!(
             "<launchable type=\"desktop-id\">{FLATHUB_ID}.desktop</launchable>"

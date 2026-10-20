@@ -64,7 +64,13 @@ impl<A: Accounts> CalendarCopy<A> {
                     ..Calendar::default()
                 };
                 store_list::add_calendar(c, account_id, &calendar)?;
-                store_list::enqueue_edit(c, account_id, &made, &ListEdit::Create { name, color, zone }).map(drop)
+                store_list::enqueue_edit(
+                    c,
+                    account_id,
+                    &made,
+                    &ListEdit::Create { name, color, zone },
+                )
+                .map(drop)
             })
             .await?;
         Ok(Permitted::Done(id))
@@ -77,7 +83,9 @@ impl<A: Accounts> CalendarCopy<A> {
         calendar: &str,
         name: &str,
     ) -> Result<Permitted<()>, SyncError> {
-        let held = self.owned(account_id, calendar, |allows| allows.rename).await?;
+        let held = self
+            .owned(account_id, calendar, |allows| allows.rename)
+            .await?;
         if self.withheld_all(account_id)?.calendars {
             return Ok(Permitted::NeedsPermission);
         }
@@ -93,8 +101,14 @@ impl<A: Accounts> CalendarCopy<A> {
 
     /// Deletes a calendar the account owns, other than its primary, with
     /// every event on it.
-    pub async fn delete_calendar(&self, account_id: AccountId, calendar: &str) -> Result<Permitted<()>, SyncError> {
-        let held = self.owned(account_id, calendar, |allows| allows.delete).await?;
+    pub async fn delete_calendar(
+        &self,
+        account_id: AccountId,
+        calendar: &str,
+    ) -> Result<Permitted<()>, SyncError> {
+        let held = self
+            .owned(account_id, calendar, |allows| allows.delete)
+            .await?;
         if self.withheld_all(account_id)?.calendars {
             return Ok(Permitted::NeedsPermission);
         }
@@ -110,8 +124,14 @@ impl<A: Accounts> CalendarCopy<A> {
 
     /// Takes a calendar the account does not own off its list, on every
     /// device: a subscription, a holiday calendar or a shared one.
-    pub async fn unsubscribe(&self, account_id: AccountId, calendar: &str) -> Result<Permitted<()>, SyncError> {
-        let held = self.owned(account_id, calendar, |allows| allows.unsubscribe).await?;
+    pub async fn unsubscribe(
+        &self,
+        account_id: AccountId,
+        calendar: &str,
+    ) -> Result<Permitted<()>, SyncError> {
+        let held = self
+            .owned(account_id, calendar, |allows| allows.unsubscribe)
+            .await?;
         if self.withheld_all(account_id)?.change_calendar_list {
             return Ok(Permitted::NeedsPermission);
         }
@@ -141,7 +161,8 @@ impl<A: Accounts> CalendarCopy<A> {
             .write(move |c| match (color, everywhere) {
                 (Some(color), true) => {
                     store_list::set_provider_color(c, account_id, &id, &color)?;
-                    store_list::enqueue_edit(c, account_id, &id, &ListEdit::Recolor { color }).map(drop)
+                    store_list::enqueue_edit(c, account_id, &id, &ListEdit::Recolor { color })
+                        .map(drop)
                 }
                 // The provider's colour is already in the row; the own one
                 // only goes.
@@ -170,7 +191,12 @@ impl<A: Accounts> CalendarCopy<A> {
                 // A calendar the provider does not have yet goes out hidden
                 // or not with the rest of its edits, in order.
                 if everywhere {
-                    store_list::enqueue_edit(c, account_id, &id, &ListEdit::Hide { hidden: !listed })?;
+                    store_list::enqueue_edit(
+                        c,
+                        account_id,
+                        &id,
+                        &ListEdit::Hide { hidden: !listed },
+                    )?;
                 }
                 Ok(())
             })
@@ -183,7 +209,11 @@ impl<A: Accounts> CalendarCopy<A> {
     /// then on, and the copy reads it as a calendar the account only
     /// reads. Answers the id the copy files it under until the provider
     /// gives its own.
-    pub async fn subscribe(&self, account_id: AccountId, typed: &str) -> Result<Permitted<String>, SyncError> {
+    pub async fn subscribe(
+        &self,
+        account_id: AccountId,
+        typed: &str,
+    ) -> Result<Permitted<String>, SyncError> {
         self.service(account_id)?;
         let url = list::subscription_address(typed)
             .ok_or_else(|| SyncError::Backend(BackendError::Refused(typed.to_string())))?;
@@ -202,7 +232,8 @@ impl<A: Accounts> CalendarCopy<A> {
         self.db
             .write(move |c| {
                 store_list::add_calendar(c, account_id, &calendar)?;
-                store_list::enqueue_edit(c, account_id, &calendar.id, &ListEdit::Subscribe { url }).map(drop)
+                store_list::enqueue_edit(c, account_id, &calendar.id, &ListEdit::Subscribe { url })
+                    .map(drop)
             })
             .await?;
         Ok(Permitted::Done(id))
@@ -211,7 +242,12 @@ impl<A: Accounts> CalendarCopy<A> {
     /// Puts a calendar the provider publishes, such as a public holiday
     /// calendar, on the account's list by its id. `name` shows until the
     /// provider's own name arrives.
-    pub async fn add_public(&self, account_id: AccountId, id: &str, name: &str) -> Result<Permitted<()>, SyncError> {
+    pub async fn add_public(
+        &self,
+        account_id: AccountId,
+        id: &str,
+        name: &str,
+    ) -> Result<Permitted<()>, SyncError> {
         self.service(account_id)?;
         if self.withheld_all(account_id)?.change_calendar_list {
             return Ok(Permitted::NeedsPermission);
@@ -245,7 +281,11 @@ impl<A: Accounts> CalendarCopy<A> {
         account_id: AccountId,
     ) -> Result<Vec<TurnedDown>, SyncError> {
         let mut turned_down = Vec::new();
-        while let Some(queued) = self.db.read(move |c| store_list::next_edit(c, account_id)).await? {
+        while let Some(queued) = self
+            .db
+            .read(move |c| store_list::next_edit(c, account_id))
+            .await?
+        {
             let seq = queued.seq;
             match calendar.edit_list(&queued.calendar, &queued.edit).await {
                 Ok(answer) => {
@@ -265,7 +305,9 @@ impl<A: Accounts> CalendarCopy<A> {
                 }
                 // Gone already or not, the calendar is off the list.
                 Err(BackendError::NotFound) if queued.edit.removes() => {
-                    self.db.write(move |c| store_list::finish_edit(c, seq)).await?;
+                    self.db
+                        .write(move |c| store_list::finish_edit(c, seq))
+                        .await?;
                 }
                 Err(err) if holds_the_queue(&err) => return Err(err.into()),
                 Err(err) => {
@@ -278,7 +320,10 @@ impl<A: Accounts> CalendarCopy<A> {
                         .db
                         .write(move |c| {
                             store_list::finish_edit(c, seq)?;
-                            let name = store::calendars(c, account_id)?.into_iter().find(|c| c.id == id).map(|c| c.name);
+                            let name = store::calendars(c, account_id)?
+                                .into_iter()
+                                .find(|c| c.id == id)
+                                .map(|c| c.name);
                             // A calendar made here that the provider refused
                             // has nothing to come back to.
                             if list::is_local(&id) {
@@ -289,7 +334,10 @@ impl<A: Accounts> CalendarCopy<A> {
                         .await?;
                     // The next read of the list puts back what the provider
                     // holds: the old name, the calendar a delete took off.
-                    self.last_list.lock().expect("copy poisoned").remove(&account_id);
+                    self.last_list
+                        .lock()
+                        .expect("copy poisoned")
+                        .remove(&account_id);
                     turned_down.push(TurnedDown {
                         account_id,
                         calendar: queued.calendar.clone(),
@@ -318,26 +366,39 @@ impl<A: Accounts> CalendarCopy<A> {
         let id = calendar.to_string();
         let held = self
             .db
-            .read(move |c| Ok(store::calendars(c, account_id)?.into_iter().find(|c| c.id == id)))
+            .read(move |c| {
+                Ok(store::calendars(c, account_id)?
+                    .into_iter()
+                    .find(|c| c.id == id))
+            })
             .await?;
-        held.filter(|c| allowed(list::allows(c))).ok_or(SyncError::Backend(BackendError::Unsupported))
+        held.filter(|c| allowed(list::allows(c)))
+            .ok_or(SyncError::Backend(BackendError::Unsupported))
     }
 
     /// The account's calendar service, or `Unsupported` for an account
     /// whose provider offers none.
     fn service(&self, account_id: AccountId) -> Result<AnyCalendar, SyncError> {
-        self.calendar(account_id)?.ok_or(SyncError::Backend(BackendError::Unsupported))
+        self.calendar(account_id)?
+            .ok_or(SyncError::Backend(BackendError::Unsupported))
     }
 
     /// Whether a hide goes to the provider's own list: the provider keeps
     /// a hidden flag and the person allowed changes to the list.
     pub(super) fn hides_everywhere(&self, account_id: AccountId) -> Result<bool, SyncError> {
-        let services = self.accounts.services(account_id).ok_or(SyncError::UnknownAccount(account_id))?;
+        let services = self
+            .accounts
+            .services(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?;
         Ok(services.hides_calendars() && !services.withheld().change_calendar_list)
     }
 
     fn withheld_all(&self, account_id: AccountId) -> Result<Withheld, SyncError> {
-        Ok(self.accounts.services(account_id).ok_or(SyncError::UnknownAccount(account_id))?.withheld())
+        Ok(self
+            .accounts
+            .services(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?
+            .withheld())
     }
 }
 

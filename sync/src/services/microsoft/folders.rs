@@ -24,17 +24,38 @@ const MOST_FOLDERS: usize = 1000;
 /// Outlook's category presets as `#rrggbb`, as Outlook on the web draws
 /// them. `none` has no colour.
 pub(super) const PRESETS: [(&str, &str); 25] = [
-    ("preset0", "#e74856"), ("preset1", "#ff8c00"), ("preset2", "#ab620d"), ("preset3", "#fff100"),
-    ("preset4", "#47d041"), ("preset5", "#30c6cc"), ("preset6", "#73aa24"), ("preset7", "#4a8ee0"),
-    ("preset8", "#a473da"), ("preset9", "#ee5fb7"), ("preset10", "#7688a8"), ("preset11", "#4c596e"),
-    ("preset12", "#abb3bb"), ("preset13", "#616b76"), ("preset14", "#474747"), ("preset15", "#750b1c"),
-    ("preset16", "#ca5010"), ("preset17", "#6d4a1c"), ("preset18", "#c19c00"), ("preset19", "#0b6a0b"),
-    ("preset20", "#038387"), ("preset21", "#5c7e0e"), ("preset22", "#004e8c"), ("preset23", "#5c2e91"),
+    ("preset0", "#e74856"),
+    ("preset1", "#ff8c00"),
+    ("preset2", "#ab620d"),
+    ("preset3", "#fff100"),
+    ("preset4", "#47d041"),
+    ("preset5", "#30c6cc"),
+    ("preset6", "#73aa24"),
+    ("preset7", "#4a8ee0"),
+    ("preset8", "#a473da"),
+    ("preset9", "#ee5fb7"),
+    ("preset10", "#7688a8"),
+    ("preset11", "#4c596e"),
+    ("preset12", "#abb3bb"),
+    ("preset13", "#616b76"),
+    ("preset14", "#474747"),
+    ("preset15", "#750b1c"),
+    ("preset16", "#ca5010"),
+    ("preset17", "#6d4a1c"),
+    ("preset18", "#c19c00"),
+    ("preset19", "#0b6a0b"),
+    ("preset20", "#038387"),
+    ("preset21", "#5c7e0e"),
+    ("preset22", "#004e8c"),
+    ("preset23", "#5c2e91"),
     ("preset24", "#9b1c5a"),
 ];
 
 pub(super) fn preset_color(preset: &str) -> Option<String> {
-    PRESETS.iter().find(|(p, _)| p.eq_ignore_ascii_case(preset)).map(|(_, hex)| hex.to_string())
+    PRESETS
+        .iter()
+        .find(|(p, _)| p.eq_ignore_ascii_case(preset))
+        .map(|(_, hex)| hex.to_string())
 }
 
 impl<G: GraphApi> Microsoft<G> {
@@ -49,19 +70,34 @@ impl<G: GraphApi> Microsoft<G> {
             .filter_map(|((_, role), folder)| folder.map(|f| (*role, f.id)))
             .collect();
         let mut listed = Vec::new();
-        let (mut paths, mut totals) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+        let (mut paths, mut totals) = (
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+        );
         let mut queue: VecDeque<(Option<String>, Option<String>)> = VecDeque::from([(None, None)]);
         'walk: while let Some((parent, path)) = queue.pop_front() {
             let mut next: Option<String> = None;
             loop {
-                let page = self.graph().folders(parent.as_deref(), next.as_deref()).await.map_err(backend)?;
+                let page = self
+                    .graph()
+                    .folders(parent.as_deref(), next.as_deref())
+                    .await
+                    .map_err(backend)?;
                 for folder in page.value {
                     if listed.len() >= MOST_FOLDERS {
-                        tracing::warn!("the mailbox has more than {MOST_FOLDERS} folders; listing the first");
+                        tracing::warn!(
+                            "the mailbox has more than {MOST_FOLDERS} folders; listing the first"
+                        );
                         break 'walk;
                     }
-                    let name = path.as_ref().map_or_else(|| folder.display_name.clone(), |p| format!("{p}/{}", folder.display_name));
-                    let role = roles.iter().find(|(_, id)| *id == folder.id).map(|(r, _)| *r);
+                    let name = path.as_ref().map_or_else(
+                        || folder.display_name.clone(),
+                        |p| format!("{p}/{}", folder.display_name),
+                    );
+                    let role = roles
+                        .iter()
+                        .find(|(_, id)| *id == folder.id)
+                        .map(|(r, _)| *r);
                     if folder.child_folder_count > 0 {
                         queue.push_back((Some(folder.id.clone()), Some(name.clone())));
                     }
@@ -70,7 +106,11 @@ impl<G: GraphApi> Microsoft<G> {
                     listed.push(RemoteMailbox {
                         id: folder.id,
                         name,
-                        kind: if role.is_some() { MailboxKind::System } else { MailboxKind::Folder },
+                        kind: if role.is_some() {
+                            MailboxKind::System
+                        } else {
+                            MailboxKind::Folder
+                        },
                         role,
                         color: None,
                         hidden: folder.is_hidden,
@@ -83,7 +123,10 @@ impl<G: GraphApi> Microsoft<G> {
             }
         }
         let categories = self.graph().categories().await.map_err(backend)?;
-        let (mut tags, mut category_ids) = (std::collections::BTreeMap::new(), std::collections::BTreeMap::new());
+        let (mut tags, mut category_ids) = (
+            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::new(),
+        );
         for category in categories {
             let id = tag_id(&category.display_name);
             tags.insert(category.display_name.clone(), id.clone());
@@ -115,7 +158,14 @@ impl<G: GraphApi> Microsoft<G> {
         }
         let known = self.known();
         let mut synced: Vec<String> = known.roles.values().cloned().collect();
-        synced.extend(known.followed.iter().filter(|f| !synced.contains(f)).cloned().collect::<Vec<_>>());
+        synced.extend(
+            known
+                .followed
+                .iter()
+                .filter(|f| !synced.contains(f))
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         Ok(synced)
     }
 }

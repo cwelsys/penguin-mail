@@ -3,6 +3,8 @@
 # and IconAccessibleDesc on the item's own interface, which ksni has no way
 # to add. The changes are in src/lib.rs, src/dbus_interface.rs and
 # src/service.rs. The upstream tests and examples are left out.
+# The item registers its Ayatana object path so Snap's unity7 policy
+# permits the label signal under strict confinement.
 
 # Its own workspace, so cargo can test it on its own.
 [workspace]

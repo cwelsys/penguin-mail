@@ -220,7 +220,11 @@ async fn whole_events_come_in_batches_in_utc() {
                 .iter()
                 .map(|r| {
                     let prefer = r["headers"]["Prefer"].as_str().unwrap();
-                    assert!(prefer.contains("ImmutableId") && prefer.contains("outlook.timezone=\"UTC\""), "{prefer}");
+                    assert!(
+                        prefer.contains("ImmutableId")
+                            && prefer.contains("outlook.timezone=\"UTC\""),
+                        "{prefer}"
+                    );
                     let id = r["url"].as_str().unwrap().trim_start_matches("/me/events/");
                     json!({"id": r["id"], "status": 200, "body": {"id": id, "subject": "Standup"}})
                 })
@@ -232,7 +236,10 @@ async fn whole_events_come_in_batches_in_utc() {
     let ids: Vec<String> = (0..3).map(|n| format!("m{n}")).collect();
     let found = common::graph(&server).events(&ids).await.unwrap();
     assert_eq!(found[2].as_ref().unwrap().id, "m2");
-    assert_eq!(found[0].as_ref().unwrap().subject.as_deref(), Some("Standup"));
+    assert_eq!(
+        found[0].as_ref().unwrap().subject.as_deref(),
+        Some("Standup")
+    );
 }
 
 /// The calendar-view delta leaves `originalStart` out of an exception; a
@@ -268,9 +275,18 @@ async fn original_starts_come_in_batches_of_twenty() {
     let found = common::graph(&server).original_starts(&ids).await.unwrap();
     assert_eq!(found.len(), 25);
     assert_eq!(found[3].as_ref().unwrap().id, "x3");
-    assert_eq!(found[3].as_ref().unwrap().original_start.as_deref(), Some("2026-10-05T08:00:00Z"));
+    assert_eq!(
+        found[3].as_ref().unwrap().original_start.as_deref(),
+        Some("2026-10-05T08:00:00Z")
+    );
     assert!(matches!(found[24], Err(mailrs_graph::GraphError::NotFound)));
-    let posts = server.received_requests().await.unwrap().iter().filter(|r| r.url.path() == "/v1.0/$batch").count();
+    let posts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/v1.0/$batch")
+        .count();
     assert_eq!(posts, 2);
 }
 
@@ -280,7 +296,10 @@ async fn instances_ask_for_their_original_start() {
     common::token_endpoint(&server, "r").await;
     Mock::given(method("GET"))
         .and(path("/v1.0/me/events/s1/instances"))
-        .and(query_param("$select", "id,type,seriesMasterId,start,end,isAllDay,originalStart,originalStartTimeZone"))
+        .and(query_param(
+            "$select",
+            "id,type,seriesMasterId,start,end,isAllDay,originalStart,originalStartTimeZone",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "value": [{"id": "x1", "originalStart": "2026-10-05T08:00:00Z"}],
         })))
@@ -290,5 +309,8 @@ async fn instances_ask_for_their_original_start() {
         .instances("s1", "2026-10-05T00:00:00Z", "2026-10-06T00:00:00Z")
         .await
         .unwrap();
-    assert_eq!(found[0].original_start.as_deref(), Some("2026-10-05T08:00:00Z"));
+    assert_eq!(
+        found[0].original_start.as_deref(),
+        Some("2026-10-05T08:00:00Z")
+    );
 }

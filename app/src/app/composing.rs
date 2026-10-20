@@ -11,7 +11,7 @@ use mailrs_domain::{Account, AccountId};
 
 use super::App;
 use crate::compose::Draft;
-use crate::settings::Change;
+use crate::settings::{AccountUse, Change};
 use crate::ui::composer::{Composer, Remembered, Writing};
 
 /// Whether a message gets the signature of the address it comes from.
@@ -26,29 +26,38 @@ pub enum Signature {
 }
 
 /// The account a new message comes from: the one set in Preferences,
-/// else `hint`, the account on screen, else the first.
+/// else `hint`, the account on screen, else the first. Only an account
+/// with mail counts, so a calendar account never writes.
 fn choose_account(
     accounts: &[Account],
     preferred: Option<&str>,
     hint: Option<AccountId>,
 ) -> Option<AccountId> {
+    let writers = mailrs_domain::mail_accounts(accounts);
     preferred
-        .and_then(|email| {
-            accounts
-                .iter()
-                .find(|a| a.email.eq_ignore_ascii_case(email))
-                .map(|a| a.id)
-        })
-        .or(hint)
-        .or_else(|| accounts.first().map(|a| a.id))
+        .and_then(|email| writers.iter().find(|a| a.email.eq_ignore_ascii_case(email)))
+        .or_else(|| hint.and_then(|id| writers.iter().find(|a| a.id == id)))
+        .or(writers.first())
+        .map(|a| a.id)
 }
 
 impl App {
     /// The account a new message comes from. `hint` is the account the
     /// window shows, when it shows one.
     pub fn default_account(&self, hint: Option<AccountId>) -> Option<AccountId> {
-        let preferred = self.settings.borrow().default_account.clone();
-        choose_account(&self.accounts.borrow(), preferred.as_deref(), hint)
+        self.account_for(AccountUse::NewMessages, hint)
+    }
+
+    /// Applies a task default while keeping a live contextual account as fallback.
+    pub fn account_for(&self, task: AccountUse, hint: Option<AccountId>) -> Option<AccountId> {
+        let settings = self.settings.borrow();
+        let accounts = self.accounts();
+        let emails: Vec<_> = accounts
+            .iter()
+            .map(|account| account.email.as_str())
+            .collect();
+        let preferred = settings.preferred_live_account(task, &emails);
+        choose_account(&accounts, preferred, hint)
     }
 
     /// A blank message from the account, carrying its identity.
@@ -205,6 +214,40 @@ mod tests {
         let gone = Some("old@example.com");
         assert_eq!(choose_account(&accounts(), gone, Some(2)), Some(2));
         assert_eq!(choose_account(&accounts(), gone, None), Some(1));
+    }
+
+    #[test]
+    fn a_calendar_account_never_writes() {
+        let mut all = accounts();
+        all.insert(
+            0,
+            Account {
+                id: 9,
+                email: "robin@cloud.example.org".into(),
+                state: AccountState::Ok,
+                provider: mailrs_domain::Provider::CalDav,
+                provider_name: None,
+            },
+        );
+        assert_eq!(
+            choose_account(&all, None, None),
+            Some(1),
+            "the first account with mail"
+        );
+        assert_eq!(
+            choose_account(&all, Some("robin@cloud.example.org"), None),
+            Some(1)
+        );
+        assert_eq!(
+            choose_account(&all, None, Some(9)),
+            Some(1),
+            "nor as the account on screen"
+        );
+        assert_eq!(
+            choose_account(&all[..1], None, None),
+            None,
+            "alone, it leaves nobody to write"
+        );
     }
 
     #[test]

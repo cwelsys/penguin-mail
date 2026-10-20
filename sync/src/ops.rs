@@ -177,9 +177,18 @@ fn set_op(set: &MailSet, on: bool, roles: &Roles) -> Result<MailOp, BackendError
             op(Membership::Mailbox(id), on)
         }
         MailSet::Mailbox(id) => op(Membership::Mailbox(id.clone()), on),
-        MailSet::Keyword(k) => MailOp::SetKeyword { keyword: k.clone(), on },
-        MailSet::Unseen => MailOp::SetKeyword { keyword: SEEN.into(), on: !on },
-        MailSet::Category(c) => MailOp::SetCategory { category: c.clone(), on },
+        MailSet::Keyword(k) => MailOp::SetKeyword {
+            keyword: k.clone(),
+            on,
+        },
+        MailSet::Unseen => MailOp::SetKeyword {
+            keyword: SEEN.into(),
+            on: !on,
+        },
+        MailSet::Category(c) => MailOp::SetCategory {
+            category: c.clone(),
+            on,
+        },
     })
 }
 
@@ -324,7 +333,10 @@ fn is_move_op(op: &MailOp) -> bool {
 /// mailbox carries a role.
 fn only_role(mailboxes: &[String], roles: &Roles) -> Option<Role> {
     let [only] = mailboxes else { return None };
-    roles.iter().find(|(_, id)| *id == only).map(|(role, _)| *role)
+    roles
+        .iter()
+        .find(|(_, id)| *id == only)
+        .map(|(role, _)| *role)
 }
 
 /// Whether a move `ops` describes should leave a message alone that sits
@@ -405,7 +417,11 @@ pub fn local_changes(
 /// The store changes that take message `id` out of every mailbox it
 /// holds, except its tags, and into `target`.
 fn move_to(changes: &mut Vec<Change>, id: &str, held: &Memberships, target: &str, tags: &Tags) {
-    for mailbox in held.mailboxes.iter().filter(|m| *m != target && !tags.contains(*m)) {
+    for mailbox in held
+        .mailboxes
+        .iter()
+        .filter(|m| *m != target && !tags.contains(*m))
+    {
         changes.push(Change::of(id, Membership::Mailbox(mailbox.clone()), false));
     }
     changes.push(Change::of(id, Membership::Mailbox(target.into()), true));
@@ -549,10 +565,7 @@ mod tests {
         );
         assert_eq!(
             ops(TriageAction::Relabel {
-                add: vec![
-                    MailSet::Category("CATEGORY_SOCIAL".into()),
-                    MailSet::Unseen
-                ],
+                add: vec![MailSet::Category("CATEGORY_SOCIAL".into()), MailSet::Unseen],
                 remove: vec![MailSet::Category("CATEGORY_UPDATES".into())],
             }),
             [
@@ -580,7 +593,10 @@ mod tests {
             ops_for(&back, &label_account(), &roles, &Tags::new(), named).unwrap(),
             vec![
                 MailOp::AddToMailbox("INBOX".into()),
-                MailOp::SetKeyword { keyword: SEEN.into(), on: false },
+                MailOp::SetKeyword {
+                    keyword: SEEN.into(),
+                    on: false
+                },
             ]
         );
     }
@@ -589,15 +605,27 @@ mod tests {
     fn a_relabel_by_category_and_keyword_needs_no_label_ids() {
         let roles = gmail_roles();
         let sort = TriageAction::Relabel {
-            add: vec![MailSet::Category("CATEGORY_SOCIAL".into()), MailSet::flagged()],
+            add: vec![
+                MailSet::Category("CATEGORY_SOCIAL".into()),
+                MailSet::flagged(),
+            ],
             remove: vec![MailSet::Category("CATEGORY_UPDATES".into())],
         };
         assert_eq!(
             ops_for(&sort, &label_account(), &roles, &Tags::new(), named).unwrap(),
             vec![
-                MailOp::SetCategory { category: "CATEGORY_SOCIAL".into(), on: true },
-                MailOp::SetKeyword { keyword: FLAGGED.into(), on: true },
-                MailOp::SetCategory { category: "CATEGORY_UPDATES".into(), on: false },
+                MailOp::SetCategory {
+                    category: "CATEGORY_SOCIAL".into(),
+                    on: true
+                },
+                MailOp::SetKeyword {
+                    keyword: FLAGGED.into(),
+                    on: true
+                },
+                MailOp::SetCategory {
+                    category: "CATEGORY_UPDATES".into(),
+                    on: false
+                },
             ]
         );
     }
@@ -609,7 +637,13 @@ mod tests {
             remove: vec![],
         };
         assert!(matches!(
-            ops_for(&relabel, &label_account(), &gmail_roles(), &Tags::new(), named),
+            ops_for(
+                &relabel,
+                &label_account(),
+                &gmail_roles(),
+                &Tags::new(),
+                named
+            ),
             Err(BackendError::Unsupported)
         ));
     }
@@ -622,7 +656,8 @@ mod tests {
                 &TriageAction::RemoveLabel("UNREAD".into()),
                 &label_account(),
                 &roles,
-                &Tags::new(), named
+                &Tags::new(),
+                named
             )
             .unwrap(),
             [keyword(SEEN, true)]
@@ -632,10 +667,14 @@ mod tests {
                 &TriageAction::AddLabel("STARRED".into()),
                 &label_account(),
                 &roles,
-                &Tags::new(), named
+                &Tags::new(),
+                named
             )
             .unwrap(),
-            [MailOp::SetKeyword { keyword: FLAGGED.into(), on: true }]
+            [MailOp::SetKeyword {
+                keyword: FLAGGED.into(),
+                on: true
+            }]
         );
     }
 
@@ -732,7 +771,10 @@ mod tests {
     #[test]
     fn a_folder_account_cannot_put_mail_in_two_folders() {
         let two = TriageAction::Relabel {
-            add: vec![MailSet::Mailbox("Work".into()), MailSet::Mailbox("Travel".into())],
+            add: vec![
+                MailSet::Mailbox("Work".into()),
+                MailSet::Mailbox("Travel".into()),
+            ],
             remove: vec![],
         };
         assert!(matches!(
@@ -744,7 +786,13 @@ mod tests {
     #[test]
     fn a_label_account_without_the_mailbox_cannot_file_there() {
         assert!(matches!(
-            ops_for(&TriageAction::Trash, &label_account(), &Roles::new(), &Tags::new(), named),
+            ops_for(
+                &TriageAction::Trash,
+                &label_account(),
+                &Roles::new(),
+                &Tags::new(),
+                named
+            ),
             Err(crate::BackendError::Unsupported)
         ));
     }
@@ -757,7 +805,13 @@ mod tests {
         };
         let roles = Roles::from([(Role::Archive, "Archive".to_string())]);
         assert_eq!(
-            local_changes("m1", &held, &[MailOp::MoveToRole(Role::Archive)], &roles, &Tags::new()),
+            local_changes(
+                "m1",
+                &held,
+                &[MailOp::MoveToRole(Role::Archive)],
+                &roles,
+                &Tags::new()
+            ),
             [
                 Change::RemoveFromMailbox {
                     message_id: "m1".into(),
@@ -820,7 +874,10 @@ mod tests {
         let mute = [keyword(MUTED, true), MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
             split_keywords(&mute, &["$seen", "$flagged"]),
-            (vec![MailOp::MoveToRole(Role::Archive)], vec![MUTED.to_string()])
+            (
+                vec![MailOp::MoveToRole(Role::Archive)],
+                vec![MUTED.to_string()]
+            )
         );
         assert_eq!(
             split_keywords(&mute, &["$seen", "$flagged", "$muted"]),
@@ -837,11 +894,17 @@ mod tests {
         let held = HashMap::from([
             (
                 "work".to_string(),
-                Memberships { mailboxes: vec!["Work".into()], ..Memberships::default() },
+                Memberships {
+                    mailboxes: vec!["Work".into()],
+                    ..Memberships::default()
+                },
             ),
             (
                 "sent".to_string(),
-                Memberships { mailboxes: vec!["Sent".into()], ..Memberships::default() },
+                Memberships {
+                    mailboxes: vec!["Sent".into()],
+                    ..Memberships::default()
+                },
             ),
         ]);
         let whole_thread = one_thread(&["work", "sent"]);
@@ -861,12 +924,23 @@ mod tests {
         ]);
         let held = HashMap::from([(
             "sent".to_string(),
-            Memberships { mailboxes: vec!["Sent".into()], ..Memberships::default() },
+            Memberships {
+                mailboxes: vec!["Sent".into()],
+                ..Memberships::default()
+            },
         )]);
         let ids = vec!["sent".to_string()];
         let ops = [MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
-            drop_protected(ids, &HashMap::new(), &held, &ops, &roles, &Tags::new(), Some("Work")),
+            drop_protected(
+                ids,
+                &HashMap::new(),
+                &held,
+                &ops,
+                &roles,
+                &Tags::new(),
+                Some("Work")
+            ),
             ["sent".to_string()]
         );
     }
@@ -879,7 +953,10 @@ mod tests {
         ]);
         let held = HashMap::from([(
             "t".to_string(),
-            Memberships { mailboxes: vec!["Trash".into()], ..Memberships::default() },
+            Memberships {
+                mailboxes: vec!["Trash".into()],
+                ..Memberships::default()
+            },
         )]);
         let whole_thread = one_thread(&["t"]);
         let ids = vec!["t".to_string()];
@@ -898,7 +975,10 @@ mod tests {
         ]);
         let held = HashMap::from([(
             "j".to_string(),
-            Memberships { mailboxes: vec!["Junk".into()], ..Memberships::default() },
+            Memberships {
+                mailboxes: vec!["Junk".into()],
+                ..Memberships::default()
+            },
         )]);
         let whole_thread = one_thread(&["j"]);
         let ids = vec!["j".to_string()];
@@ -914,7 +994,10 @@ mod tests {
         let roles = Roles::new();
         let held = HashMap::from([(
             "sent".to_string(),
-            Memberships { mailboxes: vec!["Sent".into()], ..Memberships::default() },
+            Memberships {
+                mailboxes: vec!["Sent".into()],
+                ..Memberships::default()
+            },
         )]);
         let whole_thread = one_thread(&["sent"]);
         let ids = vec!["sent".to_string()];
@@ -928,7 +1011,9 @@ mod tests {
     /// Each of `ids` as a message a thread target picked up, all of one
     /// thread.
     fn one_thread(ids: &[&str]) -> HashMap<String, String> {
-        ids.iter().map(|id| (id.to_string(), "t".to_string())).collect()
+        ids.iter()
+            .map(|id| (id.to_string(), "t".to_string()))
+            .collect()
     }
 
     /// Where each message sits: its id and its one mailbox.
@@ -964,16 +1049,37 @@ mod tests {
         let (roles, tags) = (outlook_roles(), red());
         let set_of = |id: &str| MailSet::Mailbox(id.to_string());
         assert_eq!(
-            ops_for(&TriageAction::AddLabel("category:Red".into()), &folder_account(), &roles, &tags, set_of).unwrap(),
+            ops_for(
+                &TriageAction::AddLabel("category:Red".into()),
+                &folder_account(),
+                &roles,
+                &tags,
+                set_of
+            )
+            .unwrap(),
             [MailOp::AddToMailbox("category:Red".into())]
         );
         assert_eq!(
-            ops_for(&TriageAction::RemoveLabel("category:Red".into()), &folder_account(), &roles, &tags, set_of).unwrap(),
+            ops_for(
+                &TriageAction::RemoveLabel("category:Red".into()),
+                &folder_account(),
+                &roles,
+                &tags,
+                set_of
+            )
+            .unwrap(),
             [MailOp::RemoveFromMailbox("category:Red".into())]
         );
         // A folder still moves.
         assert_eq!(
-            ops_for(&TriageAction::AddLabel("AAMk-trips".into()), &folder_account(), &roles, &tags, set_of).unwrap(),
+            ops_for(
+                &TriageAction::AddLabel("AAMk-trips".into()),
+                &folder_account(),
+                &roles,
+                &tags,
+                set_of
+            )
+            .unwrap(),
             [MailOp::MoveToMailbox("AAMk-trips".into())]
         );
     }
@@ -985,11 +1091,29 @@ mod tests {
             mailboxes: vec!["AAMk-inbox".into(), "category:Red".into()],
             ..Memberships::default()
         };
-        let changes = local_changes("m1", &held, &[MailOp::MoveToRole(Role::Archive)], &roles, &tags);
-        assert!(changes.contains(&Change::of("m1", Membership::Mailbox("AAMk-inbox".into()), false)));
-        assert!(changes.contains(&Change::of("m1", Membership::Mailbox("AAMk-archive".into()), true)));
+        let changes = local_changes(
+            "m1",
+            &held,
+            &[MailOp::MoveToRole(Role::Archive)],
+            &roles,
+            &tags,
+        );
+        assert!(changes.contains(&Change::of(
+            "m1",
+            Membership::Mailbox("AAMk-inbox".into()),
+            false
+        )));
+        assert!(changes.contains(&Change::of(
+            "m1",
+            Membership::Mailbox("AAMk-archive".into()),
+            true
+        )));
         assert!(
-            !changes.contains(&Change::of("m1", Membership::Mailbox("category:Red".into()), false)),
+            !changes.contains(&Change::of(
+                "m1",
+                Membership::Mailbox("category:Red".into()),
+                false
+            )),
             "{changes:?}"
         );
     }
@@ -1015,7 +1139,10 @@ mod tests {
             &tags,
             None,
         );
-        assert!(kept.is_empty(), "a sent reply is not pulled into the Archive");
+        assert!(
+            kept.is_empty(),
+            "a sent reply is not pulled into the Archive"
+        );
     }
 
     #[test]
@@ -1024,7 +1151,10 @@ mod tests {
         let set_of = |id: &str| MailSet::Mailbox(id.to_string());
         let action = TriageAction::RemoveLabel("category:Red".into());
         assert_eq!(moved_out_of(&action, &tags, set_of), None);
-        assert_eq!(source_mailbox(&MailSet::Mailbox("category:Red".into()), &roles, &tags), None);
+        assert_eq!(
+            source_mailbox(&MailSet::Mailbox("category:Red".into()), &roles, &tags),
+            None
+        );
     }
 
     fn folder_roles() -> Roles {
@@ -1045,7 +1175,15 @@ mod tests {
         let whole_thread = one_thread(&["work", "travel", "sent"]);
         let ops = [MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
-            drop_protected(ids, &whole_thread, &held, &ops, &folder_roles(), &Tags::new(), Some("Work")),
+            drop_protected(
+                ids,
+                &whole_thread,
+                &held,
+                &ops,
+                &folder_roles(),
+                &Tags::new(),
+                Some("Work")
+            ),
             ["work".to_string()]
         );
     }
@@ -1059,7 +1197,15 @@ mod tests {
         let whole_thread = one_thread(&["work", "travel", "sent"]);
         let ops = [MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
-            drop_protected(ids, &whole_thread, &held, &ops, &folder_roles(), &Tags::new(), None),
+            drop_protected(
+                ids,
+                &whole_thread,
+                &held,
+                &ops,
+                &folder_roles(),
+                &Tags::new(),
+                None
+            ),
             ["work".to_string(), "travel".to_string()]
         );
     }
@@ -1072,7 +1218,15 @@ mod tests {
         let whole_thread = one_thread(&["work", "sent"]);
         let ops = [MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
-            drop_protected(ids, &whole_thread, &held, &ops, &folder_roles(), &Tags::new(), Some("Sent")),
+            drop_protected(
+                ids,
+                &whole_thread,
+                &held,
+                &ops,
+                &folder_roles(),
+                &Tags::new(),
+                Some("Sent")
+            ),
             ["sent".to_string()]
         );
     }
@@ -1087,7 +1241,15 @@ mod tests {
         let whole_thread = one_thread(&["travel", "sent"]);
         let ops = [MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
-            drop_protected(ids, &whole_thread, &held, &ops, &folder_roles(), &Tags::new(), Some("Work")),
+            drop_protected(
+                ids,
+                &whole_thread,
+                &held,
+                &ops,
+                &folder_roles(),
+                &Tags::new(),
+                Some("Work")
+            ),
             ["travel".to_string()]
         );
     }
@@ -1095,8 +1257,16 @@ mod tests {
     /// Two threads in one call: each falls back on its own.
     #[test]
     fn each_thread_is_judged_by_its_own_messages() {
-        let held = sitting(&[("a-work", "Work"), ("a-travel", "Travel"), ("b-travel", "Travel")]);
-        let ids = vec!["a-work".to_string(), "a-travel".to_string(), "b-travel".to_string()];
+        let held = sitting(&[
+            ("a-work", "Work"),
+            ("a-travel", "Travel"),
+            ("b-travel", "Travel"),
+        ]);
+        let ids = vec![
+            "a-work".to_string(),
+            "a-travel".to_string(),
+            "b-travel".to_string(),
+        ];
         let whole_thread = HashMap::from([
             ("a-work".to_string(), "a".to_string()),
             ("a-travel".to_string(), "a".to_string()),
@@ -1104,7 +1274,15 @@ mod tests {
         ]);
         let ops = [MailOp::MoveToRole(Role::Archive)];
         assert_eq!(
-            drop_protected(ids, &whole_thread, &held, &ops, &folder_roles(), &Tags::new(), Some("Work")),
+            drop_protected(
+                ids,
+                &whole_thread,
+                &held,
+                &ops,
+                &folder_roles(),
+                &Tags::new(),
+                Some("Work")
+            ),
             ["a-work".to_string(), "b-travel".to_string()]
         );
     }
@@ -1114,9 +1292,20 @@ mod tests {
         let roles = folder_roles();
         let source = |set: MailSet| source_mailbox(&set, &roles, &Tags::new());
         assert_eq!(source(MailSet::Role(Role::Inbox)).as_deref(), Some("INBOX"));
-        assert_eq!(source(MailSet::Mailbox("Work".into())).as_deref(), Some("Work"));
-        assert_eq!(source_mailbox(&MailSet::Role(Role::Junk), &roles, &Tags::new()), None, "no Junk here");
-        assert_eq!(source_mailbox(&MailSet::flagged(), &roles, &Tags::new()), None, "a mark is no place");
+        assert_eq!(
+            source(MailSet::Mailbox("Work".into())).as_deref(),
+            Some("Work")
+        );
+        assert_eq!(
+            source_mailbox(&MailSet::Role(Role::Junk), &roles, &Tags::new()),
+            None,
+            "no Junk here"
+        );
+        assert_eq!(
+            source_mailbox(&MailSet::flagged(), &roles, &Tags::new()),
+            None,
+            "a mark is no place"
+        );
     }
 
     /// Taking mail out of a folder names where it comes from, whatever
@@ -1125,17 +1314,31 @@ mod tests {
     fn a_removal_names_its_own_source() {
         let set_of = |id: &str| MailSet::Mailbox(id.into());
         assert_eq!(
-            moved_out_of(&TriageAction::RemoveLabel("Travel".into()), &Tags::new(), set_of),
+            moved_out_of(
+                &TriageAction::RemoveLabel("Travel".into()),
+                &Tags::new(),
+                set_of
+            ),
             Some(MailSet::Mailbox("Travel".into()))
         );
         let relabel = TriageAction::Relabel {
             add: vec![MailSet::Mailbox("Work".into())],
             remove: vec![MailSet::Unseen, MailSet::Role(Role::Inbox)],
         };
-        assert_eq!(moved_out_of(&relabel, &Tags::new(), set_of), Some(MailSet::Role(Role::Inbox)));
-        assert_eq!(moved_out_of(&TriageAction::Archive, &Tags::new(), set_of), None);
         assert_eq!(
-            moved_out_of(&TriageAction::RemoveLabel("$flagged".into()), &Tags::new(), |_| MailSet::flagged()),
+            moved_out_of(&relabel, &Tags::new(), set_of),
+            Some(MailSet::Role(Role::Inbox))
+        );
+        assert_eq!(
+            moved_out_of(&TriageAction::Archive, &Tags::new(), set_of),
+            None
+        );
+        assert_eq!(
+            moved_out_of(
+                &TriageAction::RemoveLabel("$flagged".into()),
+                &Tags::new(),
+                |_| MailSet::flagged()
+            ),
             None
         );
     }

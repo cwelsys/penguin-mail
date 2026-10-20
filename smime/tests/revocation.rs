@@ -122,7 +122,10 @@ impl Home {
             listener.local_addr().expect("an address").port()
         );
         let grip = home.authority();
-        home.issue(&grip, (!matches!(point, Point::None)).then_some(url.as_str()));
+        home.issue(
+            &grip,
+            (!matches!(point, Point::None)).then_some(url.as_str()),
+        );
         match point {
             Point::Silent => hold(listener),
             Point::Refused | Point::None => drop(listener),
@@ -206,7 +209,10 @@ impl Home {
             .stdin(Stdio::null())
             .status()
             .expect("gpgsm runs");
-        assert!(made.success(), "gpgsm could not make the {name} certificate");
+        assert!(
+            made.success(),
+            "gpgsm could not make the {name} certificate"
+        );
         let imported = self
             .gpgsm()
             .arg("--import")
@@ -224,7 +230,13 @@ impl Home {
         let dir = self.dir.path();
         let key = self
             .gpgsm()
-            .args(["--pinentry-mode", "loopback", "--passphrase-fd", "0", "--armor"])
+            .args([
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase-fd",
+                "0",
+                "--armor",
+            ])
             .args(["--export-secret-key-raw", "CN=Test Authority"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -311,7 +323,14 @@ impl Home {
         std::fs::write(dir.join("part"), PART).expect("write");
         std::fs::write(dir.join("part.sig"), signature).expect("write");
         let status = Command::new(self.smime.program())
-            .args(["--batch", "--no-tty", "--status-fd", "1", "--assume-base64", "--homedir"])
+            .args([
+                "--batch",
+                "--no-tty",
+                "--status-fd",
+                "1",
+                "--assume-base64",
+                "--homedir",
+            ])
             .arg(dir)
             .arg("--verify")
             .arg(dir.join("part.sig"))
@@ -453,7 +472,9 @@ fn the_crl_server_answers_a_request_that_arrives_in_pieces() {
     serve(listener, crl.clone());
 
     let mut stream = TcpStream::connect(address).expect("a connection");
-    stream.write_all(b"GET /ca.crl HTTP/1.0\r\n").expect("write");
+    stream
+        .write_all(b"GET /ca.crl HTTP/1.0\r\n")
+        .expect("write");
     std::thread::sleep(Duration::from_millis(100));
     stream.write_all(b"Host: 127.0.0.1\r\n\r\n").expect("write");
     let mut answer = Vec::new();
@@ -566,7 +587,8 @@ fn a_crl_that_lists_nothing_leaves_the_chain_trusted() {
         .smime
         .clone()
         .with_revocation_wait(CRL_FETCH)
-        .verify(PART, &signature).expect("a verdict");
+        .verify(PART, &signature)
+        .expect("a verdict");
 
     if found.chain != Chain::Trusted {
         home.explain(&signature);
@@ -599,7 +621,8 @@ fn a_certificate_the_crl_lists_is_revoked() {
         .smime
         .clone()
         .with_revocation_wait(CRL_FETCH)
-        .verify(PART, &signature).expect("a verdict");
+        .verify(PART, &signature)
+        .expect("a verdict");
 
     if found.verdict != Verdict::RevokedCertificate {
         eprintln!("chain: {:?}", found.chain);

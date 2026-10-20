@@ -8,9 +8,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mailrs_jmap::{
-    AddressBook, BodyPart, CALENDARS, CORE, CalendarEvents, CalendarRights, Canceled, EventWrite, EventsPage, JmapCalendar, HELD, HeldSubmission, Hold, MDN, MdnOut, QUOTA, Quota, SubmissionState, max_delayed_send, CardChanges, CardWrite, CardsPage, ChangesResponse, Email, EmailAddress, EmailQuery, Got, Header,
-    Hit, Identity, Imported, JmapError, Listed, MAIL, MailChanges, Mailbox, MailboxWrite, MaskedEmail, MaskedState, Pushed, Queried,
-    SUBMISSION, Saved, Session, SessionAccount, SetError, SetResponse, SieveScript, Submission, Thread, Threads, VacationResponse,
+    AddressBook, BodyPart, CALENDARS, CORE, CalendarEvents, CalendarRights, Canceled, CardChanges,
+    CardWrite, CardsPage, ChangesResponse, Email, EmailAddress, EmailQuery, EventWrite, EventsPage,
+    Got, HELD, Header, HeldSubmission, Hit, Hold, Identity, Imported, JmapCalendar, JmapError,
+    Listed, MAIL, MDN, MailChanges, Mailbox, MailboxWrite, MaskedEmail, MaskedState, MdnOut,
+    Pushed, QUOTA, Queried, Quota, SUBMISSION, Saved, Session, SessionAccount, SetError,
+    SetResponse, SieveScript, Submission, SubmissionState, Thread, Threads, VacationResponse,
+    max_delayed_send,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
@@ -207,25 +211,38 @@ impl JmapState {
 
     /// The id of the mailbox with `role`.
     pub fn role_id(&self, role: &str) -> Option<String> {
-        self.mailboxes.iter().find(|(_, m)| m.role.as_deref() == Some(role)).map(|(id, _)| id.clone())
+        self.mailboxes
+            .iter()
+            .find(|(_, m)| m.role.as_deref() == Some(role))
+            .map(|(id, _)| id.clone())
     }
 
     /// The most mailboxes one message may sit in, when the session says.
     fn mailbox_limit(&self) -> Option<u64> {
         let account = self.session.accounts.values().next()?;
-        account.account_capabilities.get(MAIL)?.get("maxMailboxesPerEmail")?.as_u64()
+        account
+            .account_capabilities
+            .get(MAIL)?
+            .get("maxMailboxesPerEmail")?
+            .as_u64()
     }
 
     /// Why a message may not sit in `places`, as a server refuses it.
     fn check_places(&self, places: &BTreeSet<String>) -> Result<(), SetError> {
-        let invalid = |why: &str| SetError { kind: "invalidProperties".into(), description: Some(why.into()) };
+        let invalid = |why: &str| SetError {
+            kind: "invalidProperties".into(),
+            description: Some(why.into()),
+        };
         if places.is_empty() {
             return Err(invalid("an Email must be in a mailbox"));
         }
         if places.iter().any(|m| !self.mailboxes.contains_key(m)) {
             return Err(invalid("a mailbox does not exist"));
         }
-        if self.mailbox_limit().is_some_and(|limit| places.len() as u64 > limit) {
+        if self
+            .mailbox_limit()
+            .is_some_and(|limit| places.len() as u64 > limit)
+        {
             return Err(invalid("an Email is in too many mailboxes"));
         }
         Ok(())
@@ -238,12 +255,16 @@ impl JmapState {
         let seen = |e: Option<&FakeEmail>| e.is_some_and(|e| e.keywords.contains("$seen"));
         let places = |e: Option<&FakeEmail>| e.map(|e| e.mailbox_ids.clone()).unwrap_or_default();
         let (was, now) = (places(before), places(after));
-        let touched: BTreeSet<String> = if before.is_none() || after.is_none() || seen(before) != seen(after) {
-            was.union(&now).cloned().collect()
-        } else {
-            was.symmetric_difference(&now).cloned().collect()
-        };
-        let touched: Vec<String> = touched.into_iter().filter(|m| self.mailboxes.contains_key(m)).collect();
+        let touched: BTreeSet<String> =
+            if before.is_none() || after.is_none() || seen(before) != seen(after) {
+                was.union(&now).cloned().collect()
+            } else {
+                was.symmetric_difference(&now).cloned().collect()
+            };
+        let touched: Vec<String> = touched
+            .into_iter()
+            .filter(|m| self.mailboxes.contains_key(m))
+            .collect();
         for mailbox in touched {
             self.record("Mailbox", &mailbox, Op::Updated);
         }
@@ -270,11 +291,15 @@ impl JmapState {
             parts.header(name).map(|v| {
                 mailrs_mime::address::parse_address_list(v)
                     .into_iter()
-                    .map(|a| EmailAddress { name: a.name, email: a.email })
+                    .map(|a| EmailAddress {
+                        name: a.name,
+                        email: a.email,
+                    })
                     .collect::<Vec<_>>()
             })
         };
-        let received = chrono::DateTime::from_timestamp_millis(held.received_at).unwrap_or_default();
+        let received =
+            chrono::DateTime::from_timestamp_millis(held.received_at).unwrap_or_default();
         Some(Email {
             id: id.to_string(),
             blob_id: held.blob_id.clone(),
@@ -283,29 +308,53 @@ impl JmapState {
             keywords: held.keywords.iter().map(|k| (k.clone(), true)).collect(),
             size: held.raw.len() as u64,
             received_at: Some(received.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
-            message_id: parts.header("Message-ID").map(|m| vec![m.trim().trim_matches(['<', '>']).to_string()]),
+            message_id: parts
+                .header("Message-ID")
+                .map(|m| vec![m.trim().trim_matches(['<', '>']).to_string()]),
             from: addresses("From"),
             to: addresses("To"),
             cc: addresses("Cc"),
             subject: parts.header("Subject").map(str::to_string),
-            preview: Some(String::from_utf8_lossy(&held.raw).lines().last().unwrap_or_default().trim().to_string()),
+            preview: Some(
+                String::from_utf8_lossy(&held.raw)
+                    .lines()
+                    .last()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
+            ),
             has_attachment: has_file(&parts.root),
             list_unsubscribe: parts.header("List-Unsubscribe").map(str::to_string),
             list_unsubscribe_post: parts.header("List-Unsubscribe-Post").map(str::to_string),
-            headers: bodies.then(|| parts.headers.iter().map(|(name, value)| Header { name: name.clone(), value: value.clone() }).collect()),
+            headers: bodies.then(|| {
+                parts
+                    .headers
+                    .iter()
+                    .map(|(name, value)| Header {
+                        name: name.clone(),
+                        value: value.clone(),
+                    })
+                    .collect()
+            }),
             body_structure: bodies.then(|| body_part(&parts.root, &held.blob_id)),
         })
     }
 
     fn changes(&self, kind: &'static str, since: &str, max: usize) -> Answer<ChangesResponse> {
-        let since: u64 = since.parse().map_err(|_| JmapError::CannotCalculateChanges)?;
+        let since: u64 = since
+            .parse()
+            .map_err(|_| JmapError::CannotCalculateChanges)?;
         if since < self.forgotten || since > self.state {
             return Err(JmapError::CannotCalculateChanges);
         }
         let mut seen: BTreeMap<String, Op> = BTreeMap::new();
         let mut new_state = since;
         let mut more = false;
-        for (at, _, id, op) in self.log.iter().filter(|(at, k, _, _)| *at > since && *k == kind) {
+        for (at, _, id, op) in self
+            .log
+            .iter()
+            .filter(|(at, k, _, _)| *at > since && *k == kind)
+        {
             if seen.len() >= max && !seen.contains_key(id) {
                 more = true;
                 break;
@@ -320,7 +369,12 @@ impl JmapState {
         if !more {
             new_state = self.state.max(since);
         }
-        let pick = |want: Op| seen.iter().filter(|(_, op)| **op == want).map(|(id, _)| id.clone()).collect();
+        let pick = |want: Op| {
+            seen.iter()
+                .filter(|(_, op)| **op == want)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
         Ok(ChangesResponse {
             old_state: since.to_string(),
             new_state: new_state.to_string(),
@@ -336,9 +390,15 @@ impl JmapState {
     /// operator or a condition it does not know (`unsupportedFilter`,
     /// RFC 8620 5.5) rather than matching everything.
     fn matches(&self, email: &FakeEmail, filter: &Value) -> Answer<bool> {
-        let unsupported = |what: &str| JmapError::Method { kind: "unsupportedFilter".into(), description: format!("no {what}") };
+        let unsupported = |what: &str| JmapError::Method {
+            kind: "unsupportedFilter".into(),
+            description: format!("no {what}"),
+        };
         if let Some(op) = filter.get("operator").and_then(Value::as_str) {
-            let conditions: Vec<&Value> = filter["conditions"].as_array().map(|c| c.iter().collect()).unwrap_or_default();
+            let conditions: Vec<&Value> = filter["conditions"]
+                .as_array()
+                .map(|c| c.iter().collect())
+                .unwrap_or_default();
             let mut each = Vec::with_capacity(conditions.len());
             for c in conditions {
                 each.push(self.matches(email, c)?);
@@ -353,16 +413,28 @@ impl JmapState {
         let text = String::from_utf8_lossy(&email.raw).to_lowercase();
         let parts = mailrs_mime::parts(&email.raw).unwrap_or_default();
         let header_has = |name: &str, needle: &Value| {
-            needle.as_str().is_none_or(|n| parts.header(name).is_some_and(|v| v.to_lowercase().contains(&n.to_lowercase())))
+            needle.as_str().is_none_or(|n| {
+                parts
+                    .header(name)
+                    .is_some_and(|v| v.to_lowercase().contains(&n.to_lowercase()))
+            })
         };
-        let millis = |v: &Value| v.as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|d| d.timestamp_millis());
+        let millis = |v: &Value| {
+            v.as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.timestamp_millis())
+        };
         let Some(conditions) = filter.as_object() else {
             return Err(unsupported("filter object"));
         };
         for (key, value) in conditions {
             let holds = match key.as_str() {
-                "inMailbox" => value.as_str().is_some_and(|m| email.mailbox_ids.contains(m)),
-                "inMailboxOtherThan" => value.as_array().is_some_and(|ms| email.mailbox_ids.iter().any(|m| !ms.iter().any(|x| x == m))),
+                "inMailbox" => value
+                    .as_str()
+                    .is_some_and(|m| email.mailbox_ids.contains(m)),
+                "inMailboxOtherThan" => value
+                    .as_array()
+                    .is_some_and(|ms| email.mailbox_ids.iter().any(|m| !ms.iter().any(|x| x == m))),
                 "after" => millis(value).is_some_and(|at| email.received_at >= at),
                 "before" => millis(value).is_some_and(|at| email.received_at < at),
                 "hasKeyword" => value.as_str().is_some_and(|k| email.keywords.contains(k)),
@@ -372,15 +444,22 @@ impl JmapState {
                 "cc" => header_has("Cc", value),
                 "bcc" => header_has("Bcc", value),
                 "subject" => header_has("Subject", value),
-                "text" | "body" => value.as_str().is_some_and(|t| text.contains(&t.to_lowercase())),
+                "text" | "body" => value
+                    .as_str()
+                    .is_some_and(|t| text.contains(&t.to_lowercase())),
                 "hasAttachment" => value.as_bool() == Some(has_file(&parts.root)),
                 "minSize" => value.as_u64().is_some_and(|n| email.raw.len() as u64 >= n),
                 "maxSize" => value.as_u64().is_some_and(|n| (email.raw.len() as u64) < n),
                 "header" => {
-                    let pair: Vec<&str> = value.as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+                    let pair: Vec<&str> = value
+                        .as_array()
+                        .map(|a| a.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
                     match pair.as_slice() {
                         [name] => parts.header(name).is_some(),
-                        [name, wanted] => parts.header(name).is_some_and(|v| v.trim() == wanted.trim()),
+                        [name, wanted] => parts
+                            .header(name)
+                            .is_some_and(|v| v.trim() == wanted.trim()),
                         _ => false,
                     }
                 }
@@ -406,18 +485,31 @@ fn session(with: &[&str], mailboxes_per_email: Option<u64>) -> Session {
     })))
     .chain(with.iter().map(|c| (c.to_string(), json!({}))))
     .collect();
-    let mut account_capabilities: BTreeMap<String, Value> = with.iter().map(|c| (c.to_string(), json!({}))).collect();
-    account_capabilities.insert(MAIL.into(), json!({ "maxMailboxesPerEmail": mailboxes_per_email }));
+    let mut account_capabilities: BTreeMap<String, Value> =
+        with.iter().map(|c| (c.to_string(), json!({}))).collect();
+    account_capabilities.insert(
+        MAIL.into(),
+        json!({ "maxMailboxesPerEmail": mailboxes_per_email }),
+    );
     Session {
         capabilities,
         accounts: BTreeMap::from([(
             ACCOUNT.to_string(),
-            SessionAccount { name: "me@example.com".into(), is_personal: true, is_read_only: false, account_capabilities },
+            SessionAccount {
+                name: "me@example.com".into(),
+                is_personal: true,
+                is_read_only: false,
+                account_capabilities,
+            },
         )]),
-        primary_accounts: with.iter().map(|c| (c.to_string(), ACCOUNT.to_string())).collect(),
+        primary_accounts: with
+            .iter()
+            .map(|c| (c.to_string(), ACCOUNT.to_string()))
+            .collect(),
         username: "me@example.com".into(),
         api_url: "https://jmap.example.com/api/".into(),
-        download_url: "https://jmap.example.com/download/{accountId}/{blobId}/{name}?type={type}".into(),
+        download_url: "https://jmap.example.com/download/{accountId}/{blobId}/{name}?type={type}"
+            .into(),
         upload_url: "https://jmap.example.com/upload/{accountId}/".into(),
         event_source_url: Some("https://jmap.example.com/events/".into()),
         state: "s1".into(),
@@ -467,7 +559,11 @@ impl FakeJmap {
             refuse_mailbox_creates: false,
             vacation: VacationResponse::default(),
             cards: BTreeMap::new(),
-            books: vec![AddressBook { id: "AB1".into(), name: "Personal".into(), is_default: true }],
+            books: vec![AddressBook {
+                id: "AB1".into(),
+                name: "Personal".into(),
+                is_default: true,
+            }],
             scripts: BTreeMap::new(),
             masked: BTreeMap::new(),
             holds: BTreeMap::new(),
@@ -494,11 +590,28 @@ impl FakeJmap {
             push_ends: None,
             push_paused_until: None,
         };
-        for (name, role) in [("Inbox", "inbox"), ("Drafts", "drafts"), ("Sent", "sent"), ("Trash", "trash"), ("Junk Mail", "junk"), ("Archive", "archive")] {
+        for (name, role) in [
+            ("Inbox", "inbox"),
+            ("Drafts", "drafts"),
+            ("Sent", "sent"),
+            ("Trash", "trash"),
+            ("Junk Mail", "junk"),
+            ("Archive", "archive"),
+        ] {
             let id = format!("mb-{role}");
-            state.mailboxes.insert(id, FakeMailbox { name: name.into(), parent_id: None, role: Some(role.into()) });
+            state.mailboxes.insert(
+                id,
+                FakeMailbox {
+                    name: name.into(),
+                    parent_id: None,
+                    role: Some(role.into()),
+                },
+            );
         }
-        FakeJmap { state: Mutex::new(state), pushed: Notify::new() }
+        FakeJmap {
+            state: Mutex::new(state),
+            pushed: Notify::new(),
+        }
     }
 
     pub fn with<T>(&self, f: impl FnOnce(&mut JmapState) -> T) -> T {
@@ -587,7 +700,9 @@ impl FakeJmap {
     pub fn with_delayed_send(self, seconds: u64) -> FakeJmap {
         self.with(|s| {
             if let Some(account) = s.session.accounts.get_mut(ACCOUNT) {
-                account.account_capabilities.insert(SUBMISSION.into(), json!({ "maxDelayedSend": seconds }));
+                account
+                    .account_capabilities
+                    .insert(SUBMISSION.into(), json!({ "maxDelayedSend": seconds }));
             }
         });
         self
@@ -603,14 +718,29 @@ impl FakeJmap {
     /// hour, and answers how many went. The copy stays where it waited.
     pub fn release_due(&self, now: i64) -> usize {
         self.with(|s| {
-            let due: Vec<String> =
-                s.holds.iter().filter(|(_, h)| h.status == "pending" && h.send_at <= now).map(|(id, _)| id.clone()).collect();
+            let due: Vec<String> = s
+                .holds
+                .iter()
+                .filter(|(_, h)| h.status == "pending" && h.send_at <= now)
+                .map(|(id, _)| id.clone())
+                .collect();
             for id in &due {
-                let Some(hold) = s.holds.get_mut(id) else { continue };
+                let Some(hold) = s.holds.get_mut(id) else {
+                    continue;
+                };
                 hold.status = "final".into();
                 let (email_id, rcpt_to) = (hold.email_id.clone(), hold.rcpt_to.clone());
-                let raw = s.emails.get(&email_id).map(|e| e.raw.clone()).unwrap_or_default();
-                s.sent.push(Sent { identity_id: "I1".into(), mail_from: "me@example.com".into(), rcpt_to, raw });
+                let raw = s
+                    .emails
+                    .get(&email_id)
+                    .map(|e| e.raw.clone())
+                    .unwrap_or_default();
+                s.sent.push(Sent {
+                    identity_id: "I1".into(),
+                    mail_from: "me@example.com".into(),
+                    rcpt_to,
+                    raw,
+                });
             }
             due.len()
         })
@@ -671,9 +801,13 @@ impl FakeJmap {
     pub fn with_capability(self, capability: &str) -> FakeJmap {
         self.with(|s| {
             s.session.capabilities.insert(capability.into(), json!({}));
-            s.session.primary_accounts.insert(capability.into(), ACCOUNT.into());
+            s.session
+                .primary_accounts
+                .insert(capability.into(), ACCOUNT.into());
             if let Some(account) = s.session.accounts.get_mut(ACCOUNT) {
-                account.account_capabilities.insert(capability.into(), json!({}));
+                account
+                    .account_capabilities
+                    .insert(capability.into(), json!({}));
             }
         });
         self
@@ -684,7 +818,10 @@ impl FakeJmap {
         let fake = self.with_capability(mailrs_jmap::SIEVE);
         fake.with(|s| {
             if let Some(account) = s.session.accounts.get_mut(ACCOUNT) {
-                account.account_capabilities.insert(mailrs_jmap::SIEVE.into(), json!({ "sieveExtensions": extensions }));
+                account.account_capabilities.insert(
+                    mailrs_jmap::SIEVE.into(),
+                    json!({ "sieveExtensions": extensions }),
+                );
             }
         });
         fake
@@ -723,20 +860,30 @@ impl FakeJmap {
     pub fn mailboxes_per_email(self, limit: Option<u64>) -> FakeJmap {
         self.with(|s| {
             if let Some(account) = s.session.accounts.get_mut(ACCOUNT) {
-                account.account_capabilities.insert(MAIL.into(), json!({ "maxMailboxesPerEmail": limit }));
+                account
+                    .account_capabilities
+                    .insert(MAIL.into(), json!({ "maxMailboxesPerEmail": limit }));
             }
         });
         self
     }
 
     pub fn mailbox(&self, role: &str) -> String {
-        self.with(|s| s.role_id(role)).unwrap_or_else(|| panic!("the fake has no {role} mailbox"))
+        self.with(|s| s.role_id(role))
+            .unwrap_or_else(|| panic!("the fake has no {role} mailbox"))
     }
 
     pub fn add_mailbox(&self, name: &str, parent: Option<&str>) -> String {
         self.with(|s| {
             let id = s.id("mb-");
-            s.mailboxes.insert(id.clone(), FakeMailbox { name: name.into(), parent_id: parent.map(str::to_string), role: None });
+            s.mailboxes.insert(
+                id.clone(),
+                FakeMailbox {
+                    name: name.into(),
+                    parent_id: parent.map(str::to_string),
+                    role: None,
+                },
+            );
             s.record("Mailbox", &id, Op::Created);
             id
         })
@@ -755,19 +902,23 @@ impl FakeJmap {
                 .and_then(|wanted| {
                     s.emails.iter().find_map(|(_, e)| {
                         let p = mailrs_mime::parts(&e.raw).unwrap_or_default();
-                        (p.header("Message-ID").map(str::trim) == Some(wanted.as_str())).then(|| e.thread_id.clone())
+                        (p.header("Message-ID").map(str::trim) == Some(wanted.as_str()))
+                            .then(|| e.thread_id.clone())
                     })
                 })
                 .unwrap_or_else(|| format!("T{id}"));
             s.blobs.insert(blob.clone(), raw.to_vec());
-            s.emails.insert(id.clone(), FakeEmail {
-                raw: raw.to_vec(),
-                blob_id: blob,
-                thread_id: thread,
-                mailbox_ids: BTreeSet::from([mailbox.clone()]),
-                keywords: BTreeSet::new(),
-                received_at,
-            });
+            s.emails.insert(
+                id.clone(),
+                FakeEmail {
+                    raw: raw.to_vec(),
+                    blob_id: blob,
+                    thread_id: thread,
+                    mailbox_ids: BTreeSet::from([mailbox.clone()]),
+                    keywords: BTreeSet::new(),
+                    received_at,
+                },
+            );
             s.record("Email", &id, Op::Created);
             let made = s.emails.get(&id).cloned();
             s.settle(None, made.as_ref());
@@ -824,7 +975,12 @@ impl FakeJmap {
     /// answers with `anchorNotFound`.
     fn listing(&self, query: &EmailQuery, anchor: Option<&str>) -> Answer<Queried> {
         self.with(|s| {
-            if s.flat_mailbox_filters && query.filter.as_ref().is_some_and(mailbox_filter_james_refuses) {
+            if s.flat_mailbox_filters
+                && query
+                    .filter
+                    .as_ref()
+                    .is_some_and(mailbox_filter_james_refuses)
+            {
                 return Err(JmapError::Method {
                     kind: "unsupportedFilter".into(),
                     description: "Nested inMailbox filters are not supported".into(),
@@ -832,7 +988,11 @@ impl FakeJmap {
             }
             let mut found: Vec<(&String, &FakeEmail)> = Vec::new();
             for (id, e) in &s.emails {
-                if query.filter.as_ref().map_or(Ok(true), |f| s.matches(e, f))? {
+                if query
+                    .filter
+                    .as_ref()
+                    .map_or(Ok(true), |f| s.matches(e, f))?
+                {
                     found.push((id, e));
                 }
             }
@@ -842,17 +1002,33 @@ impl FakeJmap {
                 None => query.position as usize,
                 Some(anchor) => match found.iter().position(|(id, _)| id.as_str() == anchor) {
                     Some(at) => at + 1,
-                    None => return Err(JmapError::Method { kind: "anchorNotFound".into(), description: String::new() }),
+                    None => {
+                        return Err(JmapError::Method {
+                            kind: "anchorNotFound".into(),
+                            description: String::new(),
+                        });
+                    }
                 },
             };
             let hits = found
                 .into_iter()
                 .skip(start)
-                .take(s.query_clamp.map_or(query.limit, |clamp| clamp.min(query.limit)))
-                .map(|(id, e)| Hit { id: id.clone(), thread_id: e.thread_id.clone() })
+                .take(
+                    s.query_clamp
+                        .map_or(query.limit, |clamp| clamp.min(query.limit)),
+                )
+                .map(|(id, e)| Hit {
+                    id: id.clone(),
+                    thread_id: e.thread_id.clone(),
+                })
                 .collect();
             // Any change moves the state, as on Cyrus.
-            Ok(Queried { hits, position: start as u64, total: query.total.then_some(total), query_state: s.state.to_string() })
+            Ok(Queried {
+                hits,
+                position: start as u64,
+                total: query.total.then_some(total),
+                query_state: s.state.to_string(),
+            })
         })
     }
 
@@ -861,7 +1037,10 @@ impl FakeJmap {
         self.with(|s| match s.refusing.take() {
             Some((left, description)) if left > 0 => {
                 s.refusing = Some((left - 1, description.clone()));
-                Err(JmapError::Method { kind: "invalidArguments".into(), description })
+                Err(JmapError::Method {
+                    kind: "invalidArguments".into(),
+                    description,
+                })
             }
             _ => Ok(()),
         })
@@ -876,33 +1055,54 @@ impl FakeJmap {
     /// Imports the blob. A server that keeps one copy of the same bytes
     /// files the copy already there instead, as the client does after an
     /// `alreadyExists`.
-    fn import_now(s: &mut JmapState, blob_id: &str, mailboxes: &[String], keywords: &[&str]) -> Answer<Imported> {
+    fn import_now(
+        s: &mut JmapState,
+        blob_id: &str,
+        mailboxes: &[String],
+        keywords: &[&str],
+    ) -> Answer<Imported> {
         let raw = s.blobs.get(blob_id).cloned().ok_or(JmapError::NotFound)?;
-        if let Some((id, email)) = s.emails.iter_mut().find(|(_, e)| e.raw == raw).filter(|_| s.one_copy) {
+        if let Some((id, email)) = s
+            .emails
+            .iter_mut()
+            .find(|(_, e)| e.raw == raw)
+            .filter(|_| s.one_copy)
+        {
             let (id, before) = (id.clone(), email.clone());
             email.mailbox_ids.extend(mailboxes.iter().cloned());
-            email.keywords.extend(keywords.iter().map(|k| k.to_string()));
+            email
+                .keywords
+                .extend(keywords.iter().map(|k| k.to_string()));
             let after = email.clone();
             s.settle(Some(&before), Some(&after));
             s.record("Email", &id, Op::Updated);
-            return Ok(Imported { id, thread_id: after.thread_id });
+            return Ok(Imported {
+                id,
+                thread_id: after.thread_id,
+            });
         }
         let places: BTreeSet<String> = mailboxes.iter().cloned().collect();
         s.check_places(&places).map_err(|refused| refused.error())?;
         let id = s.id("M");
         let thread = format!("T{id}");
-        s.emails.insert(id.clone(), FakeEmail {
-            raw,
-            blob_id: blob_id.to_string(),
-            thread_id: thread.clone(),
-            mailbox_ids: mailboxes.iter().cloned().collect(),
-            keywords: keywords.iter().map(|k| k.to_string()).collect(),
-            received_at: chrono::Utc::now().timestamp_millis(),
-        });
+        s.emails.insert(
+            id.clone(),
+            FakeEmail {
+                raw,
+                blob_id: blob_id.to_string(),
+                thread_id: thread.clone(),
+                mailbox_ids: mailboxes.iter().cloned().collect(),
+                keywords: keywords.iter().map(|k| k.to_string()).collect(),
+                received_at: chrono::Utc::now().timestamp_millis(),
+            },
+        );
         s.record("Email", &id, Op::Created);
         let made = s.emails.get(&id).cloned();
         s.settle(None, made.as_ref());
-        Ok(Imported { id, thread_id: thread })
+        Ok(Imported {
+            id,
+            thread_id: thread,
+        })
     }
 }
 
@@ -913,11 +1113,14 @@ fn mailbox_filter_james_refuses(filter: &Value) -> bool {
         match filter.get("operator").and_then(Value::as_str) {
             Some(op) => {
                 let under = under || op != "AND";
-                filter["conditions"].as_array().is_some_and(|c| c.iter().any(|c| walk(c, under, seen)))
+                filter["conditions"]
+                    .as_array()
+                    .is_some_and(|c| c.iter().any(|c| walk(c, under, seen)))
             }
             None => {
                 *seen += usize::from(filter.get("inMailbox").is_some());
-                let mailbox = filter.get("inMailbox").is_some() || filter.get("inMailboxOtherThan").is_some();
+                let mailbox =
+                    filter.get("inMailbox").is_some() || filter.get("inMailboxOtherThan").is_some();
                 (under && mailbox) || *seen > 1
             }
         }
@@ -937,24 +1140,46 @@ impl JmapApi for FakeJmap {
                 .mailboxes
                 .iter()
                 .map(|(id, m)| {
-                    let inside: Vec<&FakeEmail> = s.emails.values().filter(|e| e.mailbox_ids.contains(id)).collect();
-                    let unseen: Vec<&&FakeEmail> = inside.iter().filter(|e| !e.keywords.contains("$seen")).collect();
+                    let inside: Vec<&FakeEmail> = s
+                        .emails
+                        .values()
+                        .filter(|e| e.mailbox_ids.contains(id))
+                        .collect();
+                    let unseen: Vec<&&FakeEmail> = inside
+                        .iter()
+                        .filter(|e| !e.keywords.contains("$seen"))
+                        .collect();
                     let unread = unseen.len() as u64;
                     Mailbox {
                         id: id.clone(),
                         name: m.name.clone(),
                         parent_id: m.parent_id.clone(),
                         role: m.role.clone(),
-                        total_emails: s.total_override.as_ref().filter(|(m, _)| m == id).map_or(inside.len() as u64, |(_, n)| *n),
+                        total_emails: s
+                            .total_override
+                            .as_ref()
+                            .filter(|(m, _)| m == id)
+                            .map_or(inside.len() as u64, |(_, n)| *n),
                         unread_emails: unread,
-                        total_threads: inside.iter().map(|e| &e.thread_id).collect::<BTreeSet<_>>().len() as u64,
-                        unread_threads: unseen.iter().map(|e| &e.thread_id).collect::<BTreeSet<_>>().len() as u64,
+                        total_threads: inside
+                            .iter()
+                            .map(|e| &e.thread_id)
+                            .collect::<BTreeSet<_>>()
+                            .len() as u64,
+                        unread_threads: unseen
+                            .iter()
+                            .map(|e| &e.thread_id)
+                            .collect::<BTreeSet<_>>()
+                            .len() as u64,
                         is_subscribed: true,
                         ..Mailbox::default()
                     }
                 })
                 .collect();
-            Listed { state: s.state.to_string(), list }
+            Listed {
+                state: s.state.to_string(),
+                list,
+            }
         }))
     }
 
@@ -962,9 +1187,18 @@ impl JmapApi for FakeJmap {
         self.called("Email/changes");
         self.with(|s| {
             let changes = s.changes("Email", email, max)?;
-            let changed = changes.created.iter().chain(&changes.updated).filter_map(|id| s.email(id, false)).collect();
+            let changed = changes
+                .created
+                .iter()
+                .chain(&changes.updated)
+                .filter_map(|id| s.email(id, false))
+                .collect();
             let mailbox = s.changes("Mailbox", mailbox, 10_000)?;
-            Ok(MailChanges { email: changes, mailbox, changed })
+            Ok(MailChanges {
+                email: changes,
+                mailbox,
+                changed,
+            })
         })
     }
 
@@ -983,7 +1217,10 @@ impl JmapApi for FakeJmap {
     async fn query_after(&self, query: &EmailQuery, anchor: &str) -> Answer<Queried> {
         self.called("Email/query");
         if self.with(|s| s.refuse_anchors) {
-            return Err(JmapError::Method { kind: "invalidArguments".into(), description: "anchor is not supported".into() });
+            return Err(JmapError::Method {
+                kind: "invalidArguments".into(),
+                description: "anchor is not supported".into(),
+            });
         }
         self.with(|s| {
             s.anchored_queries += 1;
@@ -1005,7 +1242,11 @@ impl JmapApi for FakeJmap {
                     None => not_found.push(id.clone()),
                 }
             }
-            Got { state: s.state.to_string(), list, not_found }
+            Got {
+                state: s.state.to_string(),
+                list,
+                not_found,
+            }
         }))
     }
 
@@ -1014,22 +1255,35 @@ impl JmapApi for FakeJmap {
         Ok(self.with(|s| {
             let mut out = Threads::default();
             for thread in ids {
-                let mut members: Vec<(&String, &FakeEmail)> = s.emails.iter().filter(|(_, e)| &e.thread_id == thread).collect();
+                let mut members: Vec<(&String, &FakeEmail)> = s
+                    .emails
+                    .iter()
+                    .filter(|(_, e)| &e.thread_id == thread)
+                    .collect();
                 if members.is_empty() {
                     out.not_found.push(thread.clone());
                     continue;
                 }
                 members.sort_by_key(|(_, e)| e.received_at);
-                out.threads.push(Thread { id: thread.clone(), email_ids: members.iter().map(|(id, _)| (*id).clone()).collect() });
-                out.emails.extend(members.iter().filter_map(|(id, _)| s.email(id, false)));
+                out.threads.push(Thread {
+                    id: thread.clone(),
+                    email_ids: members.iter().map(|(id, _)| (*id).clone()).collect(),
+                });
+                out.emails
+                    .extend(members.iter().filter_map(|(id, _)| s.email(id, false)));
             }
             out
         }))
     }
 
-    async fn set_emails(&self, update: &Map<String, Value>, destroy: &[String]) -> Answer<SetResponse> {
+    async fn set_emails(
+        &self,
+        update: &Map<String, Value>,
+        destroy: &[String],
+    ) -> Answer<SetResponse> {
         self.called("Email/set");
-        let too_many = self.with(|s| update.len() + destroy.len() > s.session.limits().max_objects_in_set);
+        let too_many =
+            self.with(|s| update.len() + destroy.len() > s.session.limits().max_objects_in_set);
         if too_many {
             return Err(JmapError::RequestTooLarge);
         }
@@ -1038,15 +1292,30 @@ impl JmapApi for FakeJmap {
             let (mut updated, mut not_updated) = (BTreeMap::new(), BTreeMap::new());
             for (id, patch) in update {
                 let Some(email) = s.emails.get(id).cloned() else {
-                    not_updated.insert(id.clone(), SetError { kind: "notFound".into(), description: None });
+                    not_updated.insert(
+                        id.clone(),
+                        SetError {
+                            kind: "notFound".into(),
+                            description: None,
+                        },
+                    );
                     continue;
                 };
                 if s.refused.contains(id) {
-                    not_updated.insert(id.clone(), SetError { kind: "forbidden".into(), description: None });
+                    not_updated.insert(
+                        id.clone(),
+                        SetError {
+                            kind: "forbidden".into(),
+                            description: None,
+                        },
+                    );
                     continue;
                 }
                 let mut next = email.clone();
-                let invalid = |why: &str| SetError { kind: "invalidProperties".into(), description: Some(why.into()) };
+                let invalid = |why: &str| SetError {
+                    kind: "invalidProperties".into(),
+                    description: Some(why.into()),
+                };
                 let mut refusal = None;
                 for (path, value) in patch.as_object().into_iter().flatten() {
                     let unescaped = |name: &str| name.replace("~1", "/").replace("~0", "~");
@@ -1056,7 +1325,10 @@ impl JmapApi for FakeJmap {
                         _ => None,
                     };
                     if path == "mailboxIds" {
-                        match value.as_object().filter(|m| m.values().all(|v| v == &Value::Bool(true))) {
+                        match value
+                            .as_object()
+                            .filter(|m| m.values().all(|v| v == &Value::Bool(true)))
+                        {
                             Some(m) => next.mailbox_ids = m.keys().cloned().collect(),
                             None => refusal = Some(invalid("mailboxIds must map ids to true")),
                         }
@@ -1064,13 +1336,19 @@ impl JmapApi for FakeJmap {
                         match flag(value) {
                             Some(true) => drop(next.mailbox_ids.insert(unescaped(mailbox))),
                             Some(false) => drop(next.mailbox_ids.remove(&unescaped(mailbox))),
-                            None => refusal = Some(invalid("a mailbox is set to true or removed with null")),
+                            None => {
+                                refusal =
+                                    Some(invalid("a mailbox is set to true or removed with null"))
+                            }
                         }
                     } else if let Some(keyword) = path.strip_prefix("keywords/") {
                         match flag(value) {
                             Some(true) => drop(next.keywords.insert(unescaped(keyword))),
                             Some(false) => drop(next.keywords.remove(&unescaped(keyword))),
-                            None => refusal = Some(invalid("a keyword is set to true or removed with null")),
+                            None => {
+                                refusal =
+                                    Some(invalid("a keyword is set to true or removed with null"))
+                            }
                         }
                     } else {
                         refusal = Some(invalid("an unknown property"));
@@ -1088,7 +1366,13 @@ impl JmapApi for FakeJmap {
             let (mut destroyed, mut not_destroyed) = (Vec::new(), BTreeMap::new());
             for id in destroy {
                 if s.refused.contains(id) {
-                    not_destroyed.insert(id.clone(), SetError { kind: "forbidden".into(), description: None });
+                    not_destroyed.insert(
+                        id.clone(),
+                        SetError {
+                            kind: "forbidden".into(),
+                            description: None,
+                        },
+                    );
                     continue;
                 }
                 match s.emails.remove(id) {
@@ -1098,7 +1382,13 @@ impl JmapApi for FakeJmap {
                         destroyed.push(id.clone());
                     }
                     None => {
-                        not_destroyed.insert(id.clone(), SetError { kind: "notFound".into(), description: None });
+                        not_destroyed.insert(
+                            id.clone(),
+                            SetError {
+                                kind: "notFound".into(),
+                                description: None,
+                            },
+                        );
                     }
                 }
             }
@@ -1114,22 +1404,40 @@ impl JmapApi for FakeJmap {
     async fn set_mailbox(&self, write: &MailboxWrite) -> Answer<String> {
         self.called("Mailbox/set");
         self.with(|s| match write {
-            MailboxWrite::Create { name, parent_id, role } => {
+            MailboxWrite::Create {
+                name,
+                parent_id,
+                role,
+            } => {
                 if s.refuse_mailbox_creates {
                     return Err(JmapError::Forbidden(String::new()));
                 }
                 if role.is_some() && s.refuse_mailbox_roles {
-                    return Err(JmapError::Method { kind: "invalidProperties".into(), description: "role".into() });
+                    return Err(JmapError::Method {
+                        kind: "invalidProperties".into(),
+                        description: "role".into(),
+                    });
                 }
                 let id = match role {
                     Some(role) => format!("mb-{role}"),
                     None => s.id("mb-"),
                 };
-                s.mailboxes.insert(id.clone(), FakeMailbox { name: name.clone(), parent_id: parent_id.clone(), role: role.clone() });
+                s.mailboxes.insert(
+                    id.clone(),
+                    FakeMailbox {
+                        name: name.clone(),
+                        parent_id: parent_id.clone(),
+                        role: role.clone(),
+                    },
+                );
                 s.record("Mailbox", &id, Op::Created);
                 Ok(id)
             }
-            MailboxWrite::Update { id, name, parent_id } => {
+            MailboxWrite::Update {
+                id,
+                name,
+                parent_id,
+            } => {
                 let mailbox = s.mailboxes.get_mut(id).ok_or(JmapError::NotFound)?;
                 mailbox.name = name.clone();
                 mailbox.parent_id = parent_id.clone();
@@ -1169,18 +1477,30 @@ impl JmapApi for FakeJmap {
         }))
     }
 
-    async fn import(&self, blob_id: &str, mailbox_ids: &[String], keywords: &[&str], destroy: Option<&str>) -> Answer<Saved> {
+    async fn import(
+        &self,
+        blob_id: &str,
+        mailbox_ids: &[String],
+        keywords: &[&str],
+        destroy: Option<&str>,
+    ) -> Answer<Saved> {
         self.called("Email/import");
         self.with(|s| {
             // As the client does: the same bytes held by a message that is
             // no draft, and not the one being replaced, are not taken over.
             let raw = s.blobs.get(blob_id);
-            let taken = s.emails.iter().find(|(_, e)| s.one_copy && Some(&e.raw) == raw);
+            let taken = s
+                .emails
+                .iter()
+                .find(|(_, e)| s.one_copy && Some(&e.raw) == raw);
             if let Some((id, email)) = taken
                 && destroy != Some(id.as_str())
                 && !email.keywords.contains("$draft")
             {
-                return Err(JmapError::Method { kind: "alreadyExists".into(), description: String::new() });
+                return Err(JmapError::Method {
+                    kind: "alreadyExists".into(),
+                    description: String::new(),
+                });
             }
             let made = FakeJmap::import_now(s, blob_id, mailbox_ids, keywords)?;
             // As the client does: the old draft goes in a second request,
@@ -1196,7 +1516,10 @@ impl JmapApi for FakeJmap {
                 s.settle(Some(&gone), None);
                 None
             });
-            Ok(Saved { email: made, leftover })
+            Ok(Saved {
+                email: made,
+                leftover,
+            })
         })
     }
 
@@ -1213,24 +1536,38 @@ impl JmapApi for FakeJmap {
                     None => email == from,
                 }
             };
-            if !s.identities.iter().any(|i| i.id == submission.identity_id && owns(i)) {
-                return Err(JmapError::Method { kind: "forbiddenFrom".into(), description: String::new() });
+            if !s
+                .identities
+                .iter()
+                .any(|i| i.id == submission.identity_id && owns(i))
+            {
+                return Err(JmapError::Method {
+                    kind: "forbiddenFrom".into(),
+                    description: String::new(),
+                });
             }
             let home = submission
                 .drafts
                 .clone()
                 .or(submission.sent.clone())
-                .ok_or_else(|| JmapError::Forbidden("the account has neither Drafts nor Sent".into()))?;
+                .ok_or_else(|| {
+                    JmapError::Forbidden("the account has neither Drafts nor Sent".into())
+                })?;
             let keywords: &[&str] = match submission.drafts {
                 Some(_) => &["$seen", "$draft"],
                 None => &["$seen"],
             };
-            let had = s.one_copy && s.blobs.get(&submission.blob_id).is_some_and(|raw| s.emails.values().any(|e| &e.raw == raw));
+            let had = s.one_copy
+                && s.blobs
+                    .get(&submission.blob_id)
+                    .is_some_and(|raw| s.emails.values().any(|e| &e.raw == raw));
             // As the client does: a copy the server keeps that is no draft
             // any more went out on an earlier try. It is filed again and
             // not sent twice.
             let raw = s.blobs.get(&submission.blob_id).cloned();
-            let went = s.emails.iter().find(|(_, e)| had && Some(&e.raw) == raw.as_ref() && !e.keywords.contains("$draft"));
+            let went = s.emails.iter().find(|(_, e)| {
+                had && Some(&e.raw) == raw.as_ref() && !e.keywords.contains("$draft")
+            });
             if let (Some((id, _)), Some(sent)) = (went, submission.sent.clone()) {
                 let id = id.clone();
                 if let Some(email) = s.emails.get_mut(&id) {
@@ -1253,7 +1590,11 @@ impl JmapApi for FakeJmap {
                 }
                 return Err(mailrs_jmap::error::method_error(&kind, None));
             }
-            let raw = s.blobs.get(&submission.blob_id).cloned().unwrap_or_default();
+            let raw = s
+                .blobs
+                .get(&submission.blob_id)
+                .cloned()
+                .unwrap_or_default();
             s.sent.push(Sent {
                 identity_id: submission.identity_id.clone(),
                 mail_from: submission.mail_from.clone(),
@@ -1301,10 +1642,14 @@ impl JmapApi for FakeJmap {
                 s.failing_event_gets -= 1;
                 return Err(JmapError::Network("the read failed".into()));
             }
-            let (found, missing): (Vec<&String>, Vec<&String>) = ids.iter().partition(|id| s.events.contains_key(*id));
+            let (found, missing): (Vec<&String>, Vec<&String>) =
+                ids.iter().partition(|id| s.events.contains_key(*id));
             Ok(CalendarEvents {
                 state: s.state.to_string(),
-                list: found.into_iter().filter_map(|id| s.events.get(id).cloned()).collect(),
+                list: found
+                    .into_iter()
+                    .filter_map(|id| s.events.get(id).cloned())
+                    .collect(),
                 not_found: missing.into_iter().cloned().collect(),
             })
         })
@@ -1314,13 +1659,23 @@ impl JmapApi for FakeJmap {
     /// everything here, which the adapter's tests do not lean on. Both must
     /// be LocalDateTime, as the drafts define them and Cyrus checks: a UTC
     /// time with `Z` is `invalidArguments`.
-    async fn calendar_events_page(&self, filter: &Value, position: u64, limit: usize) -> Answer<EventsPage> {
+    async fn calendar_events_page(
+        &self,
+        filter: &Value,
+        position: u64,
+        limit: usize,
+    ) -> Answer<EventsPage> {
         self.called("CalendarEvent/query");
         let local = |key: &str| {
-            filter.get(key).and_then(Value::as_str).is_none_or(|t| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S").is_ok())
+            filter.get(key).and_then(Value::as_str).is_none_or(|t| {
+                chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S").is_ok()
+            })
         };
         if !local("after") || !local("before") {
-            return Err(JmapError::Method { kind: "invalidArguments".into(), description: String::new() });
+            return Err(JmapError::Method {
+                kind: "invalidArguments".into(),
+                description: String::new(),
+            });
         }
         self.with(|s| {
             let calendar = filter.get("inCalendar").and_then(Value::as_str);
@@ -1333,12 +1688,25 @@ impl JmapApi for FakeJmap {
                 .cloned()
                 .collect();
             let total = matching.len() as u64;
-            let events = matching.into_iter().skip(usize::try_from(position).unwrap_or(usize::MAX)).take(limit).collect();
-            Ok(EventsPage { state: s.state.to_string(), events, total: Some(total) })
+            let events = matching
+                .into_iter()
+                .skip(usize::try_from(position).unwrap_or(usize::MAX))
+                .take(limit)
+                .collect();
+            Ok(EventsPage {
+                state: s.state.to_string(),
+                events,
+                total: Some(total),
+            })
         })
     }
 
-    async fn set_calendar_event(&self, write: &EventWrite, send: bool, state: Option<&str>) -> Answer<Option<Value>> {
+    async fn set_calendar_event(
+        &self,
+        write: &EventWrite,
+        send: bool,
+        state: Option<&str>,
+    ) -> Answer<Option<Value>> {
         self.called("CalendarEvent/set");
         self.with(|s| {
             if state.is_some_and(|state| state != s.state.to_string()) {
@@ -1348,13 +1716,22 @@ impl JmapApi for FakeJmap {
                 s.state_mismatches -= 1;
                 return Err(JmapError::StateMismatch);
             }
-            let has_guests = |o: &Value| o.get("participants").and_then(Value::as_object).is_some_and(|p| !p.is_empty());
+            let has_guests = |o: &Value| {
+                o.get("participants")
+                    .and_then(Value::as_object)
+                    .is_some_and(|p| !p.is_empty())
+            };
             let touched = match write {
                 EventWrite::Create(object) => Some(Value::Object(object.clone())),
-                EventWrite::Update { id, .. } | EventWrite::Destroy(id) => s.events.get(id).cloned(),
+                EventWrite::Update { id, .. } | EventWrite::Destroy(id) => {
+                    s.events.get(id).cloned()
+                }
             };
             if send && !s.schedules && touched.as_ref().is_some_and(has_guests) {
-                return Err(JmapError::Method { kind: "noSupportedScheduleMethods".into(), description: String::new() });
+                return Err(JmapError::Method {
+                    kind: "noSupportedScheduleMethods".into(),
+                    description: String::new(),
+                });
             }
             let stamp = format!("rev-{}", s.state + 1);
             let (id, answer) = match write {
@@ -1414,7 +1791,13 @@ impl JmapApi for FakeJmap {
         self.called("ContactCard/query");
         Ok(self.with(|s| CardsPage {
             state: s.state.to_string(),
-            cards: s.cards.values().skip(position as usize).take(limit).cloned().collect(),
+            cards: s
+                .cards
+                .values()
+                .skip(position as usize)
+                .take(limit)
+                .cloned()
+                .collect(),
             position,
             total: Some(s.cards.len() as u64),
         }))
@@ -1424,7 +1807,12 @@ impl JmapApi for FakeJmap {
         self.called("ContactCard/changes");
         self.with(|s| {
             let changes = s.changes("ContactCard", since, max)?;
-            let cards = changes.created.iter().chain(&changes.updated).filter_map(|id| s.cards.get(id).cloned()).collect();
+            let cards = changes
+                .created
+                .iter()
+                .chain(&changes.updated)
+                .filter_map(|id| s.cards.get(id).cloned())
+                .collect();
             Ok(CardChanges { changes, cards })
         })
     }
@@ -1460,14 +1848,20 @@ impl JmapApi for FakeJmap {
         Ok(self.with(|s| {
             s.scripts
                 .iter()
-                .map(|(id, (name, _, active))| SieveScript { id: id.clone(), name: Some(name.clone()), blob_id: format!("blob-{id}"), is_active: *active })
+                .map(|(id, (name, _, active))| SieveScript {
+                    id: id.clone(),
+                    name: Some(name.clone()),
+                    blob_id: format!("blob-{id}"),
+                    is_active: *active,
+                })
                 .collect()
         }))
     }
 
     async fn sieve_text(&self, blob_id: &str) -> Answer<String> {
         let id = blob_id.strip_prefix("blob-").ok_or(JmapError::NotFound)?;
-        self.with(|s| s.scripts.get(id).map(|(_, text, _)| text.clone())).ok_or(JmapError::NotFound)
+        self.with(|s| s.scripts.get(id).map(|(_, text, _)| text.clone()))
+            .ok_or(JmapError::NotFound)
     }
 
     async fn put_sieve(&self, name: &str, existing: Option<&str>, text: &str) -> Answer<String> {
@@ -1475,7 +1869,8 @@ impl JmapApi for FakeJmap {
         Ok(self.with(|s| {
             let id = existing.map(str::to_string).unwrap_or_else(|| s.id("S"));
             let active = s.scripts.get(&id).is_some_and(|(_, _, a)| *a);
-            s.scripts.insert(id.clone(), (name.to_string(), text.to_string(), active));
+            s.scripts
+                .insert(id.clone(), (name.to_string(), text.to_string(), active));
             id
         }))
     }
@@ -1491,8 +1886,16 @@ impl JmapApi for FakeJmap {
 
     async fn sieve_extensions(&self) -> Answer<Vec<String>> {
         Ok(self.with(|s| {
-            let listed = s.session.account_capability(mailrs_jmap::SIEVE).and_then(|c| c.get("sieveExtensions")).and_then(Value::as_array);
-            listed.into_iter().flatten().filter_map(|e| e.as_str().map(str::to_string)).collect()
+            let listed = s
+                .session
+                .account_capability(mailrs_jmap::SIEVE)
+                .and_then(|c| c.get("sieveExtensions"))
+                .and_then(Value::as_array);
+            listed
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().map(str::to_string))
+                .collect()
         }))
     }
 
@@ -1504,22 +1907,42 @@ impl JmapApi for FakeJmap {
                 return Err(err);
             }
             if hold.hold_for > max_delayed_send(&s.session) {
-                return Err(JmapError::Method { kind: "invalidArguments".into(), description: "HOLDFOR".into() });
+                return Err(JmapError::Method {
+                    kind: "invalidArguments".into(),
+                    description: "HOLDFOR".into(),
+                });
             }
             if !s.identities.iter().any(|i| i.id == hold.identity_id) {
-                return Err(JmapError::Method { kind: "forbiddenFrom".into(), description: String::new() });
+                return Err(JmapError::Method {
+                    kind: "forbiddenFrom".into(),
+                    description: String::new(),
+                });
             }
-            let made = FakeJmap::import_now(s, &hold.blob_id, std::slice::from_ref(&hold.drafts), &["$draft", "$seen", HELD])?;
+            let made = FakeJmap::import_now(
+                s,
+                &hold.blob_id,
+                std::slice::from_ref(&hold.drafts),
+                &["$draft", "$seen", HELD],
+            )?;
             let id = s.id("S");
             let wait = i64::try_from(hold.hold_for.saturating_mul(1000)).unwrap_or(i64::MAX / 2);
             let send_at = chrono::Utc::now().timestamp_millis().saturating_add(wait);
             s.holds.insert(
                 id.clone(),
-                FakeHold { email_id: made.id.clone(), send_at, status: "pending".into(), rcpt_to: hold.rcpt_to.clone() },
+                FakeHold {
+                    email_id: made.id.clone(),
+                    send_at,
+                    status: "pending".into(),
+                    rcpt_to: hold.rcpt_to.clone(),
+                },
             );
             match failure {
                 Some(lost) => Err(lost),
-                None => Ok(HeldSubmission { id, email_id: made.id, thread_id: made.thread_id }),
+                None => Ok(HeldSubmission {
+                    id,
+                    email_id: made.id,
+                    thread_id: made.thread_id,
+                }),
             }
         })
     }
@@ -1537,9 +1960,21 @@ impl JmapApi for FakeJmap {
                     let send_at = chrono::DateTime::from_timestamp_millis(hold.send_at)
                         .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
                     let envelope = Some(mailrs_jmap::Envelope {
-                        rcpt_to: hold.rcpt_to.iter().map(|email| mailrs_jmap::EnvelopeAddress { email: email.clone() }).collect(),
+                        rcpt_to: hold
+                            .rcpt_to
+                            .iter()
+                            .map(|email| mailrs_jmap::EnvelopeAddress {
+                                email: email.clone(),
+                            })
+                            .collect(),
                     });
-                    Some(SubmissionState { id: id.clone(), email_id: hold.email_id.clone(), undo_status: hold.status.clone(), send_at, envelope })
+                    Some(SubmissionState {
+                        id: id.clone(),
+                        email_id: hold.email_id.clone(),
+                        undo_status: hold.status.clone(),
+                        send_at,
+                        envelope,
+                    })
                 })
                 .collect())
         })
@@ -1554,7 +1989,12 @@ impl JmapApi for FakeJmap {
         self.called("EmailSubmission/query");
         self.with(|s| match s.submission_query_failure.take() {
             Some(err) => Err(err),
-            None => Ok(s.holds.iter().filter(|(_, hold)| hold.email_id == email_id).map(|(id, _)| id.clone()).collect()),
+            None => Ok(s
+                .holds
+                .iter()
+                .filter(|(_, hold)| hold.email_id == email_id)
+                .map(|(id, _)| id.clone())
+                .collect()),
         })
     }
 
@@ -1564,12 +2004,23 @@ impl JmapApi for FakeJmap {
             if std::mem::take(&mut s.cancel_races_send)
                 && let Some(hold) = s.holds.remove(id)
             {
-                let raw = s.emails.get(&hold.email_id).map(|e| e.raw.clone()).unwrap_or_default();
-                s.sent.push(Sent { identity_id: "I1".into(), mail_from: "me@example.com".into(), rcpt_to: hold.rcpt_to, raw });
+                let raw = s
+                    .emails
+                    .get(&hold.email_id)
+                    .map(|e| e.raw.clone())
+                    .unwrap_or_default();
+                s.sent.push(Sent {
+                    identity_id: "I1".into(),
+                    mail_from: "me@example.com".into(),
+                    rcpt_to: hold.rcpt_to,
+                    raw,
+                });
                 return Ok(Canceled::Gone);
             }
             // The client reads `notFound` as gone.
-            let Some(hold) = s.holds.get_mut(id) else { return Ok(Canceled::Gone) };
+            let Some(hold) = s.holds.get_mut(id) else {
+                return Ok(Canceled::Gone);
+            };
             match hold.status.as_str() {
                 "final" => Ok(Canceled::TooLate),
                 _ => {
@@ -1605,7 +2056,7 @@ impl JmapApi for FakeJmap {
 
     async fn quotas(&self) -> Answer<Vec<Quota>> {
         self.called("Quota/get");
-        self.with(|s| match s.session.offers(QUOTA) {
+        self.with(|s| match s.session.mail_quota_account().is_some() {
             true => Ok(s.quotas.clone()),
             false => Err(JmapError::UnknownCapability(QUOTA.into())),
         })
@@ -1618,10 +2069,16 @@ impl JmapApi for FakeJmap {
                 return Err(JmapError::UnknownCapability(MDN.into()));
             }
             let failure = s.mdn_failure.take();
-            if let Some(refused) = failure.clone().filter(|e| !matches!(e, JmapError::Network(_))) {
+            if let Some(refused) = failure
+                .clone()
+                .filter(|e| !matches!(e, JmapError::Network(_)))
+            {
                 return Err(refused);
             }
-            let email = s.emails.get_mut(&mdn.for_email_id).ok_or(JmapError::NotFound)?;
+            let email = s
+                .emails
+                .get_mut(&mdn.for_email_id)
+                .ok_or(JmapError::NotFound)?;
             email.keywords.insert("$mdnsent".into());
             s.mdns.push(mdn.clone());
             s.record("Email", &mdn.for_email_id, Op::Updated);
@@ -1679,7 +2136,10 @@ impl JmapApi for FakeJmap {
     }
 
     fn push_paused(&self) -> Option<tokio::time::Instant> {
-        self.with(|s| s.push_paused_until.filter(|until| *until > tokio::time::Instant::now()))
+        self.with(|s| {
+            s.push_paused_until
+                .filter(|until| *until > tokio::time::Instant::now())
+        })
     }
 }
 
@@ -1687,12 +2147,18 @@ impl JmapApi for FakeJmap {
 /// pointer without its leading slash, and `null` removes what it names. A
 /// path through a property the object lacks is an `invalidPatch`.
 fn patch_at(object: &mut Value, path: &str, value: &Value) -> Result<(), JmapError> {
-    let invalid = || JmapError::Method { kind: "invalidPatch".into(), description: String::new() };
+    let invalid = || JmapError::Method {
+        kind: "invalidPatch".into(),
+        description: String::new(),
+    };
     let mut parts: Vec<&str> = path.split('/').collect();
     let last = parts.pop().ok_or_else(invalid)?;
     let mut at = object;
     for part in parts {
-        at = at.get_mut(part).filter(|v| v.is_object()).ok_or_else(invalid)?;
+        at = at
+            .get_mut(part)
+            .filter(|v| v.is_object())
+            .ok_or_else(invalid)?;
     }
     let map = at.as_object_mut().ok_or_else(invalid)?;
     match value {
@@ -1719,12 +2185,21 @@ mod tests {
     #[tokio::test]
     async fn delivered_mail_shows_in_the_changes_since_the_last_state() {
         let fake = FakeJmap::new();
-        let (email, mailbox) = (fake.email_state().await.unwrap(), fake.mailboxes().await.unwrap().state);
+        let (email, mailbox) = (
+            fake.email_state().await.unwrap(),
+            fake.mailboxes().await.unwrap().state,
+        );
         let id = fake.deliver("inbox", RAW, 1_000);
         let changes = fake.mail_changes(&email, &mailbox, 100).await.unwrap();
         assert_eq!(changes.email.created, std::slice::from_ref(&id));
-        assert_eq!(changes.changed[0].mailbox_ids.keys().next(), Some(&fake.mailbox("inbox")));
-        let again = fake.mail_changes(&changes.email.new_state, &mailbox, 100).await.unwrap();
+        assert_eq!(
+            changes.changed[0].mailbox_ids.keys().next(),
+            Some(&fake.mailbox("inbox"))
+        );
+        let again = fake
+            .mail_changes(&changes.email.new_state, &mailbox, 100)
+            .await
+            .unwrap();
         assert!(again.email.created.is_empty() && again.changed.is_empty());
     }
 
@@ -1734,7 +2209,10 @@ mod tests {
         let email = fake.email_state().await.unwrap();
         fake.deliver("inbox", RAW, 1_000);
         fake.forget_changes();
-        assert_eq!(fake.mail_changes(&email, "0", 100).await.unwrap_err(), JmapError::CannotCalculateChanges);
+        assert_eq!(
+            fake.mail_changes(&email, "0", 100).await.unwrap_err(),
+            JmapError::CannotCalculateChanges
+        );
     }
 
     #[tokio::test]
@@ -1742,7 +2220,10 @@ mod tests {
         let fake = FakeJmap::new();
         let id = fake.deliver("inbox", RAW, 1_000);
         let mut update = Map::new();
-        update.insert(id.clone(), json!({ format!("mailboxIds/{}", fake.mailbox("inbox")): null }));
+        update.insert(
+            id.clone(),
+            json!({ format!("mailboxIds/{}", fake.mailbox("inbox")): null }),
+        );
         let set = fake.set_emails(&update, &[]).await.unwrap();
         assert_eq!(set.refusal(&id).unwrap().kind, "invalidProperties");
     }
@@ -1752,10 +2233,29 @@ mod tests {
         let fake = FakeJmap::new();
         let old = fake.deliver("inbox", RAW, 1_000);
         let new = fake.deliver("archive", RAW, 2_000);
-        let all = fake.query(&EmailQuery { filter: None, position: 0, limit: 10, total: true }).await.unwrap();
-        assert_eq!(all.hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>(), [new, old.clone()]);
+        let all = fake
+            .query(&EmailQuery {
+                filter: None,
+                position: 0,
+                limit: 10,
+                total: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            all.hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>(),
+            [new, old.clone()]
+        );
         let inbox = json!({ "inMailbox": fake.mailbox("inbox") });
-        let only = fake.query(&EmailQuery { filter: Some(inbox), position: 0, limit: 10, total: false }).await.unwrap();
+        let only = fake
+            .query(&EmailQuery {
+                filter: Some(inbox),
+                position: 0,
+                limit: 10,
+                total: false,
+            })
+            .await
+            .unwrap();
         assert_eq!(only.hits.len(), 1);
         let got = fake.emails(&[old], PLACES).await.unwrap();
         assert!(got.list[0].mailbox_ids.contains_key(&fake.mailbox("inbox")));
@@ -1765,9 +2265,21 @@ mod tests {
     async fn an_unknown_filter_key_or_operator_is_unsupported_like_a_server_says() {
         let fake = FakeJmap::new();
         fake.deliver("inbox", RAW, 1_000);
-        for filter in [json!({ "colour": "red" }), json!({ "operator": "XOR", "conditions": [] })] {
-            let asked = fake.query(&EmailQuery { filter: Some(filter), position: 0, limit: 10, total: false }).await;
-            assert!(matches!(asked, Err(JmapError::Method { kind, .. }) if kind == "unsupportedFilter"));
+        for filter in [
+            json!({ "colour": "red" }),
+            json!({ "operator": "XOR", "conditions": [] }),
+        ] {
+            let asked = fake
+                .query(&EmailQuery {
+                    filter: Some(filter),
+                    position: 0,
+                    limit: 10,
+                    total: false,
+                })
+                .await;
+            assert!(
+                matches!(asked, Err(JmapError::Method { kind, .. }) if kind == "unsupportedFilter")
+            );
         }
     }
 
@@ -1803,7 +2315,10 @@ mod tests {
         tokio::task::yield_now().await;
         fake.poke();
         assert_eq!(waiting.await.unwrap().unwrap(), Pushed::Changed);
-        assert_eq!(FakeJmap::new().without_push().push().await.unwrap(), Pushed::NoPush);
+        assert_eq!(
+            FakeJmap::new().without_push().push().await.unwrap(),
+            Pushed::NoPush
+        );
     }
 
     #[tokio::test]
@@ -1811,11 +2326,19 @@ mod tests {
         let fake = FakeJmap::new();
         let parent = fake.add_mailbox("Trips", None);
         let id = fake
-            .set_mailbox(&MailboxWrite::Create { name: "2026".into(), parent_id: Some(parent.clone()), role: None })
+            .set_mailbox(&MailboxWrite::Create {
+                name: "2026".into(),
+                parent_id: Some(parent.clone()),
+                role: None,
+            })
             .await
             .unwrap();
         let listed = fake.mailboxes().await.unwrap().list;
-        assert!(listed.iter().any(|m| m.id == id && m.parent_id.as_deref() == Some(parent.as_str())));
+        assert!(
+            listed
+                .iter()
+                .any(|m| m.id == id && m.parent_id.as_deref() == Some(parent.as_str()))
+        );
     }
 
     async fn set(fake: &FakeJmap, id: &str, patch: Value) -> SetResponse {
@@ -1829,7 +2352,10 @@ mod tests {
         let fake = FakeJmap::new();
         fake.deliver("inbox", RAW, 1_000);
         fake.forget_changes();
-        let (email, mailbox) = (fake.email_state().await.unwrap(), fake.mailboxes().await.unwrap().state);
+        let (email, mailbox) = (
+            fake.email_state().await.unwrap(),
+            fake.mailboxes().await.unwrap().state,
+        );
         let changes = fake.mail_changes(&email, &mailbox, 100).await.unwrap();
         assert!(changes.email.created.is_empty() && changes.changed.is_empty());
     }
@@ -1837,7 +2363,10 @@ mod tests {
     #[tokio::test]
     async fn a_state_from_the_future_cannot_be_calculated() {
         let fake = FakeJmap::new();
-        assert_eq!(fake.mail_changes("99", "0", 100).await.unwrap_err(), JmapError::CannotCalculateChanges);
+        assert_eq!(
+            fake.mail_changes("99", "0", 100).await.unwrap_err(),
+            JmapError::CannotCalculateChanges
+        );
     }
 
     #[tokio::test]
@@ -1862,7 +2391,11 @@ mod tests {
         set(&fake, &id, json!({ "keywords/$seen": null })).await;
         assert_eq!(step(&fake, &mut since), [fake.mailbox("archive")]);
         let blob = fake.upload(RAW.to_vec()).await.unwrap();
-        let made = fake.import(&blob, std::slice::from_ref(&inbox), &[], None).await.unwrap().email;
+        let made = fake
+            .import(&blob, std::slice::from_ref(&inbox), &[], None)
+            .await
+            .unwrap()
+            .email;
         assert_eq!(step(&fake, &mut since), std::slice::from_ref(&inbox));
         fake.destroy(&made.id);
         assert_eq!(step(&fake, &mut since), std::slice::from_ref(&inbox));
@@ -1909,15 +2442,28 @@ mod tests {
             JmapError::Method { kind, .. } => kind,
             other => panic!("{other:?}"),
         };
-        assert_eq!(kind(fake.import(&blob, &[], &[], None).await.unwrap_err()), "invalidProperties");
-        assert_eq!(kind(fake.import(&blob, &["nowhere".into()], &[], None).await.unwrap_err()), "invalidProperties");
+        assert_eq!(
+            kind(fake.import(&blob, &[], &[], None).await.unwrap_err()),
+            "invalidProperties"
+        );
+        assert_eq!(
+            kind(
+                fake.import(&blob, &["nowhere".into()], &[], None)
+                    .await
+                    .unwrap_err()
+            ),
+            "invalidProperties"
+        );
         assert!(fake.with(|s| s.emails.is_empty()));
     }
 
     #[tokio::test]
     async fn destroying_an_unknown_id_answers_not_found() {
         let fake = FakeJmap::new();
-        let set = fake.set_emails(&Map::new(), &["gone".into()]).await.unwrap();
+        let set = fake
+            .set_emails(&Map::new(), &["gone".into()])
+            .await
+            .unwrap();
         assert_eq!(set.refusal("gone").unwrap().kind, "notFound");
     }
 
@@ -1939,16 +2485,26 @@ mod tests {
         let scripts = fake.sieve_scripts().await.unwrap();
         assert!(scripts.iter().any(|s| s.id == id && s.is_active));
         assert_eq!(fake.sieve_text(&scripts[0].blob_id).await.unwrap(), "keep;");
-        assert_eq!(fake.sieve_extensions().await.unwrap(), ["fileinto", "vacation"]);
+        assert_eq!(
+            fake.sieve_extensions().await.unwrap(),
+            ["fileinto", "vacation"]
+        );
     }
 
     #[tokio::test]
     async fn a_masked_address_turns_off_and_comes_back() {
         let fake = FakeJmap::new().with_capability(mailrs_jmap::MASKED_EMAIL);
-        let made = fake.create_masked("https://shop.example", "Shop").await.unwrap();
-        fake.set_masked_state(&made.id, MaskedState::Disabled).await.unwrap();
+        let made = fake
+            .create_masked("https://shop.example", "Shop")
+            .await
+            .unwrap();
+        fake.set_masked_state(&made.id, MaskedState::Disabled)
+            .await
+            .unwrap();
         assert_eq!(fake.masked_emails().await.unwrap()[0].state, "disabled");
-        fake.set_masked_state(&made.id, MaskedState::Enabled).await.unwrap();
+        fake.set_masked_state(&made.id, MaskedState::Enabled)
+            .await
+            .unwrap();
         assert_eq!(fake.masked_emails().await.unwrap()[0].state, "enabled");
     }
 
@@ -1956,11 +2512,15 @@ mod tests {
     async fn changes_page_by_max_and_say_there_is_more() {
         let fake = FakeJmap::new();
         let since = fake.email_state().await.unwrap();
-        let ids: Vec<String> = (0..3).map(|n| fake.deliver("inbox", RAW, 1_000 + n)).collect();
+        let ids: Vec<String> = (0..3)
+            .map(|n| fake.deliver("inbox", RAW, 1_000 + n))
+            .collect();
         let first = fake.with(|s| s.changes("Email", &since, 2)).unwrap();
         assert!(first.has_more_changes);
         assert_eq!(first.created, ids[..2]);
-        let rest = fake.with(|s| s.changes("Email", &first.new_state, 2)).unwrap();
+        let rest = fake
+            .with(|s| s.changes("Email", &first.new_state, 2))
+            .unwrap();
         assert!(!rest.has_more_changes);
         assert_eq!(rest.created, ids[2..]);
     }
@@ -1981,35 +2541,67 @@ mod tests {
         let fake = FakeJmap::new().with_delayed_send(86_400);
         let blob = fake.upload(RAW.to_vec()).await.unwrap();
         let held = fake.hold(&hold_for(3600, &blob)).await.unwrap();
-        assert_eq!(fake.submissions(std::slice::from_ref(&held.id)).await.unwrap()[0].undo_status, "pending");
+        assert_eq!(
+            fake.submissions(std::slice::from_ref(&held.id))
+                .await
+                .unwrap()[0]
+                .undo_status,
+            "pending"
+        );
         assert_eq!(fake.release_due(i64::MAX), 1);
-        assert_eq!(fake.with(|s| s.sent.len()), 1, "released mail goes out once");
-        assert_eq!(fake.cancel_submission(&held.id).await.unwrap(), mailrs_jmap::Canceled::TooLate);
+        assert_eq!(
+            fake.with(|s| s.sent.len()),
+            1,
+            "released mail goes out once"
+        );
+        assert_eq!(
+            fake.cancel_submission(&held.id).await.unwrap(),
+            mailrs_jmap::Canceled::TooLate
+        );
     }
 
     #[tokio::test]
     async fn a_hold_past_the_servers_reach_is_refused() {
         let fake = FakeJmap::new().with_delayed_send(60);
         let blob = fake.upload(RAW.to_vec()).await.unwrap();
-        assert!(matches!(fake.hold(&hold_for(3600, &blob)).await, Err(JmapError::Method { .. })));
+        assert!(matches!(
+            fake.hold(&hold_for(3600, &blob)).await,
+            Err(JmapError::Method { .. })
+        ));
     }
 
     #[tokio::test]
     async fn a_server_without_submission_get_answers_unknown_method() {
-        let fake = FakeJmap::new().with_delayed_send(86_400).without_submission_get();
+        let fake = FakeJmap::new()
+            .with_delayed_send(86_400)
+            .without_submission_get();
         assert!(!fake.answers_submission_get().await.unwrap());
-        assert!(matches!(fake.submissions(&[]).await, Err(JmapError::UnknownCapability(_))));
+        assert!(matches!(
+            fake.submissions(&[]).await,
+            Err(JmapError::UnknownCapability(_))
+        ));
     }
 
     #[tokio::test]
     async fn a_receipt_needs_the_capability_and_marks_the_message() {
         let fake = FakeJmap::new();
         let id = fake.deliver("inbox", RAW, 1);
-        let mdn = mailrs_jmap::MdnOut { for_email_id: id, identity_id: "I1".into(), subject: "s".into(), text_body: "t".into() };
-        assert!(matches!(fake.send_mdn(&mdn).await, Err(JmapError::UnknownCapability(_))));
+        let mdn = mailrs_jmap::MdnOut {
+            for_email_id: id,
+            identity_id: "I1".into(),
+            subject: "s".into(),
+            text_body: "t".into(),
+        };
+        assert!(matches!(
+            fake.send_mdn(&mdn).await,
+            Err(JmapError::UnknownCapability(_))
+        ));
         let fake = FakeJmap::new().with_capability(mailrs_jmap::MDN);
         let id = fake.deliver("inbox", RAW, 1);
-        let mdn = mailrs_jmap::MdnOut { for_email_id: id.clone(), ..mdn };
+        let mdn = mailrs_jmap::MdnOut {
+            for_email_id: id.clone(),
+            ..mdn
+        };
         fake.send_mdn(&mdn).await.unwrap();
         assert!(fake.with(|s| s.emails[&id].keywords.contains("$mdnsent")));
     }
@@ -2019,10 +2611,21 @@ mod tests {
         let fake = FakeJmap::new().with_delayed_send(86_400);
         let blob = fake.upload(RAW.to_vec()).await.unwrap();
         let before = fake.with(|s| s.emails.len());
-        fake.with(|s| s.hold_failure = Some(JmapError::Method { kind: "forbiddenFrom".into(), description: String::new() }));
-        assert!(matches!(fake.hold(&hold_for(3600, &blob)).await, Err(JmapError::Method { .. })));
+        fake.with(|s| {
+            s.hold_failure = Some(JmapError::Method {
+                kind: "forbiddenFrom".into(),
+                description: String::new(),
+            })
+        });
+        assert!(matches!(
+            fake.hold(&hold_for(3600, &blob)).await,
+            Err(JmapError::Method { .. })
+        ));
         assert_eq!(fake.with(|s| (s.emails.len(), s.holds.len())), (before, 0));
-        assert!(fake.hold(&hold_for(3600, &blob)).await.is_ok(), "the failure is once");
+        assert!(
+            fake.hold(&hold_for(3600, &blob)).await.is_ok(),
+            "the failure is once"
+        );
     }
 
     #[tokio::test]
@@ -2034,24 +2637,45 @@ mod tests {
         let hold = hold_for(3600, &blob);
         assert_eq!(fake.hold(&hold).await, Err(JmapError::HoldUnknown));
         assert_eq!(fake.with(|s| s.holds.len()), 1, "the server holds it");
-        let found = fake
-            .with(|s| s.emails.values().filter(|e| e.mailbox_ids.contains(&drafts) && e.keywords.contains(mailrs_jmap::HELD)).count());
+        let found = fake.with(|s| {
+            s.emails
+                .values()
+                .filter(|e| {
+                    e.mailbox_ids.contains(&drafts) && e.keywords.contains(mailrs_jmap::HELD)
+                })
+                .count()
+        });
         assert_eq!(found, 1);
-        let query = EmailQuery { filter: Some(json!({ "inMailbox": drafts, "hasKeyword": mailrs_jmap::HELD, "header": ["Message-ID", "<a1@example.com>"] })), position: 0, limit: 10, total: false };
+        let query = EmailQuery {
+            filter: Some(
+                json!({ "inMailbox": drafts, "hasKeyword": mailrs_jmap::HELD, "header": ["Message-ID", "<a1@example.com>"] }),
+            ),
+            position: 0,
+            limit: 10,
+            total: false,
+        };
         assert_eq!(fake.query(&query).await.unwrap().hits.len(), 1);
     }
 
     #[tokio::test]
     async fn canceling_a_hold_that_is_gone_says_so() {
         let fake = FakeJmap::new().with_delayed_send(86_400);
-        assert_eq!(fake.cancel_submission("S404").await.unwrap(), mailrs_jmap::Canceled::Gone);
+        assert_eq!(
+            fake.cancel_submission("S404").await.unwrap(),
+            mailrs_jmap::Canceled::Gone
+        );
     }
 
     #[tokio::test]
     async fn a_clamped_server_answers_at_most_its_limit_to_query_and_query_after() {
         let fake = FakeJmap::new().clamping_queries(2);
         let ids: Vec<String> = (1..=5).map(|n| fake.deliver("inbox", RAW, n)).collect();
-        let query = EmailQuery { filter: None, position: 0, limit: 10, total: false };
+        let query = EmailQuery {
+            filter: None,
+            position: 0,
+            limit: 10,
+            total: false,
+        };
         let first = fake.query(&query).await.unwrap();
         assert_eq!(first.hits.len(), 2);
         let next = fake.query_after(&query, &first.hits[1].id).await.unwrap();
@@ -2072,9 +2696,24 @@ mod tests {
         let state = fake.with(|s| s.state.to_string());
         let id = fake.add_event(json!({"title": "Rota", "calendarIds": {"cal-1": true}, "start": "2026-10-06T09:00:00"}));
         let mut patch = Map::new();
-        patch.insert("participants/p1/participationStatus".into(), json!("accepted"));
-        fake.set_calendar_event(&mailrs_jmap::EventWrite::Update { id: id.clone(), patch }, false, None).await.unwrap();
-        assert_eq!(fake.event(&id).unwrap()["participants"]["p1"]["participationStatus"], "accepted");
+        patch.insert(
+            "participants/p1/participationStatus".into(),
+            json!("accepted"),
+        );
+        fake.set_calendar_event(
+            &mailrs_jmap::EventWrite::Update {
+                id: id.clone(),
+                patch,
+            },
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fake.event(&id).unwrap()["participants"]["p1"]["participationStatus"],
+            "accepted"
+        );
         let changes = fake.calendar_event_changes(&state, 50).await.unwrap();
         assert_eq!(changes.created, [id]);
     }
@@ -2084,8 +2723,13 @@ mod tests {
         let fake = FakeJmap::new().with_calendars();
         fake.with(|s| s.schedules = false);
         let id = fake.add_event(json!({"title": "Rota", "participants": {"p1": {"calendarAddress": "mailto:a@x.example"}}}));
-        let write = mailrs_jmap::EventWrite::Update { id, patch: Map::new() };
-        assert!(matches!(fake.set_calendar_event(&write, true, None).await, Err(JmapError::Method { ref kind, .. }) if kind == "noSupportedScheduleMethods"));
+        let write = mailrs_jmap::EventWrite::Update {
+            id,
+            patch: Map::new(),
+        };
+        assert!(
+            matches!(fake.set_calendar_event(&write, true, None).await, Err(JmapError::Method { ref kind, .. }) if kind == "noSupportedScheduleMethods")
+        );
         assert!(fake.set_calendar_event(&write, false, None).await.is_ok());
     }
 
@@ -2096,8 +2740,14 @@ mod tests {
         fake.with(|s| s.state_mismatches = 1);
         let mut patch = Map::new();
         patch.insert("title".into(), json!("Changed"));
-        let write = mailrs_jmap::EventWrite::Update { id: id.clone(), patch };
-        assert_eq!(fake.set_calendar_event(&write, false, None).await, Err(JmapError::StateMismatch));
+        let write = mailrs_jmap::EventWrite::Update {
+            id: id.clone(),
+            patch,
+        };
+        assert_eq!(
+            fake.set_calendar_event(&write, false, None).await,
+            Err(JmapError::StateMismatch)
+        );
         assert_eq!(fake.event(&id).unwrap()["title"], "Rota");
         fake.set_calendar_event(&write, false, None).await.unwrap();
         assert_eq!(fake.event(&id).unwrap()["title"], "Changed");
@@ -2111,11 +2761,19 @@ mod tests {
         fake.add_event(json!({"title": "Another"}));
         let mut patch = Map::new();
         patch.insert("title".into(), json!("Changed"));
-        let write = mailrs_jmap::EventWrite::Update { id: id.clone(), patch };
-        assert_eq!(fake.set_calendar_event(&write, false, Some(&old)).await, Err(JmapError::StateMismatch));
+        let write = mailrs_jmap::EventWrite::Update {
+            id: id.clone(),
+            patch,
+        };
+        assert_eq!(
+            fake.set_calendar_event(&write, false, Some(&old)).await,
+            Err(JmapError::StateMismatch)
+        );
         assert_eq!(fake.event(&id).unwrap()["title"], "Rota");
         let now = fake.calendar_events(&[]).await.unwrap().state;
-        fake.set_calendar_event(&write, false, Some(&now)).await.unwrap();
+        fake.set_calendar_event(&write, false, Some(&now))
+            .await
+            .unwrap();
         assert_eq!(fake.event(&id).unwrap()["title"], "Changed");
     }
 }

@@ -16,7 +16,7 @@ use tokio::time::Instant;
 use crate::account::{DEFAULT_BODY_CACHE_BYTES, DEFAULT_WINDOW_DAYS};
 use crate::raw_cache::{RAW_CACHE_BYTES, RawCache};
 use crate::{
-    AccountServices, AccountSync, BackendError, MailBackend, SyncError, backoff_delay, background,
+    AccountServices, AccountSync, BackendError, MailBackend, SyncError, background, backoff_delay,
     now_millis, poll_offset, with_jitter,
 };
 
@@ -97,6 +97,9 @@ impl SyncEngine {
 
     /// Starts the account's loop, replacing one that is already running.
     /// Call it from inside a tokio runtime.
+    ///
+    /// An account with no mail gets no loop and is kept all the same, so
+    /// its services answer for it.
     pub fn start_account(&self, account_id: AccountId, services: AccountServices) {
         services
             .mail
@@ -104,7 +107,8 @@ impl SyncEngine {
         let sync = Arc::new(
             AccountSync::new(account_id, services, self.db.clone(), self.events.clone())
                 .with_limits(self.config.window_days, self.config.body_cache_bytes)
-                .with_raw_cache(Arc::clone(&self.raw)),
+                .with_raw_cache(Arc::clone(&self.raw))
+                .with_network(Arc::clone(&self.network)),
         );
         let poke = Arc::new(Notify::new());
         let mut running = self.lock();
@@ -254,6 +258,16 @@ async fn supervise(
     network: Arc<AtomicBool>,
     config: EngineConfig,
 ) {
+    // An account with no mail has no change feed to follow and nothing to
+    // backfill. Its calendar is read on the app's own timer, and the
+    // calendar copy, which alone talks to its server, says how it is
+    // doing. Here it says once that it started, then waits to be stopped.
+    if !sync.services().serves_mail() {
+        if let Err(err) = sync.restate().await {
+            tracing::warn!(account = sync.account_id(), error = %err, "could not read the account state");
+        }
+        return std::future::pending().await;
+    }
     let mut crashed = false;
     loop {
         let run = run_account(

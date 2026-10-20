@@ -25,7 +25,11 @@ pub(crate) fn channels(hex: &str) -> [f64; 3] {
 fn luminance(hex: &str) -> f64 {
     let [r, g, b] = channels(hex).map(|c| {
         let c = c / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     });
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
@@ -48,7 +52,9 @@ pub(crate) fn rules() -> Vec<(&'static str, &'static str)> {
     let mut rules = Vec::new();
     let mut rest = STYLE;
     while let Some(open) = rest.find('{') {
-        let Some(close) = rest[open..].find('}') else { break };
+        let Some(close) = rest[open..].find('}') else {
+            break;
+        };
         // A comment before a rule is part of what precedes its selector.
         let head = rest[..open].rsplit("*/").next().unwrap_or("").trim();
         rules.push((head, &rest[open + 1..open + close]));
@@ -91,18 +97,34 @@ fn no_filled_control_carries_white_text_on_the_raw_accent() {
                 && body.contains("color: var(--accent-fg-color)")
         })
         .map(|(selector, _)| selector)
-        .filter(|selector| !RAW_FILL_EXCEPTIONS.iter().any(|(name, _)| selector.ends_with(name)))
+        .filter(|selector| {
+            !RAW_FILL_EXCEPTIONS
+                .iter()
+                .any(|(name, _)| selector.ends_with(name))
+        })
         .collect();
-    assert!(filled.is_empty(), "fill these with --accent-fill: {filled:?}");
+    assert!(
+        filled.is_empty(),
+        "fill these with --accent-fill: {filled:?}"
+    );
 }
 
 /// The contrast of text drawn at `opacity` over `background`: in light
 /// libadwaita's text is `rgb(0 0 6 / 80%)`, in dark it is white.
 pub(crate) fn dimmed_text_contrast(dark: bool, opacity: f64, background: &str) -> f64 {
-    let (text, alpha) = if dark { ([255.0; 3], opacity) } else { ([0.0, 0.0, 6.0], 0.8 * opacity) };
+    let (text, alpha) = if dark {
+        ([255.0; 3], opacity)
+    } else {
+        ([0.0, 0.0, 6.0], 0.8 * opacity)
+    };
     let back = channels(background);
     let mixed: Vec<String> = (0..3)
-        .map(|i| format!("{:02x}", (text[i] * alpha + back[i] * (1.0 - alpha)).round() as u8))
+        .map(|i| {
+            format!(
+                "{:02x}",
+                (text[i] * alpha + back[i] * (1.0 - alpha)).round() as u8
+            )
+        })
         .collect();
     contrast(&format!("#{}", mixed.concat()), background)
 }
@@ -112,13 +134,23 @@ fn a_day_headings_weekday_and_place_pass_aa_in_light_and_dark() {
     // The week view's heading row sits on the view, the month's on the
     // window, so both surfaces count.
     let surfaces = |dark: bool| {
-        let selector = if dark { "window.app-surfaces.app-dark" } else { "window.app-surfaces" };
+        let selector = if dark {
+            "window.app-surfaces.app-dark"
+        } else {
+            "window.app-surfaces"
+        };
         ["--view-bg-color", "--window-bg-color"]
             .map(|name| custom_property(selector, name).expect("a surface colour"))
     };
     for (dark, selectors) in [
         (false, [".day-heading .weekday", ".day-place"]),
-        (true, [".app-dark .day-heading:not(.today) .weekday", ".app-dark .day-heading:not(.today) .day-place"]),
+        (
+            true,
+            [
+                ".app-dark .day-heading:not(.today) .weekday",
+                ".app-dark .day-heading:not(.today) .day-place",
+            ],
+        ),
     ] {
         for selector in selectors {
             let opacity: f64 = custom_property(selector, "opacity")
@@ -127,7 +159,10 @@ fn a_day_headings_weekday_and_place_pass_aa_in_light_and_dark() {
                 .expect("a number");
             for surface in surfaces(dark) {
                 let ratio = dimmed_text_contrast(dark, opacity, &surface);
-                assert!(ratio >= AA, "{selector} at {opacity} on {surface} is {ratio:.2}:1");
+                assert!(
+                    ratio >= AA,
+                    "{selector} at {opacity} on {surface} is {ratio:.2}:1"
+                );
             }
         }
     }
@@ -141,7 +176,9 @@ fn no_text_is_hard_coded_in_an_orange() {
             continue;
         }
         for orange in [MOCKUP_ORANGE, DESKTOP_ORANGE] {
-            let text = body.lines().any(|l| l.trim_start().starts_with("color:") && l.contains(orange));
+            let text = body
+                .lines()
+                .any(|l| l.trim_start().starts_with("color:") && l.contains(orange));
             assert!(!text, "{selector} draws text in {orange}");
         }
     }
@@ -156,12 +193,20 @@ const ACCENTS: &[&str] = &[
 ];
 
 fn to_linear(c: f64) -> f64 {
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 fn from_linear(c: f64) -> f64 {
     let c = c.clamp(0.0, 1.0);
-    if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+    if c <= 0.003_130_8 {
+        12.92 * c
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 /// `hex` in OKLab.
@@ -198,15 +243,26 @@ fn from_oklab([lightness, a, b]: [f64; 3]) -> String {
 fn tint(colour: &str, share: f64, surface: &str) -> String {
     let (c, s) = (channels(colour), channels(surface));
     let mixed: Vec<String> = (0..3)
-        .map(|i| format!("{:02x}", (c[i] * share + s[i] * (1.0 - share)).round() as u8))
+        .map(|i| {
+            format!(
+                "{:02x}",
+                (c[i] * share + s[i] * (1.0 - share)).round() as u8
+            )
+        })
         .collect();
     format!("#{}", mixed.concat())
 }
 
 /// The number after `before` in `text`, up to `until`.
 fn number_in(text: &str, before: &str, until: char) -> f64 {
-    let after = &text[text.find(before).unwrap_or_else(|| panic!("{text} holds {before}")) + before.len()..];
-    after[..after.find(until).expect("an end")].trim().parse().expect("a number")
+    let after = &text[text
+        .find(before)
+        .unwrap_or_else(|| panic!("{text} holds {before}"))
+        + before.len()..];
+    after[..after.find(until).expect("an end")]
+        .trim()
+        .parse()
+        .expect("a number")
 }
 
 #[test]
@@ -222,7 +278,9 @@ fn todays_heading_passes_aa_on_its_tint_for_every_accent_in_light() {
     let scale = format!("min(1, {limit} / l)");
     assert_eq!(
         text,
-        format!("oklab(from var(--accent-bg-color) min(l, {limit}) calc(a * {scale}) calc(b * {scale}))")
+        format!(
+            "oklab(from var(--accent-bg-color) min(l, {limit}) calc(a * {scale}) calc(b * {scale}))"
+        )
     );
     for surface in ["--view-bg-color", "--window-bg-color"] {
         let surface = custom_property("window.app-surfaces", surface).expect("a surface");
@@ -231,7 +289,10 @@ fn todays_heading_passes_aa_on_its_tint_for_every_accent_in_light() {
             let f = (limit / l).min(1.0);
             let drawn = from_oklab([l * f, a * f, b * f]);
             let ratio = contrast(&drawn, &tint(accent, share, &surface));
-            assert!(ratio >= AA, "today in {accent} on {surface} is {ratio:.2}:1");
+            assert!(
+                ratio >= AA,
+                "today in {accent} on {surface} is {ratio:.2}:1"
+            );
         }
     }
 }

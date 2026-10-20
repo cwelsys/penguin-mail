@@ -102,8 +102,7 @@ pub fn signatures<S: AsRef<str>>(status: &[S]) -> Vec<Signature> {
             // CRL lists. It writes `GOODSIG`, since the text is the text
             // that certificate signed, and says what is wrong on the trust
             // line: `TRUST_NEVER 94`, where 94 is `GPG_ERR_CERT_REVOKED`.
-            let revoked =
-                seen.trust == Some(Trust::Never) && seen.trust_code == Some(CERT_REVOKED);
+            let revoked = seen.trust == Some(Trust::Never) && seen.trust_code == Some(CERT_REVOKED);
             Signature {
                 verdict: match seen.verdict {
                     PgpVerdict::Good if revoked => Verdict::RevokedCertificate,

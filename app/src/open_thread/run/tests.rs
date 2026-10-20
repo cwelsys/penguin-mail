@@ -5,9 +5,8 @@ use mailrs_domain::Target;
 
 use super::fake::{
     ACCOUNT, ELSEWHERE, FakeWindow, Step, THREAD, body, html_body, invited, meta,
-    opened_cancellation, opened_invitation, opened_occurrence, opened_publish, personal, portuguese, queued, row,
-    spot, strip,
-    with_inline_picture, with_picture,
+    opened_cancellation, opened_invitation, opened_occurrence, opened_publish, personal,
+    portuguese, queued, row, spot, strip, with_inline_picture, with_picture,
 };
 use super::{Card, Event, ReceiptCard, Stale};
 use crate::open_thread::Served;
@@ -337,7 +336,10 @@ async fn an_invitation_on_the_calendar_offers_to_show_it() {
     let window = FakeWindow::with_body(invited());
     window.with(|screen| screen.on_calendar = Ok(Some(spot())));
     window.run().open(row(THREAD)).await;
-    assert_eq!(window.0.borrow().spots, [("kites@example.com".to_string(), spot())]);
+    assert_eq!(
+        window.0.borrow().spots,
+        [("kites@example.com".to_string(), spot())]
+    );
 }
 
 #[tokio::test]
@@ -348,7 +350,10 @@ async fn an_invitation_the_calendar_lacks_offers_nothing() {
         window.run().open(row(THREAD)).await;
         assert!(window.took(Step::OnCalendar));
         assert!(!window.took(Step::OnCalendarKnown));
-        assert!(window.took(Step::Clashes), "the clashes still go on the card");
+        assert!(
+            window.took(Step::Clashes),
+            "the clashes still go on the card"
+        );
     }
 }
 
@@ -376,7 +381,10 @@ async fn an_answered_invitation_still_offers_to_show_it() {
     });
     window.run().open(row(THREAD)).await;
     assert!(window.took(Step::OnCalendarKnown));
-    assert!(!window.took(Step::Busy), "an answered invitation asks about no clashes");
+    assert!(
+        !window.took(Step::Busy),
+        "an answered invitation asks about no clashes"
+    );
 }
 
 #[tokio::test]
@@ -411,7 +419,10 @@ async fn a_card_the_calendar_lacked_looks_again_once_the_calendar_is_read() {
     assert!(window.0.borrow().spots.is_empty());
     window.with(|screen| screen.on_calendar = Ok(Some(spot())));
     window.run().calendar_read().await;
-    assert_eq!(window.0.borrow().spots, [("kites@example.com".to_string(), spot())]);
+    assert_eq!(
+        window.0.borrow().spots,
+        [("kites@example.com".to_string(), spot())]
+    );
 }
 
 #[tokio::test]
@@ -600,6 +611,36 @@ async fn a_language_the_reader_never_translates_gets_no_card() {
     window.with(|screen| screen.never = vec!["es".to_string(), "pt".to_string()]);
     window.run().open(row(THREAD)).await;
     assert_eq!(window.0.borrow().cards.last(), Some(&Card::Hidden));
+}
+
+#[tokio::test]
+async fn russian_and_czech_can_be_excluded_from_translation() {
+    for (code, text) in [
+        (
+            "ru",
+            "Спасибо за ваше письмо. Мы уже получили все документы и будем рады ответить на ваши вопросы. Если вы хотите, мы можем обсудить это завтра.",
+        ),
+        (
+            "cs",
+            "Děkuji za váš e-mail. Jsme rádi, že jste nám napsali. Prosím, pošlete nám dokumenty, které máme pro vás připravit, a můžeme se na to podívat.",
+        ),
+    ] {
+        let window = FakeWindow::with_body(body(text));
+        window.with(|screen| screen.never = vec![code.to_string()]);
+        window.run().open(row(THREAD)).await;
+        assert_eq!(
+            window.0.borrow().cards.last(),
+            Some(&Card::Hidden),
+            "{code}"
+        );
+        window.with(|screen| screen.never.clear());
+        window.run().offer_translation_again();
+        let last = window.0.borrow().cards.last().cloned();
+        assert!(
+            matches!(last, Some(Card::Offered { from: Some(from), .. }) if from.code == code),
+            "{code}: {last:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -978,7 +1019,11 @@ async fn gmail_s_html_is_cleaned_through_the_port_before_it_is_drawn() {
     let at = |step| steps.iter().position(|s| *s == step).expect("step taken");
     assert!(at(Step::Bodies) < at(Step::Clean) && at(Step::Clean) < at(Step::BodiesArrived));
     assert!(cleaned_away(&window));
-    assert_eq!(patches(&window), [["m1"]], "loading, then the body in one patch");
+    assert_eq!(
+        patches(&window),
+        [["m1"]],
+        "loading, then the body in one patch"
+    );
     assert!(page(&window).contains("<p>Hi Ann</p>"));
 }
 
@@ -1014,7 +1059,11 @@ async fn an_opened_html_body_is_cleaned_through_the_port() {
     let before_patches = patches(&window).len();
     window
         .run()
-        .engine_answered(target(None), "m1".to_string(), opened(html_body("<p>Under the mat</p>")))
+        .engine_answered(
+            target(None),
+            "m1".to_string(),
+            opened(html_body("<p>Under the mat</p>")),
+        )
         .await;
     assert_eq!(window.0.borrow().cleaners.len(), before + 1);
     assert!(window.took(Step::Cleaned));
@@ -1031,9 +1080,16 @@ async fn a_body_that_fails_to_clean_ends_in_the_fallback_not_in_loading() {
     window.with(|screen| screen.clean_fails = true);
     window.run().open(row(THREAD)).await;
     let drawn = page(&window);
-    assert!(drawn.contains("This message could not be displayed"), "{drawn}");
+    assert!(
+        drawn.contains("This message could not be displayed"),
+        "{drawn}"
+    );
     assert!(!drawn.contains("Loading…"), "{drawn}");
-    let asked = window.steps().iter().filter(|step| **step == Step::Clean).count();
+    let asked = window
+        .steps()
+        .iter()
+        .filter(|step| **step == Step::Clean)
+        .count();
     assert_eq!(asked, 1, "cleaned once");
 }
 
@@ -1090,7 +1146,10 @@ async fn a_synced_calendar_draws_the_hours_around_the_invitation() {
         window.0.borrow().strips,
         [("kites@example.com".to_string(), strip())]
     );
-    assert!(!window.took(Step::Busy), "the strip already says what else is on");
+    assert!(
+        !window.took(Step::Busy),
+        "the strip already says what else is on"
+    );
 }
 
 #[tokio::test]
@@ -1137,7 +1196,11 @@ async fn the_hours_follow_the_occurrence_show_in_calendar_opens() {
 
     let window = FakeWindow::with_body(invited());
     window.run().open(row(THREAD)).await;
-    assert_eq!(window.0.borrow().strip_asked, [None], "without a spot, the invitation's own start");
+    assert_eq!(
+        window.0.borrow().strip_asked,
+        [None],
+        "without a spot, the invitation's own start"
+    );
 }
 
 #[tokio::test]
@@ -1214,7 +1277,10 @@ async fn changing_language_during_translation_discards_the_old_answer_and_error(
 
 #[tokio::test]
 async fn returning_to_the_original_language_drops_the_in_flight_answer_and_error() {
-    for reply in [Ok(vec![Some("Old translation".into())]), Err("offline".into())] {
+    for reply in [
+        Ok(vec![Some("Old translation".into())]),
+        Err("offline".into()),
+    ] {
         let window = FakeWindow::with_body(portuguese());
         window.with(|screen| {
             screen.languages_during_translation = vec!["Czech".into(), "English".into()];
@@ -1247,7 +1313,11 @@ async fn a_message_that_asks_puts_the_card_up() {
             to: "ann@example.com".into()
         }]
     );
-    assert!(window.page().contains("mailrs:receipt/send"), "{}", window.page());
+    assert!(
+        window.page().contains("mailrs:receipt/send"),
+        "{}",
+        window.page()
+    );
 }
 
 #[tokio::test]
@@ -1262,8 +1332,14 @@ async fn an_answered_receipt_is_not_asked_again() {
 async fn a_message_marked_mdnsent_elsewhere_asks_nothing() {
     let window = FakeWindow::with_body(asking());
     window.with(|s| {
-        for meta in s.messages.iter_mut().chain(s.stored.get_mut(THREAD).unwrap().messages.iter_mut()) {
-            meta.held.keywords.push(mailrs_domain::mailbox::keyword::MDN_SENT.to_string());
+        for meta in s
+            .messages
+            .iter_mut()
+            .chain(s.stored.get_mut(THREAD).unwrap().messages.iter_mut())
+        {
+            meta.held
+                .keywords
+                .push(mailrs_domain::mailbox::keyword::MDN_SENT.to_string());
         }
     });
     window.run().open(row(THREAD)).await;
@@ -1275,8 +1351,14 @@ async fn never_ask_puts_nothing_up() {
     let window = FakeWindow::with_body(asking());
     window.with(|s| s.offers_receipts = false);
     window.run().open(row(THREAD)).await;
-    assert!(!window.took(Step::ReceiptAnswered), "the store is not even asked");
-    assert!(window.page().contains("Read receipt requested"), "the message still says it asked");
+    assert!(
+        !window.took(Step::ReceiptAnswered),
+        "the store is not even asked"
+    );
+    assert!(
+        window.page().contains("Read receipt requested"),
+        "the message still says it asked"
+    );
 }
 
 #[tokio::test]
@@ -1286,8 +1368,15 @@ async fn a_message_from_me_asks_nothing() {
         ..body("Note to self")
     });
     window.with(|s| {
-        for meta in s.messages.iter_mut().chain(s.stored.get_mut(THREAD).unwrap().messages.iter_mut()) {
-            meta.from = Some(mailrs_domain::Address { name: None, email: "Me@Example.com".into() });
+        for meta in s
+            .messages
+            .iter_mut()
+            .chain(s.stored.get_mut(THREAD).unwrap().messages.iter_mut())
+        {
+            meta.from = Some(mailrs_domain::Address {
+                name: None,
+                email: "Me@Example.com".into(),
+            });
         }
     });
     window.run().open(row(THREAD)).await;
@@ -1325,8 +1414,14 @@ async fn sending_takes_the_card_down_and_says_so() {
     let run = window.run();
     run.open(row(THREAD)).await;
     run.answer_receipt("m1".into(), true).await;
-    assert_eq!(window.with(|s| s.receipt_answers.clone()), [("m1".to_string(), true)]);
-    assert_eq!(window.with(|s| s.receipt_cards.last().cloned()), Some(ReceiptCard::Hidden));
+    assert_eq!(
+        window.with(|s| s.receipt_answers.clone()),
+        [("m1".to_string(), true)]
+    );
+    assert_eq!(
+        window.with(|s| s.receipt_cards.last().cloned()),
+        Some(ReceiptCard::Hidden)
+    );
     assert!(window.with(|s| s.toasts.iter().any(|t| t == "Read receipt sent")));
     assert!(!window.page().contains("mailrs:receipt/send"));
     assert!(window.page().contains("Read receipt requested"));
@@ -1338,8 +1433,14 @@ async fn declining_takes_the_card_down_quietly() {
     let run = window.run();
     run.open(row(THREAD)).await;
     run.answer_receipt("m1".into(), false).await;
-    assert_eq!(window.with(|s| s.receipt_answers.clone()), [("m1".to_string(), false)]);
-    assert_eq!(window.with(|s| s.receipt_cards.last().cloned()), Some(ReceiptCard::Hidden));
+    assert_eq!(
+        window.with(|s| s.receipt_answers.clone()),
+        [("m1".to_string(), false)]
+    );
+    assert_eq!(
+        window.with(|s| s.receipt_cards.last().cloned()),
+        Some(ReceiptCard::Hidden)
+    );
     assert!(window.with(|s| s.toasts.is_empty()));
 }
 
@@ -1364,7 +1465,11 @@ async fn a_failed_send_puts_the_question_back() {
         window.with(|s| s.receipt_cards.last().cloned()),
         Some(ReceiptCard::Asked { .. })
     ));
-    assert!(window.with(|s| s.toasts.iter().any(|t| t == "The receipt was not sent, and you can try again: offline")));
+    assert!(window.with(|s| {
+        s.toasts
+            .iter()
+            .any(|t| t == "The receipt was not sent, and you can try again: offline")
+    }));
 }
 
 /// A send that may have gone keeps its answer, so it is not tried again,
@@ -1377,12 +1482,13 @@ async fn a_failed_send_already_recorded_takes_the_card_down() {
     run.open(row(THREAD)).await;
     window.with(|s| s.receipt_answered = Ok(true));
     run.answer_receipt("m1".into(), true).await;
-    assert_eq!(window.with(|s| s.receipt_cards.last().cloned()), Some(ReceiptCard::Hidden));
+    assert_eq!(
+        window.with(|s| s.receipt_cards.last().cloned()),
+        Some(ReceiptCard::Hidden)
+    );
     assert!(
-        window.with(|s| s
-            .toasts
-            .iter()
-            .any(|t| t == "The receipt may have gone out, so Penguin Mail will not send it again: offline")),
+        window.with(|s| s.toasts.iter().any(|t| t
+            == "The receipt may have gone out, so Penguin Mail will not send it again: offline")),
         "{:?}",
         window.with(|s| s.toasts.clone())
     );
@@ -1404,7 +1510,10 @@ fn report(original: &str) -> mailrs_domain::MessageBody {
 #[tokio::test]
 async fn a_report_for_mail_i_sent_shows_as_one_line() {
     let window = FakeWindow::with_body(report("kites@example.com"));
-    window.with(|s| s.sent.push(("kites@example.com".into(), vec!["Ann@Example.com".into()])));
+    window.with(|s| {
+        s.sent
+            .push(("kites@example.com".into(), vec!["Ann@Example.com".into()]))
+    });
     window.run().open(row(THREAD)).await;
     let page = window.page();
     assert!(page.contains("ann@example.com</strong>"), "{page}");
@@ -1428,7 +1537,10 @@ async fn a_forged_report_shows_no_read_line() {
 #[tokio::test]
 async fn a_report_from_someone_the_message_did_not_go_to_shows_no_line() {
     let window = FakeWindow::with_body(report("kites@example.com"));
-    window.with(|s| s.sent.push(("kites@example.com".into(), vec!["bob@example.com".into()])));
+    window.with(|s| {
+        s.sent
+            .push(("kites@example.com".into(), vec!["bob@example.com".into()]))
+    });
     window.run().open(row(THREAD)).await;
     let page = window.page();
     assert!(!page.contains("Read by"), "{page}");
@@ -1455,9 +1567,17 @@ async fn a_redraw_while_the_answer_goes_out_keeps_the_buttons_waiting() {
     let run = window.run();
     run.open(row(THREAD)).await;
     window.receipt_card(ReceiptCard::Working);
-    run.engine_answered(target(None), "m1".into(), opened(asking())).await;
-    assert_eq!(window.with(|s| s.receipt_cards.last().cloned()), Some(ReceiptCard::Working));
-    assert!(!window.page().contains("mailrs:receipt/"), "{}", window.page());
+    run.engine_answered(target(None), "m1".into(), opened(asking()))
+        .await;
+    assert_eq!(
+        window.with(|s| s.receipt_cards.last().cloned()),
+        Some(ReceiptCard::Working)
+    );
+    assert!(
+        !window.page().contains("mailrs:receipt/"),
+        "{}",
+        window.page()
+    );
 }
 
 /// A redraw that asked the store before the answer was kept hears "not
@@ -1474,8 +1594,15 @@ async fn a_stale_redraw_does_not_bring_the_card_back_after_sending() {
         run.answer_receipt("m1".into(), true).await;
         let _ = release.send(());
     });
-    assert_eq!(window.with(|s| s.receipt_cards.last().cloned()), Some(ReceiptCard::Hidden));
-    assert!(!window.page().contains("mailrs:receipt/send"), "{}", window.page());
+    assert_eq!(
+        window.with(|s| s.receipt_cards.last().cloned()),
+        Some(ReceiptCard::Hidden)
+    );
+    assert!(
+        !window.page().contains("mailrs:receipt/send"),
+        "{}",
+        window.page()
+    );
 }
 
 /// An account still connecting cannot say whether the receipt was
@@ -1489,7 +1616,10 @@ async fn the_card_comes_up_once_the_account_connects() {
     assert!(window.with(|s| s.receipt_cards.is_empty()));
     window.with(|s| s.receipt_answered = Ok(false));
     run.account_ready(ACCOUNT + 1).await;
-    assert!(window.with(|s| s.receipt_cards.is_empty()), "another account changes nothing");
+    assert!(
+        window.with(|s| s.receipt_cards.is_empty()),
+        "another account changes nothing"
+    );
     run.account_ready(ACCOUNT).await;
     assert_eq!(window.with(|s| s.receipt_cards.len()), 1);
 }

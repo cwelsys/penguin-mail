@@ -9,14 +9,18 @@ use mailrs_mime::{MAX_DEPTH, content_id, numbered as section};
 use mailrs_mime::{Part, Parts};
 
 use super::{Jmap, JmapApi, backend};
-use crate::services::imap::bodies::text_paths;
 use crate::BackendError;
 use crate::services::RawMessage;
+use crate::services::imap::bodies::text_paths;
 
 /// `root` as a part tree numbered the way IMAP numbers sections: a
 /// multipart root has an empty path, a single part is `1`.
 pub(crate) fn numbered(root: &BodyPart) -> Part {
-    let path = match root.mime_type.to_ascii_lowercase().starts_with("multipart/") {
+    let path = match root
+        .mime_type
+        .to_ascii_lowercase()
+        .starts_with("multipart/")
+    {
         true => String::new(),
         false => "1".to_string(),
     };
@@ -40,7 +44,10 @@ fn number(part: &BodyPart, path: String, depth: usize) -> Part {
         charset: part.charset.clone(),
         filename: part.name.clone(),
         content_id: part.cid.as_deref().map(content_id),
-        attachment: part.disposition.as_deref().is_some_and(|d| d.eq_ignore_ascii_case("attachment")),
+        attachment: part
+            .disposition
+            .as_deref()
+            .is_some_and(|d| d.eq_ignore_ascii_case("attachment")),
         size: i64::try_from(part.size).unwrap_or(i64::MAX),
         children,
         ..Part::default()
@@ -75,22 +82,37 @@ impl<J: JmapApi> Jmap<J> {
     /// what the call's budget has left, and one past it is refused as too
     /// large.
     pub(super) async fn raws(&self, ids: &[String]) -> Result<Vec<RawMessage>, BackendError> {
-        let got = self.api().emails(ids, &["id", "blobId"]).await.map_err(backend)?;
+        let got = self
+            .api()
+            .emails(ids, &["id", "blobId"])
+            .await
+            .map_err(backend)?;
         let mut out = Vec::with_capacity(got.list.len());
         let mut left = RAWS_BUDGET;
         for id in ids {
             let Some(email) = got.list.iter().find(|e| &e.id == id) else {
                 return Err(BackendError::NotFound);
             };
-            let bytes = self.api().download(&email.blob_id, MOST_BLOB_BYTES.min(left)).await.map_err(backend)?;
+            let bytes = self
+                .api()
+                .download(&email.blob_id, MOST_BLOB_BYTES.min(left))
+                .await
+                .map_err(backend)?;
             left = left.saturating_sub(bytes.len());
-            out.push(RawMessage { id: id.clone(), bytes });
+            out.push(RawMessage {
+                id: id.clone(),
+                bytes,
+            });
         }
         Ok(out)
     }
 
     pub(super) async fn structure(&self, id: &str) -> Result<Parts, BackendError> {
-        let got = self.api().emails(&[id.to_string()], BODY).await.map_err(backend)?;
+        let got = self
+            .api()
+            .emails(&[id.to_string()], BODY)
+            .await
+            .map_err(backend)?;
         let email = got.list.into_iter().next().ok_or(BackendError::NotFound)?;
         let source = email.body_structure.ok_or(BackendError::NotFound)?;
         let mut handles = Vec::new();
@@ -100,7 +122,11 @@ impl<J: JmapApi> Jmap<J> {
             .into_iter()
             .map(|h| (h.name, h.value.trim().to_string()))
             .collect();
-        let mut parts = Parts { headers, root: numbered(&source), incomplete: false };
+        let mut parts = Parts {
+            headers,
+            root: numbered(&source),
+            incomplete: false,
+        };
         handles_of(&parts.root, &source, &mut handles);
         // The text parts of one message share one cap, so many of them
         // cannot add up to more than a whole message may be.
@@ -131,6 +157,9 @@ impl<J: JmapApi> Jmap<J> {
                 self.handles().get(id, path).ok_or(BackendError::NotFound)?
             }
         };
-        self.api().download(&blob, MOST_BLOB_BYTES).await.map_err(backend)
+        self.api()
+            .download(&blob, MOST_BLOB_BYTES)
+            .await
+            .map_err(backend)
     }
 }

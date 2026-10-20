@@ -13,8 +13,8 @@
 use mailrs_domain::{AccountId, Category, SmartMailbox};
 
 use super::Reveal;
-use crate::ui::{Mailbox, Standard};
 use crate::ui::list_feed::{ListFeed, Ticket};
+use crate::ui::{Mailbox, Standard};
 
 /// A thread to select once its row is on screen, and what to do with it.
 pub(super) type Revealed = (AccountId, String, Reveal);
@@ -148,7 +148,11 @@ impl OnScreen {
     }
 
     /// A label was deleted here. Its mailbox gives way to the inbox.
-    pub(super) fn label_deleted(&mut self, account_id: AccountId, label_id: &str) -> Option<Redraw> {
+    pub(super) fn label_deleted(
+        &mut self,
+        account_id: AccountId,
+        label_id: &str,
+    ) -> Option<Redraw> {
         let showing = matches!(
             &self.mailbox,
             Mailbox::Label { account_id: a, label_id: l, .. } if *a == account_id && l == label_id
@@ -270,7 +274,10 @@ mod tests {
             }
         );
         assert!(redraw.leave, "the rows selected before are gone");
-        assert!(redraw.follow, "the Outbox actions and folder buttons follow");
+        assert!(
+            redraw.follow,
+            "the Outbox actions and folder buttons follow"
+        );
         assert_eq!(redraw.sidebar, Some(Sidebar::Clear));
         assert_eq!(redraw.title, Some(("Search".into(), "invoice".into())));
     }

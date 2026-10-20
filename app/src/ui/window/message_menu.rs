@@ -398,9 +398,9 @@ impl MainWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::Standard;
     use mailrs_domain::{Address, MessageMeta};
     use mailrs_gmail::labels as gmail;
-    use crate::ui::Standard;
     use std::collections::HashMap;
 
     const ACCOUNT: mailrs_domain::AccountId = 1;
@@ -555,7 +555,10 @@ mod tests {
 
     #[test]
     fn a_folder_account_moves_a_message_instead_of_labelling_it() {
-        let folders = Offers { labels: false, ..Offers::EVERYTHING };
+        let folders = Offers {
+            labels: false,
+            ..Offers::EVERYTHING
+        };
         let items: Vec<Item> = groups(&message(), &inbox(), folders).concat();
         assert!(items.contains(&Item::MoveToFolder));
         assert!(!items.contains(&Item::Label));
@@ -565,7 +568,11 @@ mod tests {
 
     #[test]
     fn a_tag_account_offers_tags_beside_move_to_folder() {
-        let tags = Offers { labels: false, tags: true, ..Offers::EVERYTHING };
+        let tags = Offers {
+            labels: false,
+            tags: true,
+            ..Offers::EVERYTHING
+        };
         let items: Vec<Item> = groups(&message(), &inbox(), tags).concat();
         assert!(items.contains(&Item::MoveToFolder) && items.contains(&Item::Tags));
         let gmail: Vec<Item> = groups(&message(), &inbox(), Offers::EVERYTHING).concat();

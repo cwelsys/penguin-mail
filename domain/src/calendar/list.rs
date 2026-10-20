@@ -20,7 +20,11 @@ pub const LOCAL_ID_PREFIX: &str = "new:";
 pub enum ListEdit {
     /// A new calendar the account owns, in `color` (`#rrggbb`), whose
     /// events default to `zone`. An empty zone leaves it to the provider.
-    Create { name: String, color: String, zone: String },
+    Create {
+        name: String,
+        color: String,
+        zone: String,
+    },
     /// A new name for a calendar the account owns.
     Rename { name: String },
     /// Deletes a calendar the account owns, with every event on it.
@@ -44,7 +48,10 @@ pub enum ListEdit {
 impl ListEdit {
     /// Whether this edit makes a calendar that was not on the list.
     pub fn adds(&self) -> bool {
-        matches!(self, ListEdit::Create { .. } | ListEdit::Subscribe { .. } | ListEdit::Add)
+        matches!(
+            self,
+            ListEdit::Create { .. } | ListEdit::Subscribe { .. } | ListEdit::Add
+        )
     }
 }
 
@@ -66,7 +73,11 @@ pub struct Allows {
 /// but not owned, so they take neither, and are unsubscribed from instead.
 pub fn allows(calendar: &Calendar) -> Allows {
     let owned = calendar.access == Access::Owner;
-    Allows { rename: owned, delete: owned && !calendar.primary, unsubscribe: !owned && !calendar.primary }
+    Allows {
+        rename: owned,
+        delete: owned && !calendar.primary,
+        unsubscribe: !owned && !calendar.primary,
+    }
 }
 
 impl ListEdit {
@@ -105,7 +116,10 @@ pub fn subscription_address(typed: &str) -> Option<String> {
 /// the host the feed comes from.
 pub fn subscription_name(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    rest.split(['/', '?', '#']).next().unwrap_or(rest).to_string()
+    rest.split(['/', '?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .to_string()
 }
 
 #[cfg(test)]
@@ -113,30 +127,71 @@ mod tests {
     use super::*;
 
     fn calendar(access: Access, primary: bool) -> Calendar {
-        Calendar { id: "c".into(), name: "C".into(), access, primary, ..Calendar::default() }
+        Calendar {
+            id: "c".into(),
+            name: "C".into(),
+            access,
+            primary,
+            ..Calendar::default()
+        }
     }
 
     #[test]
     fn an_owned_calendar_can_be_renamed_and_deleted() {
-        assert_eq!(allows(&calendar(Access::Owner, false)), Allows { rename: true, delete: true, unsubscribe: false });
+        assert_eq!(
+            allows(&calendar(Access::Owner, false)),
+            Allows {
+                rename: true,
+                delete: true,
+                unsubscribe: false
+            }
+        );
     }
 
     #[test]
     fn the_primary_calendar_can_be_renamed_but_not_deleted() {
-        assert_eq!(allows(&calendar(Access::Owner, true)), Allows { rename: true, delete: false, unsubscribe: false });
+        assert_eq!(
+            allows(&calendar(Access::Owner, true)),
+            Allows {
+                rename: true,
+                delete: false,
+                unsubscribe: false
+            }
+        );
     }
 
     #[test]
     fn a_subscribed_calendar_takes_neither() {
         // Google lists a calendar subscribed by address, and a holiday
         // calendar, as `reader`.
-        assert_eq!(allows(&calendar(Access::Reader, false)), Allows { rename: false, delete: false, unsubscribe: true });
+        assert_eq!(
+            allows(&calendar(Access::Reader, false)),
+            Allows {
+                rename: false,
+                delete: false,
+                unsubscribe: true
+            }
+        );
     }
 
     #[test]
     fn a_calendar_shared_for_writing_is_still_someone_elses() {
-        assert_eq!(allows(&calendar(Access::Writer, false)), Allows { rename: false, delete: false, unsubscribe: true });
-        assert_eq!(allows(&calendar(Access::FreeBusy, false)), Allows { rename: false, delete: false, unsubscribe: true });
+        assert_eq!(
+            allows(&calendar(Access::Writer, false)),
+            Allows {
+                rename: false,
+                delete: false,
+                unsubscribe: true
+            }
+        );
+        assert_eq!(
+            allows(&calendar(Access::FreeBusy, false)),
+            Allows {
+                rename: false,
+                delete: false,
+                unsubscribe: true
+            }
+        );
     }
 
     #[test]
@@ -144,7 +199,10 @@ mod tests {
         for access in [Access::Reader, Access::Writer, Access::FreeBusy] {
             assert!(allows(&calendar(access, false)).unsubscribe, "{access:?}");
         }
-        assert!(!allows(&calendar(Access::Owner, false)).unsubscribe, "an owned calendar is deleted instead");
+        assert!(
+            !allows(&calendar(Access::Owner, false)).unsubscribe,
+            "an owned calendar is deleted instead"
+        );
         assert!(!allows(&calendar(Access::Owner, true)).unsubscribe);
     }
 
@@ -154,21 +212,39 @@ mod tests {
             subscription_address("  webcal://example.com/team.ics "),
             Some("https://example.com/team.ics".into())
         );
-        assert_eq!(subscription_address("WEBCAL://example.com/a.ics"), Some("https://example.com/a.ics".into()));
-        assert_eq!(subscription_address("http://example.com/a.ics"), Some("http://example.com/a.ics".into()));
-        assert_eq!(subscription_address("https://example.com/a.ics"), Some("https://example.com/a.ics".into()));
+        assert_eq!(
+            subscription_address("WEBCAL://example.com/a.ics"),
+            Some("https://example.com/a.ics".into())
+        );
+        assert_eq!(
+            subscription_address("http://example.com/a.ics"),
+            Some("http://example.com/a.ics".into())
+        );
+        assert_eq!(
+            subscription_address("https://example.com/a.ics"),
+            Some("https://example.com/a.ics".into())
+        );
     }
 
     #[test]
     fn anything_but_a_web_address_with_a_host_is_refused() {
-        for typed in ["", "example.com/a.ics", "ftp://example.com/a.ics", "https:///a.ics", "https://exa mple.com"] {
+        for typed in [
+            "",
+            "example.com/a.ics",
+            "ftp://example.com/a.ics",
+            "https:///a.ics",
+            "https://exa mple.com",
+        ] {
             assert_eq!(subscription_address(typed), None, "{typed}");
         }
     }
 
     #[test]
     fn a_subscription_is_named_after_its_host_until_the_provider_reads_it() {
-        assert_eq!(subscription_name("https://example.com/team.ics"), "example.com");
+        assert_eq!(
+            subscription_name("https://example.com/team.ics"),
+            "example.com"
+        );
     }
 
     #[test]
@@ -180,7 +256,12 @@ mod tests {
     #[test]
     fn an_edit_that_makes_a_calendar_says_so() {
         assert!(ListEdit::Add.adds());
-        assert!(ListEdit::Subscribe { url: "https://a".into() }.adds());
+        assert!(
+            ListEdit::Subscribe {
+                url: "https://a".into()
+            }
+            .adds()
+        );
         assert!(!ListEdit::Delete.adds());
     }
 }

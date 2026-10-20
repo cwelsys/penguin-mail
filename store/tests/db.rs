@@ -196,7 +196,10 @@ async fn a_checkpoint_answers_false_while_a_reader_holds_an_older_snapshot() {
     db.write(|c| accounts::insert_account(c, "b@example.com", 0))
         .await
         .unwrap();
-    assert!(!db.checkpoint().await.unwrap(), "the second account is only in the log");
+    assert!(
+        !db.checkpoint().await.unwrap(),
+        "the second account is only in the log"
+    );
     reader.execute_batch("COMMIT").unwrap();
     assert!(db.checkpoint().await.unwrap());
 }
@@ -235,7 +238,13 @@ async fn the_idle_writer_counts_new_mail_into_the_kept_correspondents() {
     .unwrap();
     for _ in 0..200 {
         let counted: i64 = db
-            .read(|c| Ok(c.query_row("SELECT counted_row FROM contact_marks WHERE stale = 0", [], |r| r.get(0))?))
+            .read(|c| {
+                Ok(c.query_row(
+                    "SELECT counted_row FROM contact_marks WHERE stale = 0",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
             .await
             .unwrap_or(0);
         if counted > 0 {

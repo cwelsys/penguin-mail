@@ -14,7 +14,9 @@
 //! nothing from the account's Gmail budget.
 
 use mailrs_domain::EpochMillis;
-use mailrs_domain::calendar::{self, Access, EventPage, Guest as CalendarGuest, Notify, Reminder, ReminderMethod, Status};
+use mailrs_domain::calendar::{
+    self, Access, EventPage, Guest as CalendarGuest, Notify, Reminder, ReminderMethod, Status,
+};
 use mailrs_domain::invitation::Answer;
 use serde_json::{Value, json};
 
@@ -52,17 +54,35 @@ const MOST_CALENDAR_PAGES: u32 = 10;
 /// outright, and the page and sync tokens when Google sent them.
 fn event_page(calendar: &str, answer: &Value) -> EventPage {
     let mut out = EventPage {
-        next_page: answer.get("nextPageToken").and_then(Value::as_str).map(str::to_string),
-        next_sync: answer.get("nextSyncToken").and_then(Value::as_str).map(str::to_string),
+        next_page: answer
+            .get("nextPageToken")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        next_sync: answer
+            .get("nextSyncToken")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         ..EventPage::default()
     };
     // Google leaves `timeZone` off an event that keeps the calendar's
     // zone, and names that zone once, at the top of the listing.
-    let zone = answer.get("timeZone").and_then(Value::as_str).unwrap_or("UTC");
-    for item in answer.get("items").and_then(Value::as_array).into_iter().flatten() {
+    let zone = answer
+        .get("timeZone")
+        .and_then(Value::as_str)
+        .unwrap_or("UTC");
+    for item in answer
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let cancelled = item.get("status").and_then(Value::as_str) == Some("cancelled");
         let occurrence = item.get("recurringEventId").is_some();
-        match (cancelled, occurrence, item.get("id").and_then(Value::as_str)) {
+        match (
+            cancelled,
+            occurrence,
+            item.get("id").and_then(Value::as_str),
+        ) {
             (true, false, Some(id)) => out.removed.push(id.to_string()),
             _ => out.events.push(google_event(calendar, item, None, zone)),
         }
@@ -90,20 +110,33 @@ impl GmailClient {
                     // Google leaves a hidden calendar off the list unless
                     // asked, and the copy would then drop it and its events
                     // rather than keep it under Hidden Calendars.
-                    let mut query = vec![("maxResults", "250".to_string()), ("showHidden", "true".to_string())];
+                    let mut query = vec![
+                        ("maxResults", "250".to_string()),
+                        ("showHidden", "true".to_string()),
+                    ];
                     if let Some(token) = &page {
                         query.push(("pageToken", token.clone()));
                     }
                     self.http().get(url).query(&query)
                 })
                 .await?;
-            list.extend(answer.get("items").and_then(Value::as_array).into_iter().flatten().map(google_calendar));
+            list.extend(
+                answer
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(google_calendar),
+            );
             match answer.get("nextPageToken").and_then(Value::as_str) {
                 Some(next) => page = Some(next.to_string()),
                 None => return Ok(list),
             }
         }
-        tracing::warn!(pages = MOST_CALENDAR_PAGES, "stopped reading the calendar list early");
+        tracing::warn!(
+            pages = MOST_CALENDAR_PAGES,
+            "stopped reading the calendar list early"
+        );
         Ok(list)
     }
 
@@ -117,7 +150,11 @@ impl GmailClient {
         page: Option<&str>,
         time_min: &str,
     ) -> Result<EventPage, GmailError> {
-        let url = format!("{}/calendars/{}/events", self.calendar_base_url, encode(calendar));
+        let url = format!(
+            "{}/calendars/{}/events",
+            self.calendar_base_url,
+            encode(calendar)
+        );
         let answer: Value = self
             .call_at(&url, |url| {
                 let mut query = vec![("showDeleted", "true"), ("maxResults", "250")];
@@ -148,7 +185,11 @@ impl GmailClient {
         time_max: &str,
         page: Option<&str>,
     ) -> Result<EventPage, GmailError> {
-        let url = format!("{}/calendars/{}/events", self.calendar_base_url, encode(calendar));
+        let url = format!(
+            "{}/calendars/{}/events",
+            self.calendar_base_url,
+            encode(calendar)
+        );
         let answer: Value = self
             .call_at(&url, |url| {
                 let mut query = vec![
@@ -177,7 +218,11 @@ impl GmailClient {
         create: bool,
         notify: Notify,
     ) -> Result<calendar::Event, GmailError> {
-        let base = format!("{}/calendars/{}/events", self.calendar_base_url, encode(&event.calendar));
+        let base = format!(
+            "{}/calendars/{}/events",
+            self.calendar_base_url,
+            encode(&event.calendar)
+        );
         let mut body = event_json(event, create);
         if !create && body.get("attendees").is_some() {
             // A PATCH replaces the guest list whole, and the model holds
@@ -185,11 +230,17 @@ impl GmailClient {
             // keeps an optional guest optional after a new title.
             let url = format!("{base}/{}", encode(&event.id));
             let held: Result<Value, GmailError> = self
-                .call_at(&url, |url| self.http().get(url).query(&[("fields", "attendees,visibility")]))
+                .call_at(&url, |url| {
+                    self.http()
+                        .get(url)
+                        .query(&[("fields", "attendees,visibility")])
+                })
                 .await;
             match held {
                 Ok(held) => keep_held_fields(&mut body, &held),
-                Err(err) => tracing::warn!(%err, "could not read the event's guests before changing it"),
+                Err(err) => {
+                    tracing::warn!(%err, "could not read the event's guests before changing it")
+                }
             }
         }
         // Google reads conferenceData only when told which version of it
@@ -197,12 +248,16 @@ impl GmailClient {
         // Without supportsAttachments Google ignores a change to the
         // attachments, so every write says it, whether the body carries
         // them or not.
-        let mut query = vec![("sendUpdates", send_updates(notify)), ("supportsAttachments", "true")];
+        let mut query = vec![
+            ("sendUpdates", send_updates(notify)),
+            ("supportsAttachments", "true"),
+        ];
         if event.meet_request.is_some() {
             query.push(("conferenceDataVersion", "1"));
         }
         let answer: Value = if create {
-            self.call_at(&base, |url| self.http().post(url).query(&query).json(&body)).await?
+            self.call_at(&base, |url| self.http().post(url).query(&query).json(&body))
+                .await?
         } else {
             // An occurrence goes out as a PATCH on its own id, which
             // changes that occurrence alone. A 404 there means the event
@@ -232,8 +287,15 @@ impl GmailClient {
     /// and no guest is invited: the import is a private copy, and mail on
     /// the person's behalf about somebody else's event would surprise
     /// everyone on it.
-    pub async fn import_event(&self, event: &calendar::Event) -> Result<calendar::Event, GmailError> {
-        let url = format!("{}/calendars/{}/events/import", self.calendar_base_url, encode(&event.calendar));
+    pub async fn import_event(
+        &self,
+        event: &calendar::Event,
+    ) -> Result<calendar::Event, GmailError> {
+        let url = format!(
+            "{}/calendars/{}/events/import",
+            self.calendar_base_url,
+            encode(&event.calendar)
+        );
         let mut body = event_json(event, true);
         if let Some(fields) = body.as_object_mut() {
             for key in ["id", "attendees", "conferenceData"] {
@@ -244,7 +306,9 @@ impl GmailClient {
                 fields.insert("sequence".to_string(), json!(event.sequence));
             }
         }
-        let answer: Value = self.call_at(&url, |url| self.http().post(url).json(&body)).await?;
+        let answer: Value = self
+            .call_at(&url, |url| self.http().post(url).json(&body))
+            .await?;
         Ok(google_event(&event.calendar, &answer, None, &event.zone))
     }
 
@@ -257,9 +321,17 @@ impl GmailClient {
         etag: Option<&str>,
         notify: Notify,
     ) -> Result<(), GmailError> {
-        let url = format!("{}/calendars/{}/events/{}", self.calendar_base_url, encode(calendar), encode(id));
+        let url = format!(
+            "{}/calendars/{}/events/{}",
+            self.calendar_base_url,
+            encode(calendar),
+            encode(id)
+        );
         self.call_at_empty(&url, |url| {
-            let mut request = self.http().delete(url).query(&[("sendUpdates", send_updates(notify))]);
+            let mut request = self
+                .http()
+                .delete(url)
+                .query(&[("sendUpdates", send_updates(notify))]);
             if let Some(etag) = etag {
                 request = request.header("If-Match", etag);
             }
@@ -285,8 +357,13 @@ impl GmailClient {
             encode(&event.calendar),
             encode(&event.id)
         );
-        let query = [("destination", destination), ("sendUpdates", send_updates(notify))];
-        let answer: Value = self.call_at(&url, |url| self.http().post(url).query(&query)).await?;
+        let query = [
+            ("destination", destination),
+            ("sendUpdates", send_updates(notify)),
+        ];
+        let answer: Value = self
+            .call_at(&url, |url| self.http().post(url).query(&query))
+            .await?;
         Ok(google_event(destination, &answer, None, &event.zone))
     }
 
@@ -310,7 +387,12 @@ impl GmailClient {
         answer: Answer,
         note: Option<&str>,
     ) -> Result<calendar::Event, GmailError> {
-        let url = format!("{}/calendars/{}/events/{}", self.calendar_base_url, encode(calendar), encode(id));
+        let url = format!(
+            "{}/calendars/{}/events/{}",
+            self.calendar_base_url,
+            encode(calendar),
+            encode(id)
+        );
         let event: Value = self.call_at(&url, |url| self.http().get(url)).await?;
         let guests = answered(&event, me, answer, note);
         let written: Value = self
@@ -380,7 +462,12 @@ pub(crate) fn encode(part: &str) -> String {
 }
 
 pub(crate) fn google_calendar(item: &Value) -> calendar::Calendar {
-    let text = |key: &str| item.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    let text = |key: &str| {
+        item.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     calendar::Calendar {
         id: text("id"),
         name: item
@@ -390,7 +477,11 @@ pub(crate) fn google_calendar(item: &Value) -> calendar::Calendar {
             .unwrap_or_else(|| text("summary")),
         color: text("backgroundColor"),
         access: Access::parse(&text("accessRole")),
-        zone: item.get("timeZone").and_then(Value::as_str).unwrap_or("UTC").to_string(),
+        zone: item
+            .get("timeZone")
+            .and_then(Value::as_str)
+            .unwrap_or("UTC")
+            .to_string(),
         primary: item.get("primary").and_then(Value::as_bool) == Some(true),
         shown: item.get("selected").and_then(Value::as_bool) != Some(false),
         // Google sends `hidden` only when it is true.
@@ -420,8 +511,18 @@ fn reminders(list: Option<&Value>) -> Vec<Reminder> {
 /// for guests Google did not mark with `self`. `calendar_zone` is the zone
 /// of the calendar the event is on, which a timed event without a
 /// `timeZone` of its own keeps.
-pub fn google_event(calendar: &str, item: &Value, me: Option<&str>, calendar_zone: &str) -> calendar::Event {
-    let text = |key: &str| item.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+pub fn google_event(
+    calendar: &str,
+    item: &Value,
+    me: Option<&str>,
+    calendar_zone: &str,
+) -> calendar::Event {
+    let text = |key: &str| {
+        item.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let (start, zone, all_day) = when(item.get("start"), calendar_zone);
     let (end, _, _) = when(item.get("end"), calendar_zone);
     let guests: Vec<CalendarGuest> = item
@@ -434,15 +535,25 @@ pub fn google_event(calendar: &str, item: &Value, me: Option<&str>, calendar_zon
             let me = g.get("self").and_then(Value::as_bool) == Some(true)
                 || me.is_some_and(|me| me.eq_ignore_ascii_case(&email));
             Some(CalendarGuest {
-                name: g.get("displayName").and_then(Value::as_str).map(str::to_string),
-                answer: Answer::from_response_status(g.get("responseStatus").and_then(Value::as_str).unwrap_or("")),
+                name: g
+                    .get("displayName")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                answer: Answer::from_response_status(
+                    g.get("responseStatus")
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                ),
                 organizer: g.get("organizer").and_then(Value::as_bool) == Some(true),
                 me,
                 email,
             })
         })
         .collect();
-    let overrides = item.pointer("/reminders/useDefault").and_then(Value::as_bool) == Some(false);
+    let overrides = item
+        .pointer("/reminders/useDefault")
+        .and_then(Value::as_bool)
+        == Some(false);
     calendar::Event {
         calendar: calendar.to_string(),
         id: text("id"),
@@ -455,14 +566,24 @@ pub fn google_event(calendar: &str, item: &Value, me: Option<&str>, calendar_zon
         title: text("summary"),
         place: text("location"),
         description: text("description"),
-        color: item.get("colorId").and_then(Value::as_str).and_then(calendar::event_color).map(str::to_string),
+        color: item
+            .get("colorId")
+            .and_then(Value::as_str)
+            .and_then(calendar::event_color)
+            .map(str::to_string),
         // `busy` holds transparency alone. Declined and all-day events keep
         // the busy value Google sent, so a queued edit never marks them
         // free on the way back out.
         busy: item.get("transparency").and_then(Value::as_str) != Some("transparent"),
         status: Status::parse(&text("status")),
-        private: matches!(item.get("visibility").and_then(Value::as_str), Some("private" | "confidential")),
-        organizer: item.pointer("/organizer/email").and_then(Value::as_str).map(str::to_string),
+        private: matches!(
+            item.get("visibility").and_then(Value::as_str),
+            Some("private" | "confidential")
+        ),
+        organizer: item
+            .pointer("/organizer/email")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         my_answer: guests.iter().find(|g| g.me).and_then(|g| g.answer),
         guests,
         sequence: item.get("sequence").and_then(Value::as_i64).unwrap_or(0),
@@ -490,8 +611,13 @@ pub fn google_event(calendar: &str, item: &Value, me: Option<&str>, calendar_zon
         unread_rule: false,
         kept_theirs: Vec::new(),
         series_etag: String::new(),
-        series: item.get("recurringEventId").and_then(Value::as_str).map(str::to_string),
-        original_start: item.get("originalStartTime").map(|t| when(Some(t), calendar_zone).0),
+        series: item
+            .get("recurringEventId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        original_start: item
+            .get("originalStartTime")
+            .map(|t| when(Some(t), calendar_zone).0),
         pending: false,
         // A Meet request is something Penguin Mail asks for on a write;
         // Google's answer never needs to say one is still pending here.
@@ -505,7 +631,12 @@ pub fn google_event(calendar: &str, item: &Value, me: Option<&str>, calendar_zon
 
 /// The files linked to Google's event.
 fn attachments_of(item: &Value) -> Vec<calendar::Attachment> {
-    let text = |file: &Value, key: &str| file.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    let text = |file: &Value, key: &str| {
+        file.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     item.get("attachments")
         .and_then(Value::as_array)
         .into_iter()
@@ -539,7 +670,12 @@ fn attachments_json(list: &[calendar::Attachment]) -> Value {
 /// properties object that type carries. An unknown type, such as
 /// `fromGmail`, reads as an ordinary event.
 fn kind_of(item: &Value) -> calendar::Kind {
-    let text = |pointer: &str| item.pointer(pointer).and_then(Value::as_str).unwrap_or_default().to_string();
+    let text = |pointer: &str| {
+        item.pointer(pointer)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let decline = |properties: &str| calendar::Decline {
         meetings: calendar::Declines::from_google(&text(&format!("/{properties}/autoDeclineMode"))),
         message: text(&format!("/{properties}/declineMessage")),
@@ -558,7 +694,9 @@ fn kind_of(item: &Value) -> calendar::Kind {
             };
             let place = match text("/workingLocationProperties/type").as_str() {
                 "officeLocation" => calendar::Workplace::Office(office()),
-                "customLocation" => calendar::Workplace::Elsewhere(text("/workingLocationProperties/customLocation/label")),
+                "customLocation" => calendar::Workplace::Elsewhere(text(
+                    "/workingLocationProperties/customLocation/label",
+                )),
                 _ => calendar::Workplace::Home,
             };
             calendar::Kind::WorkingLocation(place)
@@ -584,7 +722,11 @@ fn when(time: Option<&Value>, calendar_zone: &str) -> (EpochMillis, String, bool
     let Some(time) = time else {
         return (0, "UTC".into(), false);
     };
-    let fallback = if calendar_zone.is_empty() { "UTC" } else { calendar_zone };
+    let fallback = if calendar_zone.is_empty() {
+        "UTC"
+    } else {
+        calendar_zone
+    };
     let zone = time
         .get("timeZone")
         .and_then(Value::as_str)
@@ -592,7 +734,9 @@ fn when(time: Option<&Value>, calendar_zone: &str) -> (EpochMillis, String, bool
         .unwrap_or(fallback)
         .to_string();
     if let Some(at) = time.get("dateTime").and_then(Value::as_str) {
-        let at = chrono::DateTime::parse_from_rfc3339(at).map(|a| a.timestamp_millis()).unwrap_or(0);
+        let at = chrono::DateTime::parse_from_rfc3339(at)
+            .map(|a| a.timestamp_millis())
+            .unwrap_or(0);
         return (at, zone, false);
     }
     let day = time
@@ -649,11 +793,18 @@ const HELD_GUEST_FIELDS: [&str; 4] = ["optional", "additionalGuests", "comment",
 /// knows only private or not, so "public" stays public and "confidential"
 /// stays confidential unless the person changed the private switch.
 fn keep_held_fields(body: &mut Value, held: &Value) {
-    let held_guests = held["attendees"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let held_guests = held["attendees"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     if let Some(guests) = body["attendees"].as_array_mut() {
         for guest in guests {
             let email = guest["email"].as_str().unwrap_or_default().to_string();
-            let Some(was) = held_guests.iter().find(|g| g["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(&email))) else {
+            let Some(was) = held_guests.iter().find(|g| {
+                g["email"]
+                    .as_str()
+                    .is_some_and(|e| e.eq_ignore_ascii_case(&email))
+            }) else {
                 continue;
             };
             for field in HELD_GUEST_FIELDS {
@@ -663,7 +814,8 @@ fn keep_held_fields(body: &mut Value, held: &Value) {
             }
         }
     }
-    let (Some(asked), Some(was)) = (body["visibility"].as_str(), held["visibility"].as_str()) else {
+    let (Some(asked), Some(was)) = (body["visibility"].as_str(), held["visibility"].as_str())
+    else {
         return;
     };
     let private = |v: &str| matches!(v, "private" | "confidential");
@@ -680,7 +832,8 @@ fn event_json(event: &calendar::Event, create: bool) -> Value {
     }
     let time = |at: EpochMillis| {
         if event.all_day {
-            let day = chrono::DateTime::from_timestamp_millis(at).map(|d| d.format("%Y-%m-%d").to_string());
+            let day = chrono::DateTime::from_timestamp_millis(at)
+                .map(|d| d.format("%Y-%m-%d").to_string());
             json!({ "date": day })
         } else {
             let at = chrono::DateTime::from_timestamp_millis(at).map(|d| d.to_rfc3339());
@@ -724,16 +877,22 @@ fn event_json(event: &calendar::Event, create: bool) -> Value {
         return body;
     }
     body["location"] = json!(event.place);
-    body["attendees"] = json!(event.guests.iter().map(|g| {
-            let mut guest = json!({ "email": g.email });
-            if let Some(status) = g.answer.map(Answer::response_status) {
-                guest["responseStatus"] = json!(status);
-            }
-            if let Some(name) = &g.name {
-                guest["displayName"] = json!(name);
-            }
-            guest
-        }).collect::<Vec<_>>());
+    body["attendees"] = json!(
+        event
+            .guests
+            .iter()
+            .map(|g| {
+                let mut guest = json!({ "email": g.email });
+                if let Some(status) = g.answer.map(Answer::response_status) {
+                    guest["responseStatus"] = json!(status);
+                }
+                if let Some(name) = &g.name {
+                    guest["displayName"] = json!(name);
+                }
+                guest
+            })
+            .collect::<Vec<_>>()
+    );
     // Google refuses a recurrence rule on a changed occurrence. A patch
     // that leaves recurrence out keeps the rule Google has, so a series
     // saved with no rules must say so with an empty list. A new event

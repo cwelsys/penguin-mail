@@ -46,7 +46,11 @@ impl Heading {
                 let (place_min, place_natural, _, _) =
                     place.measure(gtk::Orientation::Horizontal, -1);
                 self.full.set(natural);
-                (min - place_min - SPACING, natural - place_natural - SPACING, natural)
+                (
+                    min - place_min - SPACING,
+                    natural - place_natural - SPACING,
+                    natural,
+                )
             }
             _ => (min, natural, self.full.get().max(natural)),
         }

@@ -103,7 +103,9 @@ fn describe(message: &Message<'_>) -> Described {
             smime_type: attribute("smime-type"),
             filename: part.attachment_name().map(str::to_string),
             content_id: part.content_id().map(content_id),
-            attachment: part.content_disposition().is_some_and(|d| d.is_attachment()),
+            attachment: part
+                .content_disposition()
+                .is_some_and(|d| d.is_attachment()),
             ..Part::default()
         },
         boundary: attribute("boundary"),
@@ -166,7 +168,11 @@ impl Skim {
                 ..Part::default()
             };
         };
-        let Described { mut skimmed, boundary, encoding } = describe(&message);
+        let Described {
+            mut skimmed,
+            boundary,
+            encoding,
+        } = describe(&message);
         let encoding = encoding.as_deref();
         if skimmed.mime_type.starts_with("multipart/") {
             if let (Some(boundary), true) = (boundary, depth < MAX_DEPTH) {
@@ -175,7 +181,13 @@ impl Skim {
         } else if skimmed.mime_type == "message/rfc822" {
             if self.forwarded {
                 skimmed.size = decoded_size(encoding, body) as i64;
-                self.note(&path, body_at, body, Transfer::of(encoding), skimmed.size as u64);
+                self.note(
+                    &path,
+                    body_at,
+                    body,
+                    Transfer::of(encoding),
+                    skimmed.size as u64,
+                );
                 if depth < MAX_DEPTH {
                     self.forwarded_message(&mut skimmed, body, body_at, encoding, &path, depth);
                 }
@@ -190,7 +202,13 @@ impl Skim {
             } else if self.forwarded {
                 skimmed.size = decoded_size(encoding, body) as i64;
             }
-            self.note(&path, body_at, body, Transfer::of(encoding), skimmed.size as u64);
+            self.note(
+                &path,
+                body_at,
+                body,
+                Transfer::of(encoding),
+                skimmed.size as u64,
+            );
         }
         skimmed.path = path;
         skimmed
@@ -251,7 +269,10 @@ impl Skim {
         };
         skimmed.subject = headers.subject().map(str::to_string);
         skimmed.children = match mime_type(headers.root_part()).starts_with("multipart/") {
-            true => self.part(inner, inner_at, path.to_string(), depth + 1).children,
+            true => {
+                self.part(inner, inner_at, path.to_string(), depth + 1)
+                    .children
+            }
             false => vec![self.part(inner, inner_at, format!("{path}.1"), depth + 1)],
         };
     }
@@ -277,9 +298,8 @@ impl Skim {
 fn decoded_size(encoding: Option<&str>, bytes: &[u8]) -> usize {
     match Transfer::of(encoding) {
         Transfer::Plain => bytes.len(),
-        Transfer::Base64 => base64_size(bytes).unwrap_or_else(|| {
-            undo_transfer_encoding(encoding, bytes).map_or(0, |d| d.len())
-        }),
+        Transfer::Base64 => base64_size(bytes)
+            .unwrap_or_else(|| undo_transfer_encoding(encoding, bytes).map_or(0, |d| d.len())),
         Transfer::QuotedPrintable => undo_transfer_encoding(encoding, bytes).map_or(0, |d| d.len()),
     }
 }
@@ -311,7 +331,9 @@ fn dismantle(message: Message<'_>) {
     let mut pending = vec![message];
     while let Some(mut message) = pending.pop() {
         for part in &mut message.parts {
-            if let PartType::Message(inner) = std::mem::replace(&mut part.body, PartType::Text("".into())) {
+            if let PartType::Message(inner) =
+                std::mem::replace(&mut part.body, PartType::Text("".into()))
+            {
                 pending.push(inner);
             }
         }
@@ -381,7 +403,9 @@ fn convert(message: &Message, raw: &[u8], id: u32, path: String, depth: usize) -
         filename: part.attachment_name().map(str::to_string),
         content_id: part.content_id().map(content_id),
         subject: None,
-        attachment: part.content_disposition().is_some_and(|d| d.is_attachment()),
+        attachment: part
+            .content_disposition()
+            .is_some_and(|d| d.is_attachment()),
         size: data.as_ref().map_or(0, |d| d.len() as i64),
         data,
         children,
@@ -417,7 +441,10 @@ fn nested_message(
     // the outer message whatever its encoding says.
     let data = transfer_decoded(raw, part);
     let raw = match part.content_transfer_encoding() {
-        Some(cte) if cte.eq_ignore_ascii_case("base64") || cte.eq_ignore_ascii_case("quoted-printable") => {
+        Some(cte)
+            if cte.eq_ignore_ascii_case("base64")
+                || cte.eq_ignore_ascii_case("quoted-printable") =>
+        {
             nested.raw_message()
         }
         _ => raw,
@@ -448,7 +475,11 @@ fn nested_message(
 
 /// A header's value with its folds undone.
 fn unfold(value: &str) -> String {
-    value.replace("\r\n", "").replace('\n', "").trim().to_string()
+    value
+        .replace("\r\n", "")
+        .replace('\n', "")
+        .trim()
+        .to_string()
 }
 
 /// The part's media type in lower case, `text/plain` when it names none.
@@ -485,9 +516,9 @@ fn transfer_decoded(raw: &[u8], part: &MessagePart) -> Option<Vec<u8>> {
 pub fn undo_transfer_encoding(encoding: Option<&str>, bytes: &[u8]) -> Option<Vec<u8>> {
     match encoding {
         Some(cte) if cte.eq_ignore_ascii_case("base64") => base64_decoded(bytes),
-        Some(cte) if cte.eq_ignore_ascii_case("quoted-printable") => Some(
-            quoted_printable_decode(bytes).unwrap_or_else(|| quoted_printable_lenient(bytes)),
-        ),
+        Some(cte) if cte.eq_ignore_ascii_case("quoted-printable") => {
+            Some(quoted_printable_decode(bytes).unwrap_or_else(|| quoted_printable_lenient(bytes)))
+        }
         _ => Some(bytes.to_vec()),
     }
 }
@@ -498,7 +529,11 @@ pub fn undo_transfer_encoding(encoding: Option<&str>, bytes: &[u8]) -> Option<Ve
 /// width that is not a multiple of four into wrong bytes without an
 /// error.
 fn base64_decoded(bytes: &[u8]) -> Option<Vec<u8>> {
-    let clean: Vec<u8> = bytes.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect();
+    let clean: Vec<u8> = bytes
+        .iter()
+        .copied()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
     match BASE64.decode(clean) {
         Ok(decoded) => (!decoded.is_empty()).then_some(decoded),
         Err(_) => base64_by_line(bytes),
@@ -515,7 +550,11 @@ fn base64_decoded(bytes: &[u8]) -> Option<Vec<u8>> {
 fn base64_by_line(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut decoded = Vec::with_capacity(bytes.len());
     for line in bytes.split(|&b| b == b'\n') {
-        let clean: Vec<u8> = line.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect();
+        let clean: Vec<u8> = line
+            .iter()
+            .copied()
+            .filter(|b| !b.is_ascii_whitespace())
+            .collect();
         if clean.is_empty() {
             continue;
         }
@@ -678,7 +717,10 @@ fn base64_streamed<R: Read + Seek>(source: &mut R, span: &Span) -> io::Result<Op
             letters.drain(..whole);
         }
     }
-    Ok(BASE64.decode_vec(&letters, &mut decoded).ok().map(|()| decoded))
+    Ok(BASE64
+        .decode_vec(&letters, &mut decoded)
+        .ok()
+        .map(|()| decoded))
 }
 
 #[cfg(test)]
@@ -706,8 +748,16 @@ mod tests {
             let (parts, _) = outline(raw).expect("an outline");
             for file in body(&parts).attachments {
                 let part = parts.find(&file.part_id).expect("listed");
-                let calendar = is_calendar(&part.mime_type, part.filename.as_deref().unwrap_or_default());
-                assert!(part.data.is_none() || calendar, "{} in {}", file.part_id, shown(raw));
+                let calendar = is_calendar(
+                    &part.mime_type,
+                    part.filename.as_deref().unwrap_or_default(),
+                );
+                assert!(
+                    part.data.is_none() || calendar,
+                    "{} in {}",
+                    file.part_id,
+                    shown(raw)
+                );
             }
         }
     }
@@ -723,8 +773,20 @@ mod tests {
                 };
                 spanned += 1;
                 let decoded = decode_span(&mut Cursor::new(raw), span).unwrap();
-                assert_eq!(decoded, part(raw, &file.part_id), "{} in {}", file.part_id, shown(raw));
-                assert_eq!(span.size, file.size as u64, "{} in {}", file.part_id, shown(raw));
+                assert_eq!(
+                    decoded,
+                    part(raw, &file.part_id),
+                    "{} in {}",
+                    file.part_id,
+                    shown(raw)
+                );
+                assert_eq!(
+                    span.size,
+                    file.size as u64,
+                    "{} in {}",
+                    file.part_id,
+                    shown(raw)
+                );
             }
         }
         assert!(spanned >= 12, "only {spanned} files had a span");
@@ -732,10 +794,19 @@ mod tests {
 
     #[test]
     fn a_file_inside_an_encoded_forwarded_message_has_no_span() {
-        let raw = SHAPES.iter().find(|raw| raw.starts_with(b"Subject: fwd b64")).expect("the shape");
+        let raw = SHAPES
+            .iter()
+            .find(|raw| raw.starts_with(b"Subject: fwd b64"))
+            .expect("the shape");
         let (parts, spans) = outline(raw).expect("an outline");
-        assert_eq!(parts.find("2.1").map(|p| p.mime_type.as_str()), Some("application/zip"));
-        assert!(spans.get("2").is_some(), "the forwarded message itself lies in the raw bytes");
+        assert_eq!(
+            parts.find("2.1").map(|p| p.mime_type.as_str()),
+            Some("application/zip")
+        );
+        assert!(
+            spans.get("2").is_some(),
+            "the forwarded message itself lies in the raw bytes"
+        );
         assert!(spans.get("2.1").is_none());
     }
 
@@ -757,6 +828,9 @@ mod tests {
         let (_, spans) = outline(raw.as_bytes()).expect("an outline");
         let span = spans.get("2").expect("a span");
         assert_eq!(span.size, data.len() as u64);
-        assert_eq!(decode_span(&mut Cursor::new(raw.as_bytes()), span).unwrap(), Some(data));
+        assert_eq!(
+            decode_span(&mut Cursor::new(raw.as_bytes()), span).unwrap(),
+            Some(data)
+        );
     }
 }

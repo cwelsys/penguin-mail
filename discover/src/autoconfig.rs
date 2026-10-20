@@ -225,7 +225,10 @@ mod tests {
         assert_eq!(config.smtp, [server("posteo.de", 465, Security::Tls)]);
         assert_eq!(config.pop3, [server("posteo.de", 995, Security::Tls)]);
         let candidates = config.candidates(Source::Autoconfig, "posteo.de");
-        assert_eq!(candidates[0].pop3, Some(server("posteo.de", 995, Security::Tls)));
+        assert_eq!(
+            candidates[0].pop3,
+            Some(server("posteo.de", 995, Security::Tls))
+        );
     }
 
     #[test]

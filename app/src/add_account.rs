@@ -243,7 +243,11 @@ pub enum Removal {
     AfterDays,
 }
 
-pub const REMOVALS: [Removal; 3] = [Removal::Leave, Removal::AfterDownloading, Removal::AfterDays];
+pub const REMOVALS: [Removal; 3] = [
+    Removal::Leave,
+    Removal::AfterDownloading,
+    Removal::AfterDays,
+];
 
 /// The day count Remove After {n} Days starts at.
 pub const DEFAULT_DAYS: u32 = 14;
@@ -465,7 +469,10 @@ pub fn pop3_line(proposal: &Proposal) -> Option<String> {
 pub fn incoming_title(proposal: &Proposal) -> String {
     match proposal.protocol {
         Protocol::Imap => gettext("Incoming"),
-        Protocol::Pop3 => fill(&gettext("Incoming over {protocol}"), &[("protocol", "POP3")]),
+        Protocol::Pop3 => fill(
+            &gettext("Incoming over {protocol}"),
+            &[("protocol", "POP3")],
+        ),
     }
 }
 
@@ -598,9 +605,9 @@ pub fn servers_summary(proposal: &Proposal) -> String {
 /// from, and what that sent anywhere.
 pub fn found_line(proposal: &Proposal) -> String {
     match proposal.source {
-        Some(Source::Table) => gettext(
-            "Penguin Mail's own list knows this provider. Nothing has left this computer.",
-        ),
+        Some(Source::Table) => {
+            gettext("Penguin Mail's own list knows this provider. Nothing has left this computer.")
+        }
         Some(Source::Mx) => gettext("Found by its mail servers. Nothing else was asked."),
         Some(Source::Autoconfig | Source::MxAutoconfig | Source::WellKnown) => {
             gettext("Found in the domain's own settings.")
@@ -681,7 +688,12 @@ pub struct Attempt {
 /// shown in groups with spaces, and trimming one changes it. The same
 /// holds for `smtp_password`, which goes only when the proposal says
 /// Server Settings holds one.
-pub fn attempt(address: &Address, proposal: &Proposal, password: &str, smtp_password: &str) -> Attempt {
+pub fn attempt(
+    address: &Address,
+    proposal: &Proposal,
+    password: &str,
+    smtp_password: &str,
+) -> Attempt {
     Attempt {
         address: address.full(),
         provider_name: proposal.provider_name.clone(),
@@ -859,11 +871,8 @@ fn failure_given(err: &anyhow::Error, proposal: &Proposal, plug: Plug) -> Failur
                 &gettext("Could not verify the secure connection to {host}."),
                 &[("host", host)],
             );
-            let mut failure = Failure::plain(
-                line.clone(),
-                gettext("Secure connection failed"),
-                line,
-            );
+            let mut failure =
+                Failure::plain(line.clone(), gettext("Secure connection failed"), line);
             if host == "127.0.0.1" {
                 failure.body = gettext(
                     "If you use Proton Mail Bridge, export its TLS certificate and follow the setup guide, then try signing in again.",
@@ -1297,13 +1306,84 @@ pub enum Kept {
 }
 
 /// Whether the added page lists `role` for a new account of `provider`:
-/// the folders its server fills. Gmail has no Archive of its own, and a
-/// POP3 server holds an inbox alone.
+/// the folders its server fills. Gmail has no Archive of its own, a POP3
+/// server holds an inbox alone, and a calendar account has no mail.
 pub fn shows_folder(provider: Provider, role: mailrs_domain::Role) -> bool {
     match provider {
         Provider::Gmail => role != mailrs_domain::Role::Archive,
         Provider::Pop3 => role == mailrs_domain::Role::Inbox,
         Provider::Imap | Provider::Microsoft | Provider::Jmap => true,
+        Provider::CalDav => false,
+    }
+}
+
+/// Whether the calendar page has what a sign-in needs: where the server
+/// is, who signs in, and a password. The password is taken as typed,
+/// since a space may be part of one.
+pub fn calendar_ready(server: &str, user_name: &str, password: &str) -> bool {
+    !server.trim().is_empty() && !user_name.trim().is_empty() && !password.is_empty()
+}
+
+/// Whether the sign-in that ended as `now` is the one `asked` was opened
+/// for. The calendar page opened for Sign In Again takes a password for
+/// one account; a sign-in that ends as another account added that one.
+pub fn signed_in_again(asked: Option<&Account>, now: &Account) -> bool {
+    asked.is_some_and(|asked| asked.id == now.id)
+}
+
+/// What the calendar page says when its sign-in fails, signing `again`
+/// in again or adding an account. What the sign-in already put in words,
+/// an address that is not HTTPS or a name another account holds, stands
+/// as it is.
+pub fn calendar_problem(err: &anyhow::Error, again: Option<&Account>) -> String {
+    use mailrs_sync::sign_in::CalDavSignInError;
+    use mailrs_sync::{BackendError, SyncError};
+
+    let unknown = |reason: &dyn std::fmt::Display| {
+        let said = match again {
+            Some(_) => gettext("Could not sign in: {reason}"),
+            None => gettext("Could not add the calendar: {reason}"),
+        };
+        mailrs_domain::translate::with_reason(&said, &reason, &[])
+    };
+    match err.downcast_ref::<CalDavSignInError>() {
+        // An IMAP or POP3 account that holds the name can take the
+        // server's calendars itself, which is the way on from here.
+        Some(
+            taken @ CalDavSignInError::Taken {
+                holder: Provider::Imap | Provider::Pop3,
+                ..
+            },
+        ) => format!(
+            "{taken} {}",
+            gettext(
+                "To see this server's calendars there, open Preferences, then Accounts, open that account, \
+                 and type this server's address under Calendar, Contacts and Rules Servers."
+            )
+        ),
+        Some(
+            said @ (CalDavSignInError::Taken { .. }
+            | CalDavSignInError::Elsewhere { .. }
+            | CalDavSignInError::OtherUser { .. }
+            | CalDavSignInError::Moves { .. }
+            | CalDavSignInError::NotHttps),
+        ) => said.to_string(),
+        Some(CalDavSignInError::Server(SyncError::Backend(backend))) => match backend {
+            BackendError::NeedsReauth => gettext(
+                "The server did not take that user name and password. Where it uses two-step \
+                 sign-in, it needs an app password.",
+            ),
+            BackendError::Offline(_) => gettext(
+                "Penguin Mail could not reach that server. Check the address and your connection.",
+            ),
+            // A web page at the address, or no CalDAV there, is refused in
+            // the protocol's own words, which are not for the page.
+            BackendError::Unsupported | BackendError::Refused(_) => {
+                gettext("No calendar was found at that address.")
+            }
+            other => unknown(other),
+        },
+        _ => unknown(err),
     }
 }
 
@@ -1371,7 +1451,9 @@ pub fn added_page(
             false => gettext(
                 "Newest mail comes first. Older mail keeps coming in the background, even with the window closed.",
             ),
-            true => gettext("Penguin Mail keeps checking for new mail, even with the window closed."),
+            true => {
+                gettext("Penguin Mail keeps checking for new mail, even with the window closed.")
+            }
         };
         return AddedPage {
             lede: ready_lede(backfill_done),
@@ -1523,7 +1605,10 @@ pub fn jmap_proposal(
         .provider
         .as_ref()
         .map_or_else(|| host_of(&found.session_url), |p| p.name.clone());
-    let token = found.provider.as_ref().is_some_and(|p| p.token_url.is_some());
+    let token = found
+        .provider
+        .as_ref()
+        .is_some_and(|p| p.token_url.is_some());
     JmapProposal {
         address: address.full(),
         provider_name,
@@ -1540,7 +1625,10 @@ pub fn jmap_proposal(
 /// Whether the provider signs JMAP in with a token alone: its table entry
 /// names a token page.
 pub fn token_only(proposal: &JmapProposal) -> bool {
-    proposal.provider.as_ref().is_some_and(|p| p.token_url.is_some())
+    proposal
+        .provider
+        .as_ref()
+        .is_some_and(|p| p.token_url.is_some())
 }
 
 /// The secret field's title.
@@ -1559,26 +1647,43 @@ pub fn jmap_hint(proposal: &JmapProposal, token: bool) -> Option<(String, String
     let provider = post::short_name(&proposal.provider_name);
     let named = [("provider", provider.as_str())];
     let info = proposal.provider.as_ref();
-    let access = info.map(|p| p.token_access.join(", ")).filter(|a| !a.is_empty());
+    let access = info
+        .map(|p| p.token_access.join(", "))
+        .filter(|a| !a.is_empty());
     let mut body = match access {
         Some(access) => fill(
-            &gettext("Make an API token in {provider}'s settings with this access: {access}. Paste it here."),
+            &gettext(
+                "Make an API token in {provider}'s settings with this access: {access}. Paste it here.",
+            ),
             &[("provider", provider.as_str()), ("access", access.as_str())],
         ),
-        None => fill(&gettext("Make an API token in {provider}'s settings and paste it here."), &named),
+        None => fill(
+            &gettext("Make an API token in {provider}'s settings and paste it here."),
+            &named,
+        ),
     };
     if let Some(plan) = info.and_then(|p| p.token_plan_above.as_deref()) {
         body.push(' ');
-        body.push_str(&fill(&gettext("Tokens need a plan above {plan}."), &[("plan", plan)]));
+        body.push_str(&fill(
+            &gettext("Tokens need a plan above {plan}."),
+            &[("plan", plan)],
+        ));
     }
     let link = token_link(proposal);
-    Some((fill(&gettext("{provider} signs in with an API token"), &named), body, link))
+    Some((
+        fill(&gettext("{provider} signs in with an API token"), &named),
+        body,
+        link,
+    ))
 }
 
 /// The provider's page on making a token, when the table knows one.
 fn token_link(proposal: &JmapProposal) -> Option<Link> {
     let url = proposal.provider.as_ref()?.token_url.clone()?;
-    Some(Link { label: gettext("How to Make a Token"), url })
+    Some(Link {
+        label: gettext("How to Make a Token"),
+        url,
+    })
 }
 
 /// The JMAP sign-in's heading: the provider the list knows, or else the
@@ -1589,7 +1694,10 @@ pub fn jmap_title(proposal: &JmapProposal, address: &Address) -> String {
             &gettext("Sign in to {provider}"),
             &[("provider", &post::short_name(&proposal.provider_name))],
         ),
-        None => fill(&gettext("Sign in to {domain}"), &[("domain", &address.domain)]),
+        None => fill(
+            &gettext("Sign in to {domain}"),
+            &[("domain", &address.domain)],
+        ),
     }
 }
 
@@ -1622,8 +1730,12 @@ pub fn jmap_agree(proposal: &JmapProposal, address: &Address, token: bool) -> (S
     let host = session_line(proposal);
     let named = [("host", host.as_str()), ("domain", address.domain.as_str())];
     let body = match token {
-        true => gettext("{host} is outside {domain}. Your token goes there only after you check the box."),
-        false => gettext("{host} is outside {domain}. Your password goes there only after you check the box."),
+        true => gettext(
+            "{host} is outside {domain}. Your token goes there only after you check the box.",
+        ),
+        false => gettext(
+            "{host} is outside {domain}. Your password goes there only after you check the box.",
+        ),
     };
     (fill(&gettext("Use {host}"), &named), fill(&body, &named))
 }
@@ -1643,7 +1755,12 @@ pub fn imap_instead_line(proposal: &JmapProposal) -> String {
 /// Whether Sign In can go: there is a secret, the person said yes to a
 /// session outside the domain, and no sign-in is on its way. Nothing
 /// reaches the session before this says yes.
-pub fn can_sign_in_jmap(secret: &str, proposal: &JmapProposal, confirmed: bool, running: bool) -> bool {
+pub fn can_sign_in_jmap(
+    secret: &str,
+    proposal: &JmapProposal,
+    confirmed: bool,
+    running: bool,
+) -> bool {
     !running && !secret.is_empty() && (confirmed || !proposal.confirm)
 }
 
@@ -1670,7 +1787,9 @@ pub fn typed_jmap(
     let parsed = url::Url::parse(&full).map_err(|_| unusable())?;
     let local = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     if parsed.scheme() != "https" && !(parsed.scheme() == "http" && local) {
-        return Err(gettext("Penguin Mail reaches JMAP servers over HTTPS only."));
+        return Err(gettext(
+            "Penguin Mail reaches JMAP servers over HTTPS only.",
+        ));
     }
     let user = user.trim();
     let user = (!user.is_empty()).then(|| user.to_string());
@@ -1704,7 +1823,11 @@ pub fn typed_jmap(
 /// outside the address's domain, waits for the person's yes, as one
 /// discovery found would. `None` (nothing answered) keeps the well-known
 /// URL for the sign-in to try.
-pub fn located_jmap(proposal: JmapProposal, target: Option<String>, address: &Address) -> JmapProposal {
+pub fn located_jmap(
+    proposal: JmapProposal,
+    target: Option<String>,
+    address: &Address,
+) -> JmapProposal {
     let Some(target) = target else {
         return proposal;
     };
@@ -1785,11 +1908,16 @@ pub fn asks_dav_password(proposal: &JmapProposal, token: bool) -> bool {
 /// an account signs in again: it signed in through the browser, and its
 /// calendar or contacts server, in `refused`, refused that sign-in. A
 /// token account asks by [`asks_dav_password`].
-pub fn asks_dav_password_again(saved: &mailrs_store::jmap::JmapSaved, refused: &[mailrs_store::services::ServiceKind]) -> bool {
+pub fn asks_dav_password_again(
+    saved: &mailrs_store::jmap::JmapSaved,
+    refused: &[mailrs_store::services::ServiceKind],
+) -> bool {
     use mailrs_store::services::ServiceKind;
 
     saved.auth == mailrs_store::jmap::JmapAuth::OAuth
-        && refused.iter().any(|kind| matches!(kind, ServiceKind::CalDav | ServiceKind::CardDav))
+        && refused
+            .iter()
+            .any(|kind| matches!(kind, ServiceKind::CalDav | ServiceKind::CardDav))
 }
 
 /// The session a browser sign-in for `proposal` goes to.
@@ -1829,7 +1957,10 @@ pub fn can_sign_in_jmap_browser(proposal: &JmapProposal, confirmed: bool, runnin
 /// sign-in page, which may name its buttons in any way.
 pub fn jmap_browser_steps(provider: &str) -> Vec<String> {
     vec![
-        fill(&gettext("Sign in to {provider} if it asks."), &[("provider", provider)]),
+        fill(
+            &gettext("Sign in to {provider} if it asks."),
+            &[("provider", provider)],
+        ),
         gettext("Read what Penguin Mail asks for and allow it."),
     ]
 }
@@ -1841,33 +1972,46 @@ pub fn jmap_browser_failure(err: &anyhow::Error, proposal: &JmapProposal) -> Fai
     use mailrs_jmap::JmapError;
     use mailrs_sync::sign_in::BrowserSignInError;
     let Some(BrowserSignInError::Jmap(jmap)) = err.downcast_ref::<BrowserSignInError>() else {
-        return Failure::plain(err.to_string(), gettext("Could not sign in"), err.to_string());
+        return Failure::plain(
+            err.to_string(),
+            gettext("Could not sign in"),
+            err.to_string(),
+        );
     };
     let provider = post::short_name(&proposal.provider_name);
     let named = [("provider", provider.as_str())];
     let mut said = None;
     let (title, body) = match jmap {
-        JmapError::Unauthorized | JmapError::BadCredential | JmapError::UnknownClient | JmapError::Forbidden(_) => (
+        JmapError::Unauthorized
+        | JmapError::BadCredential
+        | JmapError::UnknownClient
+        | JmapError::Forbidden(_) => (
             fill(&gettext("{provider} refused the sign-in"), &named),
             gettext("Choose Sign In With Browser to try again."),
         ),
         JmapError::Declined => (
             gettext("The sign-in was declined"),
-            fill(&gettext("Choose Sign In With Browser and allow access on {provider}'s page."), &named),
+            fill(
+                &gettext("Choose Sign In With Browser and allow access on {provider}'s page."),
+                &named,
+            ),
         ),
         JmapError::Network(_) => (
             fill(&gettext("{provider} does not answer"), &named),
             gettext("Check your connection, then choose Sign In With Browser."),
         ),
         JmapError::RateLimited { .. } | JmapError::SignInLocked => (
-            fill(&gettext("{provider} asked Penguin Mail to wait"), &named),
+            mailrs_sync::SyncError::asked_to_wait(&provider),
             gettext("Wait a minute, then choose Sign In With Browser."),
         ),
         other => {
             said = Some(other.to_string());
             (
                 gettext("Could not sign in"),
-                fill(&gettext("{provider} gave an answer Penguin Mail cannot use. Try again later."), &named),
+                fill(
+                    &gettext("{provider} gave an answer Penguin Mail cannot use. Try again later."),
+                    &named,
+                ),
             )
         }
     };
@@ -1890,7 +2034,11 @@ pub fn jmap_failure(err: &anyhow::Error, proposal: &JmapProposal, token: bool) -
     let provider = post::short_name(&proposal.provider_name);
     let named = [("provider", provider.as_str())];
     let Some(jmap) = err.downcast_ref::<JmapError>() else {
-        return Failure::plain(err.to_string(), gettext("Could not sign in"), err.to_string());
+        return Failure::plain(
+            err.to_string(),
+            gettext("Could not sign in"),
+            err.to_string(),
+        );
     };
     let mut said = None;
     let imap = proposal.imap.is_some();
@@ -1913,7 +2061,10 @@ pub fn jmap_failure(err: &anyhow::Error, proposal: &JmapProposal, token: bool) -
             gettext("Paste it again without the line break, then choose Sign In."),
         ),
         JmapError::NotFound => (
-            fill(&gettext("No JMAP server at {host}"), &[("host", &session_line(proposal))]),
+            fill(
+                &gettext("No JMAP server at {host}"),
+                &[("host", &session_line(proposal))],
+            ),
             match imap {
                 true => gettext("Check the session URL in Server Settings, or use IMAP instead."),
                 false => gettext("Check the session URL in Server Settings."),
@@ -1946,7 +2097,7 @@ pub fn jmap_failure(err: &anyhow::Error, proposal: &JmapProposal, token: bool) -
             gettext("Check your connection, then choose Sign In."),
         ),
         JmapError::RateLimited { .. } => (
-            fill(&gettext("{provider} asked Penguin Mail to wait"), &named),
+            mailrs_sync::SyncError::asked_to_wait(&provider),
             gettext("Wait a minute, then choose Sign In."),
         ),
         other => {
@@ -1958,7 +2109,9 @@ pub fn jmap_failure(err: &anyhow::Error, proposal: &JmapProposal, token: bool) -
                         true => gettext(
                             "{provider} gave an answer Penguin Mail cannot use. Try again later, or use IMAP instead.",
                         ),
-                        false => gettext("{provider} gave an answer Penguin Mail cannot use. Try again later."),
+                        false => gettext(
+                            "{provider} gave an answer Penguin Mail cannot use. Try again later.",
+                        ),
                     },
                     &named,
                 ),
@@ -1966,7 +2119,10 @@ pub fn jmap_failure(err: &anyhow::Error, proposal: &JmapProposal, token: bool) -
         }
     };
     let refused = matches!(jmap, JmapError::Unauthorized | JmapError::BadCredential);
-    let links = token_link(proposal).filter(|_| token && refused).into_iter().collect();
+    let links = token_link(proposal)
+        .filter(|_| token && refused)
+        .into_iter()
+        .collect();
     Failure {
         line: format!("{title}. {body}"),
         title,
@@ -2019,10 +2175,12 @@ pub fn failure_kind(err: &anyhow::Error) -> &'static str {
             BrowserSignInError::OtherAddress { .. } => "other address",
             BrowserSignInError::Google(_) => "google",
             BrowserSignInError::Microsoft(_) => "microsoft",
-            BrowserSignInError::KeptJmap(JmapSignInError::DifferentAccount { .. }) => "different account",
-            BrowserSignInError::Kept(_) | BrowserSignInError::KeptMicrosoft(_) | BrowserSignInError::KeptJmap(_) => {
-                "keeping the account"
+            BrowserSignInError::KeptJmap(JmapSignInError::DifferentAccount { .. }) => {
+                "different account"
             }
+            BrowserSignInError::Kept(_)
+            | BrowserSignInError::KeptMicrosoft(_)
+            | BrowserSignInError::KeptJmap(_) => "keeping the account",
             BrowserSignInError::Connect(_) => "connect",
             BrowserSignInError::OwnClient(_) => "own client",
             BrowserSignInError::Jmap(_) => "jmap",
@@ -2038,11 +2196,18 @@ pub fn failure_kind(err: &anyhow::Error) -> &'static str {
             CheckError::Smtp(_) => "outgoing server",
         };
     }
-    match (err.downcast_ref::<JmapSignInError>(), err.downcast_ref::<ImapSignInError>()) {
-        (Some(JmapSignInError::Taken { .. }), _) | (_, Some(ImapSignInError::Taken { .. })) => "address taken",
+    match (
+        err.downcast_ref::<JmapSignInError>(),
+        err.downcast_ref::<ImapSignInError>(),
+    ) {
+        (Some(JmapSignInError::Taken { .. }), _) | (_, Some(ImapSignInError::Taken { .. })) => {
+            "address taken"
+        }
         (Some(JmapSignInError::DifferentAccount { .. }), _) => "different account",
         (Some(JmapSignInError::Store(_)), _) | (_, Some(ImapSignInError::Store(_))) => "store",
-        (Some(JmapSignInError::Password(_)), _) | (_, Some(ImapSignInError::Password(_))) => "keyring",
+        (Some(JmapSignInError::Password(_)), _) | (_, Some(ImapSignInError::Password(_))) => {
+            "keyring"
+        }
         _ => "other",
     }
 }
@@ -2053,12 +2218,138 @@ mod tests {
         Candidate, Found, PasswordKind, ProviderInfo, Security, Server, Source, Unreachable,
         UserName, Verdict,
     };
+    use mailrs_domain::RemoveSetting;
     use mailrs_domain::{Account, AccountState, Provider};
     use mailrs_imap::{CheckError, ImapError};
-    use mailrs_domain::RemoveSetting;
     use mailrs_store::servers::{Pop3Servers, Saved, Servers};
 
     use super::*;
+
+    use mailrs_sync::sign_in::CalDavSignInError;
+    use mailrs_sync::{BackendError, SyncError};
+
+    #[test]
+    fn each_way_a_calendar_sign_in_fails_has_its_own_words() {
+        let no_calendar = "No calendar was found";
+        let failures = [
+            (BackendError::NeedsReauth, "app password"),
+            (BackendError::Offline("no route".into()), "could not reach"),
+            (BackendError::Unsupported, no_calendar),
+            // A web page at the address, or a server that is no CalDAV
+            // server, answers the login try in the protocol's own words.
+            (
+                BackendError::Refused("HTTP 404: Not Found".into()),
+                no_calendar,
+            ),
+            (
+                BackendError::Refused("HTTP 405: Method Not Allowed".into()),
+                no_calendar,
+            ),
+            (
+                BackendError::Refused("the server named no principal".into()),
+                no_calendar,
+            ),
+        ];
+        for (failure, words) in failures {
+            let shown = calendar_problem(
+                &CalDavSignInError::Server(SyncError::Backend(failure)).into(),
+                None,
+            );
+            assert!(shown.contains(words) && !shown.contains("HTTP "), "{shown}");
+        }
+        let not_https = calendar_problem(&CalDavSignInError::NotHttps.into(), None);
+        assert!(
+            not_https.contains("HTTPS only"),
+            "words the sign-in chose stand: {not_https}"
+        );
+        let other_user = CalDavSignInError::OtherUser {
+            name: "robin@cloud.example.org".into(),
+            user: "Robin".into(),
+        };
+        let shown = calendar_problem(&other_user.into(), None);
+        assert!(
+            shown.contains("signed in to this server as Robin. Type Robin"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn a_taken_name_says_whose_it_is() {
+        let taken = |holder| -> anyhow::Error {
+            CalDavSignInError::Taken {
+                name: "robin@example.org".into(),
+                provider: "Fastmail".into(),
+                holder,
+            }
+            .into()
+        };
+        let by_mail = calendar_problem(&taken(Provider::Imap), None);
+        assert!(
+            by_mail.contains("robin@example.org") && by_mail.contains("Fastmail"),
+            "{by_mail}"
+        );
+        assert!(
+            by_mail.contains("Preferences"),
+            "an IMAP account can take the server itself: {by_mail}"
+        );
+        // The group the account's servers sit in on the Accounts page,
+        // in contacts_prefs.rs, word for word.
+        assert!(
+            by_mail.contains("under Calendar, Contacts and Rules Servers"),
+            "{by_mail}"
+        );
+        assert!(calendar_problem(&taken(Provider::Pop3), None).contains("Preferences"));
+        let by_google = calendar_problem(&taken(Provider::Gmail), None);
+        assert!(
+            by_google.contains("robin@example.org") && !by_google.contains("Preferences"),
+            "{by_google}"
+        );
+    }
+
+    #[test]
+    fn anything_else_keeps_its_reason() {
+        let full = || anyhow::anyhow!("the disk is full");
+        assert_eq!(
+            calendar_problem(&full(), None),
+            "Could not add the calendar: the disk is full"
+        );
+        let again = icloud_account();
+        assert_eq!(
+            calendar_problem(&full(), Some(&again)),
+            "Could not sign in: the disk is full",
+            "Sign In Again adds nothing"
+        );
+    }
+
+    /// Sign In Again opens the calendar page for one account. A sign-in
+    /// that ends as another account, because the address or the user
+    /// name changed, added one and left the first as it was.
+    #[test]
+    fn only_the_account_asked_to_sign_in_again_has() {
+        let asked = icloud_account();
+        let another = Account {
+            id: asked.id + 1,
+            ..asked.clone()
+        };
+        assert!(signed_in_again(Some(&asked), &asked));
+        assert!(!signed_in_again(Some(&asked), &another));
+        assert!(
+            !signed_in_again(None, &asked),
+            "a first sign-in is not a second"
+        );
+    }
+
+    #[test]
+    fn the_calendar_page_waits_for_an_address_a_user_and_a_password() {
+        assert!(calendar_ready("cloud.example.org", "robin", "secret"));
+        assert!(!calendar_ready("  ", "robin", "secret"));
+        assert!(!calendar_ready("cloud.example.org", " ", "secret"));
+        assert!(!calendar_ready("cloud.example.org", "robin", ""));
+        assert!(
+            calendar_ready("cloud.example.org", "robin", " "),
+            "a password may be a space"
+        );
+    }
 
     #[test]
     fn a_pop3_account_is_done_when_its_first_check_is() {
@@ -2088,9 +2379,17 @@ mod tests {
 
     #[test]
     fn the_ready_page_says_mail_is_downloading_until_the_first_download_ends() {
-        for provider in [Provider::Gmail, Provider::Imap, Provider::Microsoft, Provider::Pop3] {
+        for provider in [
+            Provider::Gmail,
+            Provider::Imap,
+            Provider::Microsoft,
+            Provider::Pop3,
+        ] {
             let page = added_page(provider, RemoveSetting::Never, false, false);
-            assert_eq!(page.lede, "Mail is downloading. You can close this window.", "{provider:?}");
+            assert_eq!(
+                page.lede, "Mail is downloading. You can close this window.",
+                "{provider:?}"
+            );
         }
     }
 
@@ -2122,7 +2421,9 @@ mod tests {
     fn the_pop3_note_says_what_happens_to_mail_on_the_server() {
         let note = |remove| added_page(Provider::Pop3, remove, false, false).note;
         assert!(note(RemoveSetting::Never).contains("Mail stays on the server."));
-        assert!(note(RemoveSetting::Downloaded).contains("removes each message from the server after"));
+        assert!(
+            note(RemoveSetting::Downloaded).contains("removes each message from the server after")
+        );
         assert!(note(RemoveSetting::Days(30)).contains("30 days after"));
         assert!(note(RemoveSetting::Days(1)).contains("1 day after"));
         assert!(!note(RemoveSetting::Days(1)).contains("1 days"));
@@ -2185,7 +2486,12 @@ mod tests {
     }
 
     fn fastmail() -> Proposal {
-        match after_discovery(found(Some(fastmail_info()), Source::Table, false), None, &dana(), true) {
+        match after_discovery(
+            found(Some(fastmail_info()), Source::Table, false),
+            None,
+            &dana(),
+            true,
+        ) {
             Next::Password(proposal) => proposal,
             other => panic!("{other:?}"),
         }
@@ -2227,7 +2533,8 @@ mod tests {
     #[test]
     fn a_server_nobody_lists_is_named_after_the_domain_and_asks_first() {
         let address = Address::parse("me@example.org").unwrap();
-        let Next::Password(proposal) = after_discovery(found(None, Source::Srv, true), None, &address, true)
+        let Next::Password(proposal) =
+            after_discovery(found(None, Source::Srv, true), None, &address, true)
         else {
             panic!("expected the password step");
         };
@@ -2309,7 +2616,9 @@ mod tests {
         assert_eq!(proposal.incoming, server("imap.fastmail.com", 993));
         assert_eq!(proposal.smtp, server("smtp.fastmail.com", 465));
         assert!(
-            proposal.info.is_some_and(|info| info.password == PasswordKind::AppPassword),
+            proposal
+                .info
+                .is_some_and(|info| info.password == PasswordKind::AppPassword),
             "Fastmail's own password rule, not the guess's default"
         );
     }
@@ -2609,12 +2918,18 @@ mod tests {
             provider_name: Some("Fastmail".into()),
             ..icloud_account()
         };
-        assert_eq!(again_browser_line(&account), "Choose Sign In With Browser to sign in to dana@fastmail.com again.");
+        assert_eq!(
+            again_browser_line(&account),
+            "Choose Sign In With Browser to sign in to dana@fastmail.com again."
+        );
         assert_eq!(
             sign_in_again_banner("dana@fastmail.com", true),
             "Sign in again through the browser to keep dana@fastmail.com syncing"
         );
-        assert_eq!(sign_in_again_banner("dana@fastmail.com", false), "Sign in again to keep dana@fastmail.com syncing");
+        assert_eq!(
+            sign_in_again_banner("dana@fastmail.com", false),
+            "Sign in again to keep dana@fastmail.com syncing"
+        );
     }
 
     #[test]
@@ -2673,7 +2988,11 @@ mod tests {
         };
         let proposal = saved_proposal(&account, &Kept::Imap(saved));
         assert_eq!(proposal.provider_name, "Fastmail");
-        assert!(proposal.info.is_some_and(|info| info.password == PasswordKind::AppPassword));
+        assert!(
+            proposal
+                .info
+                .is_some_and(|info| info.password == PasswordKind::AppPassword)
+        );
     }
 
     #[test]
@@ -2744,7 +3063,8 @@ mod tests {
     #[test]
     fn the_first_candidates_port_is_blocked_the_second_signs_in() {
         let address = Address::parse("ann@example.org").unwrap();
-        let Next::Password(first) = after_discovery(two_candidates(false), None, &address, true) else {
+        let Next::Password(first) = after_discovery(two_candidates(false), None, &address, true)
+        else {
             panic!("expected the password step");
         };
         assert_eq!(first.incoming.host, "imap1.example.org");
@@ -2761,7 +3081,8 @@ mod tests {
     #[test]
     fn a_refused_password_never_reaches_for_another_candidate() {
         let address = Address::parse("ann@example.org").unwrap();
-        let Next::Password(first) = after_discovery(two_candidates(false), None, &address, true) else {
+        let Next::Password(first) = after_discovery(two_candidates(false), None, &address, true)
+        else {
             panic!("expected the password step");
         };
         let refused = anyhow::Error::new(CheckError::Imap(ImapError::Auth { text: "no".into() }));
@@ -2774,7 +3095,8 @@ mod tests {
     #[test]
     fn a_candidate_needing_confirmation_still_needs_it_after_a_retry() {
         let address = Address::parse("ann@example.org").unwrap();
-        let Next::Password(first) = after_discovery(two_candidates(true), None, &address, true) else {
+        let Next::Password(first) = after_discovery(two_candidates(true), None, &address, true)
+        else {
             panic!("expected the password step");
         };
         let blocked = anyhow::Error::new(CheckError::Imap(ImapError::Tls {
@@ -2895,10 +3217,22 @@ mod tests {
     #[test]
     fn switching_security_moves_a_default_port_to_the_other_default() {
         use Role::{Incoming, Outgoing};
-        assert_eq!(port_after_switch(Incoming, Protocol::Imap, 993, Security::StartTls), 143);
-        assert_eq!(port_after_switch(Incoming, Protocol::Imap, 143, Security::Tls), 993);
-        assert_eq!(port_after_switch(Outgoing, Protocol::Imap, 465, Security::StartTls), 587);
-        assert_eq!(port_after_switch(Outgoing, Protocol::Imap, 587, Security::Tls), 465);
+        assert_eq!(
+            port_after_switch(Incoming, Protocol::Imap, 993, Security::StartTls),
+            143
+        );
+        assert_eq!(
+            port_after_switch(Incoming, Protocol::Imap, 143, Security::Tls),
+            993
+        );
+        assert_eq!(
+            port_after_switch(Outgoing, Protocol::Imap, 465, Security::StartTls),
+            587
+        );
+        assert_eq!(
+            port_after_switch(Outgoing, Protocol::Imap, 587, Security::Tls),
+            465
+        );
     }
 
     #[test]
@@ -2907,9 +3241,15 @@ mod tests {
             port_after_switch(Role::Incoming, Protocol::Imap, 1143, Security::StartTls),
             1143
         );
-        assert_eq!(port_after_switch(Role::Outgoing, Protocol::Imap, 2525, Security::Tls), 2525);
+        assert_eq!(
+            port_after_switch(Role::Outgoing, Protocol::Imap, 2525, Security::Tls),
+            2525
+        );
         // Already the new mode's default: nothing to move.
-        assert_eq!(port_after_switch(Role::Outgoing, Protocol::Imap, 465, Security::Tls), 465);
+        assert_eq!(
+            port_after_switch(Role::Outgoing, Protocol::Imap, 465, Security::Tls),
+            465
+        );
     }
 
     #[test]
@@ -2947,7 +3287,10 @@ mod tests {
         assert!(shared.smtp_password.is_none());
         let own = with_smtp_password(fastmail(), "out");
         assert!(own.own_smtp_password);
-        assert_eq!(attempt(&dana(), &own, "pw", "out").smtp_password.as_deref(), Some("out"));
+        assert_eq!(
+            attempt(&dana(), &own, "pw", "out").smtp_password.as_deref(),
+            Some("out")
+        );
         let cleared = with_smtp_password(own, "");
         assert!(!cleared.own_smtp_password);
         assert!(attempt(&dana(), &cleared, "pw", "").smtp_password.is_none());
@@ -2973,7 +3316,9 @@ mod tests {
 
     #[test]
     fn a_shared_password_the_outgoing_server_refused_says_which_server() {
-        let refused = anyhow::Error::new(CheckError::Smtp(ImapError::Auth { text: String::new() }));
+        let refused = anyhow::Error::new(CheckError::Smtp(ImapError::Auth {
+            text: String::new(),
+        }));
         let said = failure(&refused, &fastmail());
         assert_eq!(said.line, "The outgoing server refused the password.");
         assert_eq!(said.title, "Fastmail refused the password");
@@ -2981,7 +3326,9 @@ mod tests {
 
     #[test]
     fn with_an_outgoing_password_apart_an_incoming_refusal_names_the_incoming_server() {
-        let refused = anyhow::Error::new(CheckError::Imap(ImapError::Auth { text: String::new() }));
+        let refused = anyhow::Error::new(CheckError::Imap(ImapError::Auth {
+            text: String::new(),
+        }));
         let said = failure(&refused, &with_smtp_password(fastmail(), "out"));
         assert_eq!(said.line, "The incoming server refused the password.");
     }
@@ -3054,7 +3401,11 @@ mod tests {
             assert!(failure.body.contains("Proton Mail Bridge"));
             assert!(failure.body.contains("certificate"));
             assert_eq!(failure.links.len(), 1);
-            assert!(failure.links[0].url.ends_with("docs/setup.md#proton-mail-bridge"));
+            assert!(
+                failure.links[0]
+                    .url
+                    .ends_with("docs/setup.md#proton-mail-bridge")
+            );
         }
     }
 
@@ -3075,7 +3426,10 @@ mod tests {
             &anyhow::Error::new(CheckError::Imap(ImapError::Protocol("garbled".into()))),
             &server,
         );
-        assert_eq!(said.body, format!("{host} answered in a way this app cannot work with."));
+        assert_eq!(
+            said.body,
+            format!("{host} answered in a way this app cannot work with.")
+        );
     }
 
     #[test]
@@ -3196,8 +3550,7 @@ mod tests {
             assert!(running.contains("Older mail keeps coming"), "{provider:?}");
             let done = added_page(provider, RemoveSetting::Never, true, false).note;
             assert_eq!(
-                done,
-                "Penguin Mail keeps checking for new mail, even with the window closed.",
+                done, "Penguin Mail keeps checking for new mail, even with the window closed.",
                 "{provider:?}"
             );
         }
@@ -3231,7 +3584,10 @@ mod tests {
         // Back, a new address at another provider, Continue: the first
         // account's password must not be one Enter away from the second
         // provider's servers.
-        assert!(!keeps_password(Some("a@fastmail.com"), "b@otherdomain.example"));
+        assert!(!keeps_password(
+            Some("a@fastmail.com"),
+            "b@otherdomain.example"
+        ));
         assert!(!keeps_password(None, "a@fastmail.com"));
         assert!(keeps_password(Some("a@fastmail.com"), "A@Fastmail.com"));
     }
@@ -3328,11 +3684,17 @@ mod tests {
             (pop3.protocol, pop3.pop3_remove),
             (Protocol::Pop3, Some(RemoveSetting::Downloaded))
         );
-        assert_eq!(attempt(&dana(), &pop3, "pw", "").pop3_remove, RemoveSetting::Downloaded);
+        assert_eq!(
+            attempt(&dana(), &pop3, "pw", "").pop3_remove,
+            RemoveSetting::Downloaded
+        );
         let back = with_protocol(pop3, Protocol::Imap, RemoveSetting::Downloaded);
         assert_eq!((back.protocol, back.pop3_remove), (Protocol::Imap, None));
         let tried = attempt(&dana(), &back, "pw", "");
-        assert_eq!((tried.protocol, tried.pop3_remove), (Protocol::Imap, RemoveSetting::Never));
+        assert_eq!(
+            (tried.protocol, tried.pop3_remove),
+            (Protocol::Imap, RemoveSetting::Never)
+        );
     }
 
     #[test]
@@ -3343,13 +3705,20 @@ mod tests {
             panic!("step 2")
         };
         assert_eq!(proposal.protocol, Protocol::Imap);
-        assert_eq!(pop3_line(&proposal).as_deref(), Some("Fastmail also offers POP3"));
+        assert_eq!(
+            pop3_line(&proposal).as_deref(),
+            Some("Fastmail also offers POP3")
+        );
         let pop3 = as_pop3(&proposal).expect("a POP3 proposal");
         assert_eq!(
             (pop3.protocol, pop3.incoming.host.as_str()),
             (Protocol::Pop3, "pop.fastmail.com")
         );
-        assert_eq!(pop3.pop3_remove, Some(RemoveSetting::Never), "Leave on Server is the default");
+        assert_eq!(
+            pop3.pop3_remove,
+            Some(RemoveSetting::Never),
+            "Leave on Server is the default"
+        );
         assert_eq!(pop3_line(&pop3), None);
         assert_eq!(incoming_title(&pop3), "Incoming over POP3");
         assert_eq!(incoming_title(&proposal), "Incoming");
@@ -3358,20 +3727,44 @@ mod tests {
     #[test]
     fn the_incoming_port_follows_the_protocol_unless_typed() {
         assert_eq!(port_after_protocol(993, Security::Tls, Protocol::Pop3), 995);
-        assert_eq!(port_after_protocol(143, Security::StartTls, Protocol::Pop3), 110);
+        assert_eq!(
+            port_after_protocol(143, Security::StartTls, Protocol::Pop3),
+            110
+        );
         assert_eq!(port_after_protocol(995, Security::Tls, Protocol::Imap), 993);
-        assert_eq!(port_after_protocol(1995, Security::Tls, Protocol::Imap), 1995);
-        assert_eq!(port_after_switch(Role::Incoming, Protocol::Pop3, 995, Security::StartTls), 110);
-        assert_eq!(port_after_switch(Role::Outgoing, Protocol::Pop3, 465, Security::StartTls), 587);
+        assert_eq!(
+            port_after_protocol(1995, Security::Tls, Protocol::Imap),
+            1995
+        );
+        assert_eq!(
+            port_after_switch(Role::Incoming, Protocol::Pop3, 995, Security::StartTls),
+            110
+        );
+        assert_eq!(
+            port_after_switch(Role::Outgoing, Protocol::Pop3, 465, Security::StartTls),
+            587
+        );
     }
 
     #[test]
     fn the_removal_rows_name_their_setting() {
         assert_eq!(removal_title(Removal::AfterDays, 1), "Remove After 1 Day");
-        assert_eq!(removal_title(Removal::AfterDays, 14), "Remove After 14 Days");
-        assert_eq!(removal_setting(Removal::AfterDays, 30), RemoveSetting::Days(30));
-        assert_eq!(removal_of(RemoveSetting::Days(30)), (Removal::AfterDays, 30));
-        assert_eq!(removal_of(RemoveSetting::Never), (Removal::Leave, DEFAULT_DAYS));
+        assert_eq!(
+            removal_title(Removal::AfterDays, 14),
+            "Remove After 14 Days"
+        );
+        assert_eq!(
+            removal_setting(Removal::AfterDays, 30),
+            RemoveSetting::Days(30)
+        );
+        assert_eq!(
+            removal_of(RemoveSetting::Days(30)),
+            (Removal::AfterDays, 30)
+        );
+        assert_eq!(
+            removal_of(RemoveSetting::Never),
+            (Removal::Leave, DEFAULT_DAYS)
+        );
     }
 
     #[test]
@@ -3416,8 +3809,14 @@ mod tests {
         assert_eq!(pop3, Some(server("pop.example.org", 995)));
         let back = server_after_protocol(&found, "pop.example.org", Protocol::Imap);
         assert_eq!(back, Some(server("imap.example.org", 993)));
-        assert_eq!(server_after_protocol(&found, "mail.example.org", Protocol::Pop3), None);
-        assert_eq!(server_after_protocol(&fastmail(), "imap.example.org", Protocol::Pop3), None);
+        assert_eq!(
+            server_after_protocol(&found, "mail.example.org", Protocol::Pop3),
+            None
+        );
+        assert_eq!(
+            server_after_protocol(&fastmail(), "imap.example.org", Protocol::Pop3),
+            None
+        );
     }
 
     #[test]
@@ -3443,6 +3842,7 @@ mod tests {
         assert!(shows_folder(Provider::Pop3, MailRole::Inbox));
         assert!(!shows_folder(Provider::Pop3, MailRole::Sent));
         assert!(!shows_folder(Provider::Pop3, MailRole::Archive));
+        assert!(!shows_folder(Provider::CalDav, MailRole::Inbox));
     }
 
     fn fastmail_jmap() -> mailrs_discover::JmapFound {
@@ -3468,14 +3868,20 @@ mod tests {
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
         assert!(asks_dav_password(&proposal, true));
-        assert!(!asks_dav_password(&proposal, false), "a password signs in to the calendar as it is");
+        assert!(
+            !asks_dav_password(&proposal, false),
+            "a password signs in to the calendar as it is"
+        );
     }
 
     #[test]
     fn the_browser_button_names_the_provider() {
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
-        assert!(browser_line(&proposal).starts_with("Sign in on Fastmail's own page instead of making a token."));
+        assert!(
+            browser_line(&proposal)
+                .starts_with("Sign in on Fastmail's own page instead of making a token.")
+        );
     }
 
     #[test]
@@ -3486,8 +3892,15 @@ mod tests {
             browser_line(&proposal),
             "Sign in on Fastmail's own page instead of making a token. Masked Email needs an API token."
         );
-        let elsewhere = jmap_proposal(hoster_jmap(), None, &Address::parse("me@example.org").unwrap());
-        assert!(!browser_line(&elsewhere).contains("Masked Email"), "only a provider whose tokens give Masked Email says so");
+        let elsewhere = jmap_proposal(
+            hoster_jmap(),
+            None,
+            &Address::parse("me@example.org").unwrap(),
+        );
+        assert!(
+            !browser_line(&elsewhere).contains("Masked Email"),
+            "only a provider whose tokens give Masked Email says so"
+        );
     }
 
     #[test]
@@ -3505,7 +3918,10 @@ mod tests {
         let proposal = jmap_proposal(hoster_jmap(), None, &address);
         assert!(!can_sign_in_jmap_browser(&proposal, false, false));
         assert!(can_sign_in_jmap_browser(&proposal, true, false));
-        assert!(!can_sign_in_jmap_browser(&proposal, true, true), "a sign-in already runs");
+        assert!(
+            !can_sign_in_jmap_browser(&proposal, true, true),
+            "a sign-in already runs"
+        );
     }
 
     #[test]
@@ -3513,11 +3929,16 @@ mod tests {
         use mailrs_sync::sign_in::BrowserSignInError;
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
-        let err = anyhow::Error::new(BrowserSignInError::Jmap(mailrs_jmap::JmapError::Unauthorized));
+        let err = anyhow::Error::new(BrowserSignInError::Jmap(
+            mailrs_jmap::JmapError::Unauthorized,
+        ));
         let failure = jmap_browser_failure(&err, &proposal);
         assert_eq!(
             (failure.title.as_str(), failure.body.as_str()),
-            ("Fastmail refused the sign-in", "Choose Sign In With Browser to try again.")
+            (
+                "Fastmail refused the sign-in",
+                "Choose Sign In With Browser to try again."
+            )
         );
     }
 
@@ -3526,11 +3947,16 @@ mod tests {
         use mailrs_sync::sign_in::BrowserSignInError;
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
-        let err = anyhow::Error::new(BrowserSignInError::Jmap(mailrs_jmap::JmapError::Network("reset".into())));
+        let err = anyhow::Error::new(BrowserSignInError::Jmap(mailrs_jmap::JmapError::Network(
+            "reset".into(),
+        )));
         let failure = jmap_browser_failure(&err, &proposal);
         assert_eq!(
             (failure.title.as_str(), failure.body.as_str()),
-            ("Fastmail does not answer", "Check your connection, then choose Sign In With Browser.")
+            (
+                "Fastmail does not answer",
+                "Check your connection, then choose Sign In With Browser."
+            )
         );
     }
 
@@ -3539,15 +3965,22 @@ mod tests {
         use mailrs_sync::sign_in::BrowserSignInError;
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
-        let failure = jmap_browser_failure(&anyhow::Error::new(BrowserSignInError::GaveUp), &proposal);
-        assert_eq!(failure.body, "Gave up waiting for the browser after ten minutes.");
+        let failure =
+            jmap_browser_failure(&anyhow::Error::new(BrowserSignInError::GaveUp), &proposal);
+        assert_eq!(
+            failure.body,
+            "Gave up waiting for the browser after ten minutes."
+        );
     }
 
     #[test]
     fn the_waiting_page_lists_the_jmap_server_s_steps() {
         assert_eq!(
             jmap_browser_steps("Fastmail"),
-            ["Sign in to Fastmail if it asks.", "Read what Penguin Mail asks for and allow it."]
+            [
+                "Sign in to Fastmail if it asks.",
+                "Read what Penguin Mail asks for and allow it."
+            ]
         );
     }
 
@@ -3562,8 +3995,16 @@ mod tests {
     fn an_empty_calendar_password_is_left_out_of_the_attempt() {
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
-        assert_eq!(jmap_attempt(&address, &proposal, "token", "", true).dav_password, None);
-        assert_eq!(jmap_attempt(&address, &proposal, "token", "app", true).dav_password.as_deref(), Some("app"));
+        assert_eq!(
+            jmap_attempt(&address, &proposal, "token", "", true).dav_password,
+            None
+        );
+        assert_eq!(
+            jmap_attempt(&address, &proposal, "token", "app", true)
+                .dav_password
+                .as_deref(),
+            Some("app")
+        );
     }
 
     #[test]
@@ -3583,7 +4024,12 @@ mod tests {
     #[test]
     fn jmap_alone_is_offered_when_nothing_else_is_found() {
         let address = Address::parse("me@example.org").unwrap();
-        match after_discovery(verdict(Verdict::NothingFound), Some(hoster_jmap()), &address, true) {
+        match after_discovery(
+            verdict(Verdict::NothingFound),
+            Some(hoster_jmap()),
+            &address,
+            true,
+        ) {
             Next::Jmap(proposal) => assert!(proposal.imap.is_none()),
             other => panic!("{other:?}"),
         }
@@ -3592,8 +4038,14 @@ mod tests {
     #[test]
     fn a_google_domain_still_goes_to_google_whatever_jmap_says() {
         let address = Address::parse("me@example.org").unwrap();
-        let found = Found { verdict: Verdict::Google, candidates: Vec::new() };
-        assert_eq!(after_discovery(found, Some(fastmail_jmap()), &address, true), Next::Google);
+        let found = Found {
+            verdict: Verdict::Google,
+            candidates: Vec::new(),
+        };
+        assert_eq!(
+            after_discovery(found, Some(fastmail_jmap()), &address, true),
+            Next::Google
+        );
     }
 
     #[test]
@@ -3628,7 +4080,10 @@ mod tests {
         let proposal = jmap_proposal(hoster_jmap(), None, &address);
         let (title, body) = jmap_agree(&proposal, &address, false);
         assert_eq!(title, "Use jmap.hoster.net");
-        assert!(body.contains("jmap.hoster.net") && body.contains("example.org"), "{body}");
+        assert!(
+            body.contains("jmap.hoster.net") && body.contains("example.org"),
+            "{body}"
+        );
         assert!(body.contains("password"), "{body}");
         assert!(jmap_agree(&proposal, &address, true).1.contains("token"));
     }
@@ -3638,7 +4093,10 @@ mod tests {
         let fastmail = Address::parse("me@fastmail.com").unwrap();
         let listed = jmap_proposal(fastmail_jmap(), None, &fastmail);
         assert_eq!(jmap_title(&listed, &fastmail), "Sign in to Fastmail");
-        assert_eq!(jmap_found_line(&listed, &fastmail), "Penguin Mail found Fastmail's JMAP server.");
+        assert_eq!(
+            jmap_found_line(&listed, &fastmail),
+            "Penguin Mail found Fastmail's JMAP server."
+        );
         let address = Address::parse("me@example.org").unwrap();
         let unlisted = jmap_proposal(hoster_jmap(), None, &address);
         assert_eq!(jmap_title(&unlisted, &address), "Sign in to example.org");
@@ -3647,7 +4105,10 @@ mod tests {
             "Penguin Mail found a JMAP server for example.org."
         );
         let typed = typed_jmap("mail.example.org", "", &address, None).unwrap();
-        assert_eq!(jmap_found_line(&typed, &address), "The JMAP server you gave.");
+        assert_eq!(
+            jmap_found_line(&typed, &address),
+            "The JMAP server you gave."
+        );
     }
 
     #[test]
@@ -3656,7 +4117,10 @@ mod tests {
         let proposal = jmap_proposal(fastmail_jmap(), None, &address);
         let (title, body, link) = jmap_hint(&proposal, true).unwrap();
         assert!(title.contains("Fastmail"), "{title}");
-        assert!(body.contains("Basic") && body.contains("Masked Email"), "{body}");
+        assert!(
+            body.contains("Basic") && body.contains("Masked Email"),
+            "{body}"
+        );
         assert!(link.unwrap().url.contains("fastmail.help"));
         assert_eq!(jmap_hint(&proposal, false), None);
     }
@@ -3665,8 +4129,17 @@ mod tests {
     fn a_typed_session_url_takes_https_and_a_bare_host() {
         let address = Address::parse("me@example.org").unwrap();
         let typed = typed_jmap("mail.example.org", "", &address, None).unwrap();
-        assert_eq!(typed.session_url, "https://mail.example.org/.well-known/jmap");
-        let full = typed_jmap("https://mail.example.org/jmap/session", "me", &address, None).unwrap();
+        assert_eq!(
+            typed.session_url,
+            "https://mail.example.org/.well-known/jmap"
+        );
+        let full = typed_jmap(
+            "https://mail.example.org/jmap/session",
+            "me",
+            &address,
+            None,
+        )
+        .unwrap();
         assert_eq!(full.session_url, "https://mail.example.org/jmap/session");
         assert_eq!(full.user.as_deref(), Some("me"));
         assert!(typed_jmap("http://mail.example.org/jmap", "", &address, None).is_err());
@@ -3678,7 +4151,10 @@ mod tests {
     fn the_attempt_logs_in_with_the_address_unless_a_user_name_was_typed() {
         let address = Address::parse("me@example.org").unwrap();
         let bare = typed_jmap("mail.example.org", "", &address, None).unwrap();
-        assert_eq!(jmap_attempt(&address, &bare, "pw", "", false).user, "me@example.org");
+        assert_eq!(
+            jmap_attempt(&address, &bare, "pw", "", false).user,
+            "me@example.org"
+        );
         let named = typed_jmap("mail.example.org", "me", &address, None).unwrap();
         assert_eq!(jmap_attempt(&address, &named, "pw", "", false).user, "me");
     }
@@ -3690,7 +4166,12 @@ mod tests {
         let err = anyhow::Error::new(mailrs_jmap::JmapError::Unauthorized);
         let failure = jmap_failure(&err, &proposal, true);
         assert_eq!(failure.title, "Fastmail refused the token");
-        assert!(failure.links.iter().any(|l| l.url.contains("fastmail.help")));
+        assert!(
+            failure
+                .links
+                .iter()
+                .any(|l| l.url.contains("fastmail.help"))
+        );
     }
 
     #[test]
@@ -3717,8 +4198,13 @@ mod tests {
     fn a_session_without_mail_says_the_server_offers_none() {
         let address = Address::parse("me@example.org").unwrap();
         let proposal = typed_jmap("mail.example.org", "", &address, None).unwrap();
-        let err = anyhow::Error::new(mailrs_jmap::JmapError::UnknownCapability(mailrs_jmap::MAIL.into()));
-        assert_eq!(jmap_failure(&err, &proposal, false).title, "mail.example.org offers no mail over JMAP");
+        let err = anyhow::Error::new(mailrs_jmap::JmapError::UnknownCapability(
+            mailrs_jmap::MAIL.into(),
+        ));
+        assert_eq!(
+            jmap_failure(&err, &proposal, false).title,
+            "mail.example.org offers no mail over JMAP"
+        );
     }
 
     #[test]
@@ -3728,7 +4214,10 @@ mod tests {
         let err = anyhow::Error::new(mailrs_jmap::JmapError::Network("timed out".into()));
         let failure = jmap_failure(&err, &proposal, false);
         assert_eq!(failure.title, "mail.example.org does not answer");
-        assert!(!failure.line.contains("timed out"), "the dialog speaks in its own words");
+        assert!(
+            !failure.line.contains("timed out"),
+            "the dialog speaks in its own words"
+        );
     }
 
     #[test]
@@ -3743,10 +4232,16 @@ mod tests {
     #[test]
     fn imap_instead_names_the_app_password_only_where_the_provider_wants_one() {
         let fastmail = jmap_proposal(fastmail_jmap(), Some(fastmail()), &dana());
-        assert_eq!(imap_instead_line(&fastmail), "Sign in with an app password over IMAP and SMTP");
+        assert_eq!(
+            imap_instead_line(&fastmail),
+            "Sign in with an app password over IMAP and SMTP"
+        );
         let mut own = fastmail.clone();
         own.imap = Some(Box::new(guess(&Address::parse("me@example.org").unwrap())));
-        assert_eq!(imap_instead_line(&own), "Sign in with your password over IMAP and SMTP");
+        assert_eq!(
+            imap_instead_line(&own),
+            "Sign in with your password over IMAP and SMTP"
+        );
     }
 
     #[test]
@@ -3792,7 +4287,10 @@ mod tests {
             owner: None,
         };
         assert!(saved_jmap(&account, &saved).token);
-        let basic = mailrs_store::jmap::JmapSaved { auth: mailrs_store::jmap::JmapAuth::Basic, ..saved };
+        let basic = mailrs_store::jmap::JmapSaved {
+            auth: mailrs_store::jmap::JmapAuth::Basic,
+            ..saved
+        };
         assert!(!saved_jmap(&account, &basic).token);
     }
 
@@ -3807,21 +4305,38 @@ mod tests {
             user_name: None,
             labels: true,
             capabilities: Vec::new(),
-            oauth: Some(SavedOAuth { client_id: "c1".into(), token_endpoint: "https://api.fastmail.com/oauth/refresh".into() }),
+            oauth: Some(SavedOAuth {
+                client_id: "c1".into(),
+                token_endpoint: "https://api.fastmail.com/oauth/refresh".into(),
+            }),
             owner: None,
         };
         assert!(asks_dav_password_again(&saved, &[ServiceKind::CalDav]));
         assert!(asks_dav_password_again(&saved, &[ServiceKind::CardDav]));
-        assert!(!asks_dav_password_again(&saved, &[]), "a calendar that takes the token needs nothing more");
-        let token = JmapSaved { auth: JmapAuth::Bearer, oauth: None, ..saved };
-        assert!(!asks_dav_password_again(&token, &[ServiceKind::CalDav]), "a token account asks through its own rule");
+        assert!(
+            !asks_dav_password_again(&saved, &[]),
+            "a calendar that takes the token needs nothing more"
+        );
+        let token = JmapSaved {
+            auth: JmapAuth::Bearer,
+            oauth: None,
+            ..saved
+        };
+        assert!(
+            !asks_dav_password_again(&token, &[ServiceKind::CalDav]),
+            "a token account asks through its own rule"
+        );
     }
 
     #[test]
     fn the_protocol_row_has_jmap_third() {
         assert_eq!(PROTOCOL_CHOICES, ["IMAP", "POP3", "JMAP"]);
         assert!(jmap_at(2) && !jmap_at(1));
-        assert_eq!(protocol_at(2), Protocol::Imap, "the mail protocols ignore the JMAP index");
+        assert_eq!(
+            protocol_at(2),
+            Protocol::Imap,
+            "the mail protocols ignore the JMAP index"
+        );
     }
 
     #[test]
@@ -3829,10 +4344,19 @@ mod tests {
         let address = Address::parse("me@example.org").unwrap();
         let found = jmap_proposal(hoster_jmap(), None, &address);
         let back = typed_jmap(&found.session_url, "", &address, Some(&found)).unwrap();
-        assert!(back.confirm, "the host is still the one discovery found off the domain");
+        assert!(
+            back.confirm,
+            "the host is still the one discovery found off the domain"
+        );
         assert!(!can_sign_in_jmap("secret", &back, false, false));
         assert!(can_sign_in_jmap("secret", &back, true, false));
-        let own = typed_jmap("https://mail.example.org/jmap/session", "", &address, Some(&found)).unwrap();
+        let own = typed_jmap(
+            "https://mail.example.org/jmap/session",
+            "",
+            &address,
+            Some(&found),
+        )
+        .unwrap();
         assert!(!own.confirm, "a host the person typed needs no yes");
     }
 
@@ -3848,7 +4372,8 @@ mod tests {
     #[test]
     fn an_unchanged_imap_round_trip_keeps_the_question_for_guessed_servers() {
         let address = Address::parse("me@example.org").unwrap();
-        let Next::Password(found) = after_discovery(found(None, Source::Srv, true), None, &address, true)
+        let Next::Password(found) =
+            after_discovery(found(None, Source::Srv, true), None, &address, true)
         else {
             panic!("expected the password step");
         };
@@ -3875,10 +4400,18 @@ mod tests {
     fn a_bare_host_that_leads_off_the_domain_asks_first() {
         let address = Address::parse("me@example.org").unwrap();
         let typed = typed_jmap("mail.example.org", "", &address, None).unwrap();
-        let away = located_jmap(typed.clone(), Some("https://jmap.hoster.net/session".into()), &address);
+        let away = located_jmap(
+            typed.clone(),
+            Some("https://jmap.hoster.net/session".into()),
+            &address,
+        );
         assert_eq!(away.session_url, "https://jmap.hoster.net/session");
         assert!(away.confirm);
-        let home = located_jmap(typed.clone(), Some("https://mail.example.org/jmap/session".into()), &address);
+        let home = located_jmap(
+            typed.clone(),
+            Some("https://mail.example.org/jmap/session".into()),
+            &address,
+        );
         assert_eq!(home.session_url, "https://mail.example.org/jmap/session");
         assert!(!home.confirm);
         assert_eq!(located_jmap(typed.clone(), None, &address), typed);
@@ -3888,7 +4421,11 @@ mod tests {
     fn a_bare_host_off_the_domain_that_stays_on_itself_needs_no_yes() {
         let address = Address::parse("me@example.org").unwrap();
         let typed = typed_jmap("jmap.hoster.net", "", &address, None).unwrap();
-        let located = located_jmap(typed, Some("https://jmap.hoster.net/jmap/session".into()), &address);
+        let located = located_jmap(
+            typed,
+            Some("https://jmap.hoster.net/jmap/session".into()),
+            &address,
+        );
         assert!(!located.confirm, "the person typed that host");
     }
 
@@ -3898,7 +4435,11 @@ mod tests {
         let proposal = typed_jmap("mail.example.org", "", &address, None).unwrap();
         let err = anyhow::Error::new(mailrs_jmap::JmapError::OffHost("api.other.net".into()));
         let failure = jmap_failure(&err, &proposal, false);
-        assert!(failure.title.contains("mail.example.org"), "{}", failure.title);
+        assert!(
+            failure.title.contains("mail.example.org"),
+            "{}",
+            failure.title
+        );
         assert!(failure.body.contains("api.other.net"), "{}", failure.body);
     }
 
@@ -3908,11 +4449,25 @@ mod tests {
         let alone = typed_jmap("mail.example.org", "", &address, None).unwrap();
         let err = anyhow::Error::new(mailrs_jmap::JmapError::NotFound);
         assert!(!jmap_failure(&err, &alone, false).body.contains("IMAP"));
-        let beside = JmapProposal { imap: Some(Box::new(guess(&address))), ..alone };
-        assert!(jmap_failure(&err, &beside, false).body.contains("use IMAP instead"));
+        let beside = JmapProposal {
+            imap: Some(Box::new(guess(&address))),
+            ..alone
+        };
+        assert!(
+            jmap_failure(&err, &beside, false)
+                .body
+                .contains("use IMAP instead")
+        );
         let odd = anyhow::Error::new(mailrs_jmap::JmapError::Decode("x".into()));
-        assert!(jmap_failure(&odd, &beside, false).body.contains("use IMAP instead"));
-        let bare = JmapProposal { imap: None, ..beside };
+        assert!(
+            jmap_failure(&odd, &beside, false)
+                .body
+                .contains("use IMAP instead")
+        );
+        let bare = JmapProposal {
+            imap: None,
+            ..beside
+        };
         assert!(!jmap_failure(&odd, &bare, false).body.contains("IMAP"));
     }
 
@@ -3931,11 +4486,17 @@ mod tests {
     fn a_sign_in_that_reached_another_account_says_so_and_logs_no_address() {
         let address = Address::parse("me@fastmail.com").unwrap();
         let proposal = typed_jmap("api.fastmail.com", "", &address, None).unwrap();
-        let other = || anyhow::Error::new(mailrs_sync::sign_in::JmapSignInError::DifferentAccount { address: "me@fastmail.com".into() });
+        let other = || {
+            anyhow::Error::new(mailrs_sync::sign_in::JmapSignInError::DifferentAccount {
+                address: "me@fastmail.com".into(),
+            })
+        };
         let said = "You signed in to a different account than me@fastmail.com, so nothing changed.";
         assert_eq!(jmap_failure(&other(), &proposal, true).body, said);
         let browser = anyhow::Error::new(mailrs_sync::sign_in::BrowserSignInError::KeptJmap(
-            mailrs_sync::sign_in::JmapSignInError::DifferentAccount { address: "me@fastmail.com".into() },
+            mailrs_sync::sign_in::JmapSignInError::DifferentAccount {
+                address: "me@fastmail.com".into(),
+            },
         ));
         assert_eq!(jmap_browser_failure(&browser, &proposal).body, said);
         assert_eq!(failure_kind(&other()), "different account");
@@ -3949,7 +4510,10 @@ mod tests {
         let now = Address::parse("me@example.net").unwrap();
         let typed = typed_jmap(&held.session_url, "", &now, Some(&held)).unwrap();
         assert_eq!(typed.address, "me@example.net");
-        assert!(typed.provider.is_none(), "the list's facts were for the other address");
+        assert!(
+            typed.provider.is_none(),
+            "the list's facts were for the other address"
+        );
         assert!(!typed.token);
         assert_eq!(typed.source, Some(Source::Manual));
     }
@@ -3957,8 +4521,12 @@ mod tests {
     #[test]
     fn servers_found_for_another_address_are_never_carried_over() {
         let first = Address::parse("me@example.org").unwrap();
-        let Next::Password(held) = after_discovery(found(Some(fastmail_info()), Source::Srv, true), None, &first, true)
-        else {
+        let Next::Password(held) = after_discovery(
+            found(Some(fastmail_info()), Source::Srv, true),
+            None,
+            &first,
+            true,
+        ) else {
             panic!("expected the password step");
         };
         assert_eq!(held.address, "me@example.org");

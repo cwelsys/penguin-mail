@@ -9,9 +9,9 @@ use mailrs_domain::{Account, AccountId, Label};
 
 use super::MainWindow;
 use crate::settings::{Change, Settings};
-use crate::ui::{Mailbox, Standard};
 use crate::ui::confirm::{Tone, confirm};
 use crate::ui::sidebar::Extras;
+use crate::ui::{Mailbox, Standard};
 use mailrs_domain::translate::{fill, gettext};
 
 impl MainWindow {
@@ -78,7 +78,7 @@ impl MainWindow {
         let existing = id.and_then(|id| {
             self.settings_with(|s| s.smart_mailboxes.iter().find(|m| m.id == id).cloned())
         });
-        let accounts: Vec<String> = self.accounts().into_iter().map(|a| a.email).collect();
+        let accounts: Vec<String> = self.mail_accounts().into_iter().map(|a| a.email).collect();
         let weak = Rc::downgrade(self);
         super::super::smart_editor::present(&self.window, existing, accounts, move |mailbox| {
             let (Some(win), Some(app)) =
@@ -165,7 +165,9 @@ impl MainWindow {
     }
 
     pub(super) fn move_account(self: &Rc<Self>, account: Account, step: isize) {
-        let emails: Vec<String> = self.accounts().into_iter().map(|a| a.email).collect();
+        // The mail sidebar's own accounts: a step past a calendar account,
+        // which it does not show, would move nothing on screen.
+        let emails: Vec<String> = self.mail_accounts().into_iter().map(|a| a.email).collect();
         if let Some(app) = self.app.upgrade() {
             app.change_settings(Change::MoveAccount {
                 emails,

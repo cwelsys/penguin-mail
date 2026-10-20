@@ -102,7 +102,11 @@ mod tests {
         let mut waiting = Waiting::default();
         let first = waiting.add(0, 30);
         let second = waiting.add(20_000, 5);
-        assert_eq!(waiting.left(21_000), Some(9_000), "the first has 9 s left, the second 4 s");
+        assert_eq!(
+            waiting.left(21_000),
+            Some(9_000),
+            "the first has 9 s left, the second 4 s"
+        );
         assert_eq!(waiting.newest(), Some(second));
         assert!(waiting.remove(second));
         assert_eq!(waiting.newest(), Some(first));
@@ -123,7 +127,11 @@ mod tests {
     #[test]
     fn the_pill_needs_the_sidebar_beside_the_list() {
         assert_eq!(surface(false, true), Surface::Pill);
-        assert_eq!(surface(true, true), Surface::Toast, "an overlay that closes on the next click");
+        assert_eq!(
+            surface(true, true),
+            Surface::Toast,
+            "an overlay that closes on the next click"
+        );
         assert_eq!(surface(true, false), Surface::Toast);
         assert_eq!(surface(false, false), Surface::Toast);
     }

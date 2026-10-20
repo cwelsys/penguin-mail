@@ -98,7 +98,10 @@ mod old {
 
     /// A message's fields as they were, in their order, labels and all.
     #[derive(Debug)]
-    #[expect(dead_code, reason = "only Debug reads the fields, which dead code analysis ignores")]
+    #[expect(
+        dead_code,
+        reason = "only Debug reads the fields, which dead code analysis ignores"
+    )]
     pub struct MessageMeta<'a> {
         pub account_id: AccountId,
         pub id: &'a str,
@@ -298,7 +301,10 @@ fn mailbox() -> (Connection, AccountId, AccountId) {
 fn filters(a: AccountId, b: AccountId) -> Vec<(String, ThreadFilter)> {
     let mut filters: Vec<(String, ThreadFilter)> = Vec::new();
     for label in LABELS {
-        filters.push((format!("unified {label:?}"), ThreadFilter::unified(set(label))));
+        filters.push((
+            format!("unified {label:?}"),
+            ThreadFilter::unified(set(label)),
+        ));
     }
     filters.push(("unified \"\"".into(), ThreadFilter::everything()));
     for label in ["INBOX", "Label_1", "Label_2", "TRASH", "SPAM"] {
@@ -356,8 +362,11 @@ fn filters(a: AccountId, b: AccountId) -> Vec<(String, ThreadFilter)> {
     ));
     filters.push((
         "named threads".into(),
-        ThreadFilter::unified(set("INBOX"))
-            .with_threads(vec!["t3".into(), "t6".into(), "u2".into()]),
+        ThreadFilter::unified(set("INBOX")).with_threads(vec![
+            "t3".into(),
+            "t6".into(),
+            "u2".into(),
+        ]),
     ));
     filters.push((
         "account a named threads".into(),

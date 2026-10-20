@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mailrs_domain::calendar::{
-    Access, Calendar as CalendarModel, Event as CalendarEvent, Guest as CalendarGuest, Reminder, ReminderMethod,
-    Status as CalendarStatus,
+    Access, Calendar as CalendarModel, Event as CalendarEvent, Guest as CalendarGuest, Reminder,
+    ReminderMethod, Status as CalendarStatus,
 };
 use mailrs_domain::invitation::Answer;
 use mailrs_domain::{
@@ -21,20 +21,21 @@ use mailrs_domain::{
 };
 use mailrs_gmail::{LabelColor, RemoteLabel, SendAs};
 use mailrs_store::servers::{self, Saved, Security, Servers};
+use mailrs_store::services::{FoundService, ServiceKind};
 use mailrs_store::{Db, Result, StoreError, accounts, address_book, invitations};
 use mailrs_sync::calendar_copy::CalendarCopy;
 use mailrs_sync::fake::{DavKind, FakeDav, FakeGmail, FakeGraph, FakeImap, FakeSmtp, fill_store};
-use mailrs_store::services::{FoundService, ServiceKind};
 use mailrs_sync::{
-    AccountServices, AccountSync, AnyCalendar, AnyContacts, AnyDav, AnyRules, CalDav, CardDav, ContactBook, DEFAULT_WINDOW_DAYS,
-    ImapSettings, LocalRules, SyncError,
+    AccountServices, AccountSync, AnyCalendar, AnyContacts, AnyDav, AnyRules, CalDav, CardDav,
+    ContactBook, DEFAULT_WINDOW_DAYS, ImapSettings, LocalRules, SyncError,
 };
 use rusqlite::Connection;
 
+mod calendar_account;
 pub mod folder;
 mod outlook;
-mod pop3;
 mod pages;
+mod pop3;
 
 /// The id of the draft behind the sample draft message, as Gmail would hold it.
 const DRAFT_ID: &str = "demo-draft";
@@ -711,6 +712,11 @@ fn samples() -> Vec<Sample> {
             minutes_ago: 5 * HOUR,
             labels: &["SPAM", "UNREAD", "CATEGORY_PROMOTIONS"],
             text: "Claim your gift card today. Offer ends at midnight.",
+            // A disguised destination lets the demo show the link warning
+            // without visiting a real site or changing the Junk sample's metadata.
+            html: Some(
+                r#"<p>Claim your gift card today. Offer ends at midnight.</p><p><a href="https://claim.prize-center.example/redeem">https://rewards.example/redeem</a></p>"#,
+            ),
             ..PLAIN
         },
         Sample {
@@ -744,7 +750,13 @@ enum DemoServer {
         db: Db,
     },
     Microsoft(Arc<FakeGraph>),
-    Pop3 { server: pop3::Pop3Server, db: Db },
+    Pop3 {
+        server: pop3::Pop3Server,
+        db: Db,
+    },
+    /// The calendar account's CalDAV server, when the demo was asked for
+    /// one (`calendar_account::wanted`).
+    Calendar(Arc<FakeDav>),
 }
 
 impl DemoMail {
@@ -752,11 +764,17 @@ impl DemoMail {
     pub fn services(&self, account_id: AccountId) -> Option<AccountServices> {
         Some(match self.0.get(&account_id)? {
             DemoServer::Gmail(gmail) => AccountServices::google(Arc::clone(gmail)),
-            DemoServer::Imap { imap, smtp, dav, db } => imap_services(imap, smtp, dav, db, account_id),
+            DemoServer::Imap {
+                imap,
+                smtp,
+                dav,
+                db,
+            } => imap_services(imap, smtp, dav, db, account_id),
             DemoServer::Microsoft(graph) => {
                 AccountServices::microsoft(Arc::clone(graph), outlook::settings())
             }
             DemoServer::Pop3 { server, db } => server.services(db, account_id),
+            DemoServer::Calendar(dav) => calendar_account::services(dav),
         })
     }
 
@@ -765,7 +783,10 @@ impl DemoMail {
     fn gmail(&self, account_id: AccountId) -> Option<Arc<FakeGmail>> {
         match self.0.get(&account_id)? {
             DemoServer::Gmail(gmail) => Some(Arc::clone(gmail)),
-            DemoServer::Imap { .. } | DemoServer::Microsoft(_) | DemoServer::Pop3 { .. } => None,
+            DemoServer::Imap { .. }
+            | DemoServer::Microsoft(_)
+            | DemoServer::Pop3 { .. }
+            | DemoServer::Calendar(_) => None,
         }
     }
 }
@@ -837,7 +858,13 @@ pub async fn seed(db: &Db, now: EpochMillis) -> std::result::Result<DemoMail, Sy
     // the copy and the address book read its calendar and contacts from
     // the demo's own.
     let mut own_services = HashMap::new();
-    if let DemoServer::Imap { imap, smtp, dav, db } = &server {
+    if let DemoServer::Imap {
+        imap,
+        smtp,
+        dav,
+        db,
+    } = &server
+    {
         own_services.insert(account_id, imap_services(imap, smtp, dav, db, account_id));
     }
     syncing.insert(account_id, sync);
@@ -847,16 +874,39 @@ pub async fn seed(db: &Db, now: EpochMillis) -> std::result::Result<DemoMail, Sy
     mail.insert(outlook_id, DemoServer::Microsoft(graph));
     let (pop3_id, server, sync) = pop3::seed_pop3(db, now).await?;
     syncing.insert(pop3_id, sync);
-    mail.insert(pop3_id, DemoServer::Pop3 { server, db: db.clone() });
+    mail.insert(
+        pop3_id,
+        DemoServer::Pop3 {
+            server,
+            db: db.clone(),
+        },
+    );
+    // A calendar account, only when asked for: the screenshots and the
+    // tour were drawn with the accounts above.
+    let mut to_refuse = None;
+    if let Some(wanted) = calendar_account::wanted() {
+        let (id, dav, sync) = calendar_account::seed(db, now).await?;
+        syncing.insert(id, sync);
+        mail.insert(id, DemoServer::Calendar(Arc::clone(&dav)));
+        to_refuse = (wanted == calendar_account::Wanted::Refused).then_some(dav);
+    }
 
     // Reads each account's calendars into the store now, so the demo
     // opens already synced: the assistant and the invitation card's clash
     // line read the copy from the first screen.
     let accounts_synced: Vec<AccountId> = syncing.keys().copied().collect();
-    let seeding = Arc::new(Seeding { syncing, own_services });
+    let seeding = Arc::new(Seeding {
+        syncing,
+        own_services,
+    });
     let copy = CalendarCopy::new(Arc::clone(&seeding), db.clone());
     for account_id in accounts_synced {
         copy.refresh(account_id, now).await?;
+    }
+    // Refused only now, with its calendar already in the store, as an
+    // account is whose password changed after it had been in use.
+    if let Some(dav) = &to_refuse {
+        dav.refuse_login(true);
     }
     // The demo's cards carry no photos, so the address book writes none
     // and the photo folder is never touched.
@@ -916,8 +966,14 @@ impl mailrs_sync::Accounts for Seeding {
 fn demo_storage(index: usize) -> Option<mailrs_gmail::DriveStorage> {
     const GIB: u64 = 1 << 30;
     match index {
-        0 => Some(mailrs_gmail::DriveStorage { usage: 143 * GIB / 10, limit: Some(15 * GIB) }),
-        1 => Some(mailrs_gmail::DriveStorage { usage: 21 * GIB / 10, limit: Some(30 * GIB) }),
+        0 => Some(mailrs_gmail::DriveStorage {
+            usage: 143 * GIB / 10,
+            limit: Some(15 * GIB),
+        }),
+        1 => Some(mailrs_gmail::DriveStorage {
+            usage: 21 * GIB / 10,
+            limit: Some(30 * GIB),
+        }),
         _ => None,
     }
 }
@@ -989,7 +1045,10 @@ fn demo_calendars(index: usize) -> Vec<CalendarModel> {
                 hidden: false,
                 // A common choice on Google's side; lets a run of the
                 // demo show a reminder for the call with Rita below.
-                reminders: vec![Reminder { minutes: 10, method: ReminderMethod::Notification }],
+                reminders: vec![Reminder {
+                    minutes: 10,
+                    method: ReminderMethod::Notification,
+                }],
                 all_day_reminders: None,
             },
             CalendarModel {
@@ -1072,7 +1131,13 @@ fn demo_calendars(index: usize) -> Vec<CalendarModel> {
 
 /// A one-off, busy, confirmed event, the shape most of the week's sample
 /// events take before a row overrides one field or two.
-fn timed_event(calendar: &str, id: &str, title: &str, start: EpochMillis, end: EpochMillis) -> CalendarEvent {
+fn timed_event(
+    calendar: &str,
+    id: &str,
+    title: &str,
+    start: EpochMillis,
+    end: EpochMillis,
+) -> CalendarEvent {
     CalendarEvent {
         calendar: calendar.into(),
         id: id.into(),
@@ -1131,7 +1196,12 @@ fn demo_monday(today: chrono::NaiveDate, start: chrono::Weekday) -> chrono::Naiv
 }
 
 /// `hour:minute` local, `day_offset` days after `monday`.
-fn at_week(monday: chrono::DateTime<chrono::Local>, day_offset: i64, hour: u32, minute: u32) -> EpochMillis {
+fn at_week(
+    monday: chrono::DateTime<chrono::Local>,
+    day_offset: i64,
+    hour: u32,
+    minute: u32,
+) -> EpochMillis {
     use chrono::TimeZone;
     let day = monday.date_naive() + chrono::Duration::days(day_offset);
     day.and_hms_opt(hour, minute, 0)
@@ -1143,7 +1213,11 @@ fn at_week(monday: chrono::DateTime<chrono::Local>, day_offset: i64, hour: u32, 
 /// The neutral span of an all-day event starting on `date` and running
 /// `days` of them: midnight UTC of `date` to midnight UTC `days` later.
 fn all_day_utc(date: chrono::NaiveDate, days: i64) -> (EpochMillis, EpochMillis) {
-    let start = date.and_hms_opt(0, 0, 0).unwrap_or_default().and_utc().timestamp_millis();
+    let start = date
+        .and_hms_opt(0, 0, 0)
+        .unwrap_or_default()
+        .and_utc()
+        .timestamp_millis();
     let end = (date + chrono::Duration::days(days))
         .and_hms_opt(0, 0, 0)
         .unwrap_or_default()
@@ -1186,13 +1260,41 @@ fn account0_events(now: EpochMillis) -> Vec<CalendarEvent> {
                     shared_with: vec!["ana.reyes@example.com".into()],
                     ..drive_file("Restaurant menu.pdf", "application/pdf", "pmdemo-menu")
                 },
-                drive_file("Summer trip budget", "application/vnd.google-apps.spreadsheet", "pmdemo-budget"),
+                drive_file(
+                    "Summer trip budget",
+                    "application/vnd.google-apps.spreadsheet",
+                    "pmdemo-budget",
+                ),
             ]),
-            ..timed_event("primary", "lunch-with-ana", "Lunch with Ana", at_week(monday, 1, 13, 0), at_week(monday, 1, 14, 0))
+            ..timed_event(
+                "primary",
+                "lunch-with-ana",
+                "Lunch with Ana",
+                at_week(monday, 1, 13, 0),
+                at_week(monday, 1, 14, 0),
+            )
         },
-        timed_event("primary", "dentist", "Dentist", at_week(monday, 2, 11, 0), at_week(monday, 2, 12, 0)),
-        timed_event("primary", "gym", "Gym", at_week(monday, 1, 16, 0), at_week(monday, 1, 17, 0)),
-        timed_event("primary", "yoga", "Yoga", at_week(monday, 9, 18, 30), at_week(monday, 9, 19, 30)),
+        timed_event(
+            "primary",
+            "dentist",
+            "Dentist",
+            at_week(monday, 2, 11, 0),
+            at_week(monday, 2, 12, 0),
+        ),
+        timed_event(
+            "primary",
+            "gym",
+            "Gym",
+            at_week(monday, 1, 16, 0),
+            at_week(monday, 1, 17, 0),
+        ),
+        timed_event(
+            "primary",
+            "yoga",
+            "Yoga",
+            at_week(monday, 9, 18, 30),
+            at_week(monday, 9, 19, 30),
+        ),
         timed_event(
             FAMILY,
             "swimming-lessons",
@@ -1241,7 +1343,8 @@ fn account0_events(now: EpochMillis) -> Vec<CalendarEvent> {
         ..CalendarEvent::default()
     });
     let year = monday.year();
-    let republic_day = chrono::NaiveDate::from_ymd_opt(year, 10, 5).unwrap_or_else(|| monday.date_naive());
+    let republic_day =
+        chrono::NaiveDate::from_ymd_opt(year, 10, 5).unwrap_or_else(|| monday.date_naive());
     let (start, end) = all_day_utc(republic_day, 1);
     events.push(CalendarEvent {
         calendar: HOLIDAYS_PT.into(),
@@ -1281,7 +1384,13 @@ fn account0_events(now: EpochMillis) -> Vec<CalendarEvent> {
     let soon = now - now.rem_euclid(5 * 60_000) + 10 * 60_000;
     events.push(CalendarEvent {
         color: Some("#3584e4".into()),
-        ..timed_event("primary", "demo-next-event", "Sprint planning", soon, soon + 30 * 60_000)
+        ..timed_event(
+            "primary",
+            "demo-next-event",
+            "Sprint planning",
+            soon,
+            soon + 30 * 60_000,
+        )
     });
     events.extend(two_years_ago(now));
     events
@@ -1298,11 +1407,41 @@ fn two_years_ago(now: EpochMillis) -> Vec<CalendarEvent> {
         .map_or(now, |at| at.timestamp_millis());
     let monday = week_monday(back);
     vec![
-        timed_event("primary", "old-planning", "Quarter planning", at_week(monday, 0, 10, 0), at_week(monday, 0, 12, 0)),
-        timed_event("primary", "old-lunch", "Lunch with Rui", at_week(monday, 1, 13, 0), at_week(monday, 1, 14, 0)),
-        timed_event("primary", "old-review", "Design review", at_week(monday, 2, 15, 0), at_week(monday, 2, 16, 30)),
-        timed_event(FAMILY, "old-recital", "Piano recital", at_week(monday, 3, 18, 0), at_week(monday, 3, 19, 30)),
-        timed_event("primary", "old-run", "Morning run", at_week(monday, 4, 7, 30), at_week(monday, 4, 8, 30)),
+        timed_event(
+            "primary",
+            "old-planning",
+            "Quarter planning",
+            at_week(monday, 0, 10, 0),
+            at_week(monday, 0, 12, 0),
+        ),
+        timed_event(
+            "primary",
+            "old-lunch",
+            "Lunch with Rui",
+            at_week(monday, 1, 13, 0),
+            at_week(monday, 1, 14, 0),
+        ),
+        timed_event(
+            "primary",
+            "old-review",
+            "Design review",
+            at_week(monday, 2, 15, 0),
+            at_week(monday, 2, 16, 30),
+        ),
+        timed_event(
+            FAMILY,
+            "old-recital",
+            "Piano recital",
+            at_week(monday, 3, 18, 0),
+            at_week(monday, 3, 19, 30),
+        ),
+        timed_event(
+            "primary",
+            "old-run",
+            "Morning run",
+            at_week(monday, 4, 7, 30),
+            at_week(monday, 4, 8, 30),
+        ),
     ]
 }
 
@@ -1321,7 +1460,13 @@ fn account1_events(now: EpochMillis) -> Vec<CalendarEvent> {
     let mut events = vec![
         CalendarEvent {
             rules: vec!["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".into()],
-            ..timed_event("primary", "standup", "Stand-up", standup_start, at_week(monday, 0, 9, 45))
+            ..timed_event(
+                "primary",
+                "standup",
+                "Stand-up",
+                standup_start,
+                at_week(monday, 0, 9, 45),
+            )
         },
         timed_event(
             DESIGN_TEAM,
@@ -1349,16 +1494,41 @@ fn account1_events(now: EpochMillis) -> Vec<CalendarEvent> {
                 at_week(monday, 3, 13, 0),
             )
         },
-        timed_event(DESIGN_TEAM, "retro", "Retro", at_week(monday, 4, 16, 30), at_week(monday, 4, 17, 30)),
+        timed_event(
+            DESIGN_TEAM,
+            "retro",
+            "Retro",
+            at_week(monday, 4, 16, 30),
+            at_week(monday, 4, 17, 30),
+        ),
         // Next Wednesday is the busiest day, so a short window folds it
         // into an "N more" button in Month. It sits outside the week the
         // mockup draws.
-        timed_event("primary", "sprint-review", "Sprint review", at_week(monday, 9, 11, 0), at_week(monday, 9, 12, 0)),
-        timed_event(DESIGN_TEAM, "design-sync", "Design sync", at_week(monday, 9, 14, 0), at_week(monday, 9, 15, 0)),
-        timed_event("primary", "hiring-panel", "Hiring panel", at_week(monday, 9, 16, 0), at_week(monday, 9, 17, 0)),
+        timed_event(
+            "primary",
+            "sprint-review",
+            "Sprint review",
+            at_week(monday, 9, 11, 0),
+            at_week(monday, 9, 12, 0),
+        ),
+        timed_event(
+            DESIGN_TEAM,
+            "design-sync",
+            "Design sync",
+            at_week(monday, 9, 14, 0),
+            at_week(monday, 9, 15, 0),
+        ),
+        timed_event(
+            "primary",
+            "hiring-panel",
+            "Hiring panel",
+            at_week(monday, 9, 16, 0),
+            at_week(monday, 9, 17, 0),
+        ),
     ];
     events.extend(status_entries(monday));
-    let (offsite_start, offsite_end) = all_day_utc(monday.date_naive() + chrono::Duration::days(3), 2);
+    let (offsite_start, offsite_end) =
+        all_day_utc(monday.date_naive() + chrono::Duration::days(3), 2);
     events.push(CalendarEvent {
         calendar: "primary".into(),
         id: "lisbon-offsite".into(),
@@ -1465,7 +1635,10 @@ fn account1_events(now: EpochMillis) -> Vec<CalendarEvent> {
                 ..CalendarGuest::default()
             },
         ],
-        rules: vec![format!("RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL={}", until_stamp(until))],
+        rules: vec![format!(
+            "RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL={}",
+            until_stamp(until)
+        )],
         ..CalendarEvent::default()
     });
     events.push(CalendarEvent {
@@ -1572,15 +1745,30 @@ fn status_entries(monday: chrono::DateTime<chrono::Local>) -> Vec<CalendarEvent>
     use mailrs_domain::calendar::{Decline, Declines, Kind, Workplace};
     let mut entries = vec![
         CalendarEvent {
-            kind: Kind::Focus(Decline { meetings: Declines::New, message: "Heads down on the Q4 roadmap".into() }),
-            ..timed_event("primary", "focus-tuesday", "Focus time", at_week(monday, 1, 10, 0), at_week(monday, 1, 12, 0))
+            kind: Kind::Focus(Decline {
+                meetings: Declines::New,
+                message: "Heads down on the Q4 roadmap".into(),
+            }),
+            ..timed_event(
+                "primary",
+                "focus-tuesday",
+                "Focus time",
+                at_week(monday, 1, 10, 0),
+                at_week(monday, 1, 12, 0),
+            )
         },
         CalendarEvent {
             kind: Kind::OutOfOffice(Decline {
                 meetings: Declines::All,
                 message: "Declined because I am out of office".into(),
             }),
-            ..timed_event("primary", "away-friday", "Out of office", at_week(monday, 4, 13, 0), at_week(monday, 4, 16, 0))
+            ..timed_event(
+                "primary",
+                "away-friday",
+                "Out of office",
+                at_week(monday, 4, 13, 0),
+                at_week(monday, 4, 16, 0),
+            )
         },
     ];
     let places = [
@@ -1884,6 +2072,14 @@ async fn seed_fastmail(
         })
         .await?;
     let imap = Arc::new(FakeImap::new());
+    imap.with(|data| {
+        data.quota = vec![mailrs_imap::QuotaUse {
+            root: String::new(),
+            resource: "STORAGE".into(),
+            usage: 3_145_728,
+            limit: 10_485_760,
+        }]
+    });
     for name in FOLDERS {
         imap.add_mailbox(name, None);
     }
@@ -1900,7 +2096,12 @@ async fn seed_fastmail(
     }
     let smtp = Arc::new(FakeSmtp::default());
     let dav = Arc::new(FakeDav::new());
-    dav.add_collection("/cal/personal/", DavKind::Calendar, "Personal", Some("#e66100"));
+    dav.add_collection(
+        "/cal/personal/",
+        DavKind::Calendar,
+        "Personal",
+        Some("#e66100"),
+    );
     dav.add_collection("/card/default/", DavKind::AddressBook, "Contacts", None);
     for (href, body) in fastmail_calendar(now).into_iter().chain(fastmail_cards()) {
         dav.put_resource(&href, &body);
@@ -1913,7 +2114,16 @@ async fn seed_fastmail(
         events,
     ));
     fill_store(&sync).await?;
-    Ok((account_id, DemoServer::Imap { imap, smtp, dav, db: db.clone() }, sync))
+    Ok((
+        account_id,
+        DemoServer::Imap {
+            imap,
+            smtp,
+            dav,
+            db: db.clone(),
+        },
+        sync,
+    ))
 }
 
 /// The Fastmail account's services: its IMAP server for mail, a CalDAV and
@@ -1932,7 +2142,11 @@ fn imap_services(
     let mail = services.mail.clone();
     let dav = Arc::new(AnyDav::from(Arc::clone(dav)));
     services
-        .with_calendar(AnyCalendar::Dav(CalDav::new(Arc::clone(&dav), mail, vec![FASTMAIL.to_string()])))
+        .with_calendar(AnyCalendar::Dav(CalDav::new(
+            Arc::clone(&dav),
+            mail,
+            vec![FASTMAIL.to_string()],
+        )))
         .with_contacts(AnyContacts::Dav(CardDav::new(dav)))
         .with_rules(AnyRules::Local(LocalRules::new(db.clone(), account_id)))
 }
@@ -1942,29 +2156,62 @@ fn imap_services(
 /// CalDAV server holds them.
 fn fastmail_calendar(now: EpochMillis) -> Vec<(String, String)> {
     let monday = week_monday(now);
+    let event = |uid: &str, title: &str, start: EpochMillis, minutes: i64, rule: &str| {
+        caldav_event(
+            "Fastmail",
+            now,
+            uid,
+            title,
+            start..start + minutes * 60_000,
+            rule,
+        )
+    };
+    vec![
+        (
+            "/cal/personal/climbing.ics".into(),
+            event("climbing", "Climbing", at_week(monday, 1, 18, 30), 90, ""),
+        ),
+        (
+            "/cal/personal/dentist.ics".into(),
+            event("dentist", "Dentist", at_week(monday, 3, 10, 0), 45, ""),
+        ),
+        (
+            "/cal/personal/book-club.ics".into(),
+            event(
+                "book-club",
+                "Book club",
+                at_week(monday, 2, 19, 0),
+                120,
+                "RRULE:FREQ=WEEKLY\r\n",
+            ),
+        ),
+    ]
+}
+
+/// One event as the CalDAV server `product` holds it, written at `now`.
+/// `rule` is a whole RRULE line, or nothing for an event that happens
+/// once.
+fn caldav_event(
+    product: &str,
+    now: EpochMillis,
+    uid: &str,
+    title: &str,
+    span: std::ops::Range<EpochMillis>,
+    rule: &str,
+) -> String {
     let stamp = |at: EpochMillis| {
         chrono::DateTime::<chrono::Utc>::from_timestamp_millis(at)
             .unwrap_or_default()
             .format("%Y%m%dT%H%M%SZ")
             .to_string()
     };
-    let event = |uid: &str, title: &str, start: EpochMillis, minutes: i64, rule: &str| {
-        format!(
-            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Fastmail//EN\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:{}\r\n\
-             DTSTART:{}\r\nDTEND:{}\r\n{rule}SUMMARY:{title}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-            stamp(now),
-            stamp(start),
-            stamp(start + minutes * 60_000),
-        )
-    };
-    vec![
-        ("/cal/personal/climbing.ics".into(), event("climbing", "Climbing", at_week(monday, 1, 18, 30), 90, "")),
-        ("/cal/personal/dentist.ics".into(), event("dentist", "Dentist", at_week(monday, 3, 10, 0), 45, "")),
-        (
-            "/cal/personal/book-club.ics".into(),
-            event("book-club", "Book club", at_week(monday, 2, 19, 0), 120, "RRULE:FREQ=WEEKLY\r\n"),
-        ),
-    ]
+    format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//{product}//EN\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:{}\r\n\
+         DTSTART:{}\r\nDTEND:{}\r\n{rule}SUMMARY:{title}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        stamp(now),
+        stamp(span.start),
+        stamp(span.end),
+    )
 }
 
 /// The Fastmail account's address book, as vCards.
@@ -2262,7 +2509,8 @@ fn stand_in(attachment_id: &str, mime_type: &str, size: i64) -> Vec<u8> {
     // The body reads each file's size off its bytes, so the file runs to
     // the size the sample gives it and the attachment row shows that.
     let mut file =
-        format!("This is {attachment_id}, a stand-in file from Penguin Mail demo mode.\n").into_bytes();
+        format!("This is {attachment_id}, a stand-in file from Penguin Mail demo mode.\n")
+            .into_bytes();
     file.resize(file.len().max(size as usize), b'\n');
     file
 }
@@ -2327,7 +2575,9 @@ impl Sample {
                     (Some(ics), "text/calendar") => ics.clone().into_bytes(),
                     _ => stand_in(&id, &attachment.mime_type, attachment.size),
                 };
-                state.attachments.insert((meta.id.clone(), id.clone()), bytes);
+                state
+                    .attachments
+                    .insert((meta.id.clone(), id.clone()), bytes);
             }
             if let Some(draft_id) = self.draft {
                 state
@@ -2517,31 +2767,46 @@ fn invitation_ics(now: EpochMillis) -> String {
 /// `METHOD:REQUEST` and nobody to answer.
 fn ticket_ics(now: EpochMillis) -> String {
     let stamp = |at: chrono::DateTime<chrono::Local>| {
-        at.with_timezone(&chrono::Utc).format("%Y%m%dT%H%M%SZ").to_string()
+        at.with_timezone(&chrono::Utc)
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string()
     };
     let sent = chrono::DateTime::from_timestamp_millis(now).unwrap_or_default();
     let out = weekday_at(now, chrono::Weekday::Fri, 9);
     let back = weekday_at(now, chrono::Weekday::Sun, 17);
-    let leg = |uid: String, title: &str, from: &str, to: &str, start: chrono::DateTime<chrono::Local>| {
-        vec![
-            "BEGIN:VEVENT".to_string(),
-            format!("UID:{uid}"),
-            format!("DTSTAMP:{}", stamp(sent.with_timezone(&chrono::Local))),
-            format!("DTSTART:{}", stamp(start)),
-            format!("DTEND:{}", stamp(start + chrono::Duration::minutes(195))),
-            format!("SUMMARY:{title}"),
-            format!("LOCATION:{from} to {to}\\, coach 4 seat 22"),
-            "END:VEVENT".to_string(),
-        ]
-    };
+    let leg =
+        |uid: String, title: &str, from: &str, to: &str, start: chrono::DateTime<chrono::Local>| {
+            vec![
+                "BEGIN:VEVENT".to_string(),
+                format!("UID:{uid}"),
+                format!("DTSTAMP:{}", stamp(sent.with_timezone(&chrono::Local))),
+                format!("DTSTART:{}", stamp(start)),
+                format!("DTEND:{}", stamp(start + chrono::Duration::minutes(195))),
+                format!("SUMMARY:{title}"),
+                format!("LOCATION:{from} to {to}\\, coach 4 seat 22"),
+                "END:VEVENT".to_string(),
+            ]
+        };
     let mut lines = vec![
         "BEGIN:VCALENDAR".to_string(),
         "PRODID:-//CP Comboios//Tickets//EN".to_string(),
         "VERSION:2.0".to_string(),
         "METHOD:PUBLISH".to_string(),
     ];
-    lines.extend(leg(format!("{TICKET_UID}-out"), "Train to Porto", "Lisboa Santa Apolonia", "Porto Campanha", out));
-    lines.extend(leg(format!("{TICKET_UID}-back"), "Train to Lisboa", "Porto Campanha", "Lisboa Santa Apolonia", back));
+    lines.extend(leg(
+        format!("{TICKET_UID}-out"),
+        "Train to Porto",
+        "Lisboa Santa Apolonia",
+        "Porto Campanha",
+        out,
+    ));
+    lines.extend(leg(
+        format!("{TICKET_UID}-back"),
+        "Train to Lisboa",
+        "Porto Campanha",
+        "Lisboa Santa Apolonia",
+        back,
+    ));
     lines.push("END:VCALENDAR".to_string());
     lines.push(String::new());
     lines.join("\r\n")
@@ -2751,6 +3016,16 @@ mod tests {
         assert!(!offers.categories);
         assert!(offers.calendar && offers.contacts && offers.rules);
         assert!(!offers.auto_reply, "Fastmail runs no ManageSieve here");
+        assert_eq!(
+            demo.mail
+                .services(id)
+                .unwrap()
+                .mail
+                .storage()
+                .await
+                .unwrap(),
+            mailrs_sync::Storage::new(3 * 1024 * 1024 * 1024, 10 * 1024 * 1024 * 1024, None)
+        );
     }
 
     #[tokio::test]
@@ -2763,9 +3038,16 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(account.provider, mailrs_domain::Provider::Pop3);
-        assert!(demo.mail.services(account.id).is_some(), "the demo serves it");
+        assert!(
+            demo.mail.services(account.id).is_some(),
+            "the demo serves it"
+        );
         let id = account.id;
-        let failing = demo.db.read(move |c| mailrs_store::pop3::failing(c, id)).await.unwrap();
+        let failing = demo
+            .db
+            .read(move |c| mailrs_store::pop3::failing(c, id))
+            .await
+            .unwrap();
         assert_eq!(failing.len(), 2, "{failing:?}");
         let inbox = demo
             .db
@@ -2773,7 +3055,11 @@ mod tests {
             .await
             .unwrap();
         assert!(inbox.len() >= 4, "{inbox:?}");
-        let own = demo.db.read(move |c| mailrs_store::labels::list_labels(c, id)).await.unwrap();
+        let own = demo
+            .db
+            .read(move |c| mailrs_store::labels::list_labels(c, id))
+            .await
+            .unwrap();
         assert!(own.iter().any(|l| l.name == pop3::FOLDER), "{own:?}");
     }
 
@@ -2792,7 +3078,11 @@ mod tests {
         let offers = services.offers();
         assert!(offers.tags && offers.focused && offers.calendar && offers.contacts);
         let id = account.id;
-        let tags = demo.db.read(move |c| mailrs_store::labels::tag_ids(c, id)).await.unwrap();
+        let tags = demo
+            .db
+            .read(move |c| mailrs_store::labels::tag_ids(c, id))
+            .await
+            .unwrap();
         assert!(tags.contains("category:Travel"), "{tags:?}");
         let counts = demo
             .db
@@ -2802,14 +3092,27 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(counts[&mailrs_domain::Category::Other] > 0 && counts[&mailrs_domain::Category::Focused] > 0);
-        let calendars = demo.db.read(move |c| mailrs_store::calendar::calendars(c, id)).await.unwrap();
+        assert!(
+            counts[&mailrs_domain::Category::Other] > 0
+                && counts[&mailrs_domain::Category::Focused] > 0
+        );
+        let calendars = demo
+            .db
+            .read(move |c| mailrs_store::calendar::calendars(c, id))
+            .await
+            .unwrap();
         assert!(!calendars.is_empty());
         let (from, to) = (demo.now - 40 * 86_400_000, demo.now + 40 * 86_400_000);
         let seen = demo
             .db
             .read(move |c| {
-                mailrs_store::calendar::occurrences(c, &[id], from, to, mailrs_store::calendar::CalendarScope::Shown)
+                mailrs_store::calendar::occurrences(
+                    c,
+                    &[id],
+                    from,
+                    to,
+                    mailrs_store::calendar::CalendarScope::Shown,
+                )
             })
             .await
             .unwrap();
@@ -2817,8 +3120,16 @@ mod tests {
             seen.iter().filter(|o| o.event.title == "Standup").count() >= 4,
             "the weekly standup repeats on the calendar"
         );
-        let people = demo.db.read(mailrs_store::address_book::list).await.unwrap();
-        assert!(people.iter().any(|p| p.account_id == id && p.name.as_deref() == Some("Rui Costa")));
+        let people = demo
+            .db
+            .read(mailrs_store::address_book::list)
+            .await
+            .unwrap();
+        assert!(
+            people
+                .iter()
+                .any(|p| p.account_id == id && p.name.as_deref() == Some("Rui Costa"))
+        );
     }
 
     #[tokio::test]
@@ -2826,19 +3137,49 @@ mod tests {
         let demo = demo().await;
         let fastmail = demo.fastmail().await;
         let services = demo.mail.services(fastmail).expect("the demo serves it");
-        assert!(matches!(services.calendar, Some(mailrs_sync::AnyCalendar::Dav(_))));
-        assert!(matches!(services.contacts, Some(mailrs_sync::AnyContacts::Dav(_))));
+        assert!(matches!(
+            services.calendar,
+            Some(mailrs_sync::AnyCalendar::Dav(_))
+        ));
+        assert!(matches!(
+            services.contacts,
+            Some(mailrs_sync::AnyContacts::Dav(_))
+        ));
         assert_eq!(
             services.rules.as_ref().map(mailrs_sync::AnyRules::place),
             Some(mailrs_sync::RulesPlace::ThisComputer)
         );
-        assert!(services.auto_reply.is_none(), "Fastmail runs no ManageSieve");
-        let calendars = demo.db.read(move |c| mailrs_store::calendar::calendars(c, fastmail)).await.unwrap();
+        assert!(
+            services.auto_reply.is_none(),
+            "Fastmail runs no ManageSieve"
+        );
+        let calendars = demo
+            .db
+            .read(move |c| mailrs_store::calendar::calendars(c, fastmail))
+            .await
+            .unwrap();
         assert_eq!(calendars.len(), 1, "the calendar was read at seed");
-        assert!(demo.db.read(move |c| mailrs_store::calendar::synced(c, fastmail)).await.unwrap());
-        let people = demo.db.read(mailrs_store::address_book::list).await.unwrap();
-        assert!(people.iter().any(|p| p.account_id == fastmail && p.name.as_deref() == Some("Tomás Faria")));
-        let rules = demo.db.read(move |c| mailrs_store::local_rules::list(c, fastmail)).await.unwrap();
+        assert!(
+            demo.db
+                .read(move |c| mailrs_store::calendar::synced(c, fastmail))
+                .await
+                .unwrap()
+        );
+        let people = demo
+            .db
+            .read(mailrs_store::address_book::list)
+            .await
+            .unwrap();
+        assert!(
+            people
+                .iter()
+                .any(|p| p.account_id == fastmail && p.name.as_deref() == Some("Tomás Faria"))
+        );
+        let rules = demo
+            .db
+            .read(move |c| mailrs_store::local_rules::list(c, fastmail))
+            .await
+            .unwrap();
         assert_eq!(rules.len(), 1);
     }
 
@@ -2848,7 +3189,10 @@ mod tests {
         for index in 0..ACCOUNTS.len() {
             let id = demo.account(index).await;
             assert!(
-                demo.db.read(move |c| mailrs_store::calendar::synced(c, id)).await.unwrap(),
+                demo.db
+                    .read(move |c| mailrs_store::calendar::synced(c, id))
+                    .await
+                    .unwrap(),
                 "account {index} should be synced"
             );
         }
@@ -2875,21 +3219,29 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|(title, calendar, series)| title == "Sprint planning" && calendar == "primary" && series.is_none()),
+                .any(|(title, calendar, series)| title == "Sprint planning"
+                    && calendar == "primary"
+                    && series.is_none()),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(
+                |(title, calendar, _)| title == "Offline editor design review"
+                    && calendar == "primary"
+            ),
             "{events:?}"
         );
         assert!(
             events
                 .iter()
-                .any(|(title, calendar, _)| title == "Offline editor design review" && calendar == "primary"),
-            "{events:?}"
-        );
-        assert!(
-            events.iter().any(|(title, calendar, _)| title == "Lunch with Ana" && calendar == "primary"),
+                .any(|(title, calendar, _)| title == "Lunch with Ana" && calendar == "primary"),
             "{events:?}"
         );
         assert_eq!(
-            events.iter().filter(|(title, _, series)| title == "Sprint planning" && series.is_none()).count(),
+            events
+                .iter()
+                .filter(|(title, _, series)| title == "Sprint planning" && series.is_none())
+                .count(),
             1,
             "no second Sprint planning: {events:?}"
         );
@@ -3039,7 +3391,9 @@ mod tests {
             .unwrap();
         sync.incremental().await.unwrap();
 
-        let sent = demo.threads(ThreadFilter::unified(MailSet::Role(Role::Sent))).await;
+        let sent = demo
+            .threads(ThreadFilter::unified(MailSet::Role(Role::Sent)))
+            .await;
         assert!(sent.iter().any(|t| t.id == "t-roadmap"), "{sent:?}");
         let body = sync.body("sent1").await.unwrap();
         assert_eq!(body.text.as_deref(), Some("October works for me.\r\n"));
@@ -3095,11 +3449,21 @@ mod tests {
         let day = 24 * 60 * 60 * 1_000;
         let found = demo
             .db
-            .read(move |c| mailrs_store::calendar::with_uid(c, work, INVITE_UID, now - 30 * day, now + 90 * day))
+            .read(move |c| {
+                mailrs_store::calendar::with_uid(
+                    c,
+                    work,
+                    INVITE_UID,
+                    now - 30 * day,
+                    now + 90 * day,
+                )
+            })
             .await
             .unwrap();
         let first = found.first().expect("the design review is on the calendar");
-        let sent = chrono::DateTime::from_timestamp_millis(now).unwrap().with_timezone(&chrono::Local);
+        let sent = chrono::DateTime::from_timestamp_millis(now)
+            .unwrap()
+            .with_timezone(&chrono::Local);
         assert_eq!(first.start, next_tuesday(sent).timestamp_millis());
         assert_eq!(first.event.title, "Offline editor design review");
         assert_eq!(first.event.my_answer, None);

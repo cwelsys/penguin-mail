@@ -3,9 +3,9 @@
 //! service and sits here instead. `MailActions` holds one; tests and the
 //! demo hand it the fake, so nothing they do posts anywhere.
 
+use crate::SyncError;
 #[cfg(any(test, feature = "fake"))]
 use crate::fake::FakeOneClick;
-use crate::SyncError;
 
 /// Where a one-click request goes.
 pub enum OneClick {

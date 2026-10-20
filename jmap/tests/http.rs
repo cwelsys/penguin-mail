@@ -16,7 +16,9 @@ async fn serving_session(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/jmap/session"))
         .and(header("Authorization", "Bearer token-1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(session_on(&server.uri(), json!({}))))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(session_on(&server.uri(), json!({}))),
+        )
         .mount(server)
         .await;
 }
@@ -29,7 +31,10 @@ async fn the_session_comes_with_the_token_and_is_kept() {
     let first = client.session().await.unwrap();
     let again = client.session().await.unwrap();
     assert_eq!(first.username, "me@example.org");
-    assert!(std::sync::Arc::ptr_eq(&first, &again), "the second read is the cached one");
+    assert!(
+        std::sync::Arc::ptr_eq(&first, &again),
+        "the second read is the cached one"
+    );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
 
@@ -38,11 +43,18 @@ async fn a_redirect_on_the_same_host_is_followed() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/.well-known/jmap"))
-        .respond_with(ResponseTemplate::new(307).insert_header("Location", format!("{}/jmap/session", server.uri())))
+        .respond_with(
+            ResponseTemplate::new(307)
+                .insert_header("Location", format!("{}/jmap/session", server.uri())),
+        )
         .mount(&server)
         .await;
     serving_session(&server).await;
-    let client = JmapClient::new(&format!("{}/.well-known/jmap", server.uri()), Auth::Bearer("token-1".into())).unwrap();
+    let client = JmapClient::new(
+        &format!("{}/.well-known/jmap", server.uri()),
+        Auth::Bearer("token-1".into()),
+    )
+    .unwrap();
     assert_eq!(client.session().await.unwrap().state, "s1");
 }
 
@@ -51,7 +63,10 @@ async fn a_redirect_to_another_host_gets_no_credentials() {
     let (server, elsewhere) = (MockServer::start().await, MockServer::start().await);
     Mock::given(method("GET"))
         .and(path("/jmap/session"))
-        .respond_with(ResponseTemplate::new(302).insert_header("Location", format!("{}/jmap/session", elsewhere.uri())))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("Location", format!("{}/jmap/session", elsewhere.uri())),
+        )
         .mount(&server)
         .await;
     let refused = client(&server).session().await;
@@ -66,18 +81,27 @@ async fn a_refused_token_says_unauthorized() {
         .respond_with(ResponseTemplate::new(401).set_body_string("No Authorization header"))
         .mount(&server)
         .await;
-    assert_eq!(client(&server).session().await.unwrap_err(), JmapError::Unauthorized);
+    assert_eq!(
+        client(&server).session().await.unwrap_err(),
+        JmapError::Unauthorized
+    );
 }
 
 #[test]
 fn a_session_url_over_plain_http_is_refused_unless_it_is_this_computer() {
     let bearer = || Auth::Bearer("t".into());
-    assert!(matches!(JmapClient::new("http://mail.example.org/jmap", bearer()), Err(JmapError::BadUrl(_))));
+    assert!(matches!(
+        JmapClient::new("http://mail.example.org/jmap", bearer()),
+        Err(JmapError::BadUrl(_))
+    ));
     assert!(JmapClient::new("http://localhost:8080/jmap/session", bearer()).is_ok());
     assert!(JmapClient::new("http://127.0.0.1:8080/jmap/session", bearer()).is_ok());
     assert!(JmapClient::new("http://[::1]:8080/jmap/session", bearer()).is_ok());
     assert!(JmapClient::new("https://api.fastmail.com/jmap/session", bearer()).is_ok());
-    assert!(matches!(JmapClient::new("ftp://example.org/", bearer()), Err(JmapError::BadUrl(_))));
+    assert!(matches!(
+        JmapClient::new("ftp://example.org/", bearer()),
+        Err(JmapError::BadUrl(_))
+    ));
 }
 
 #[tokio::test]
@@ -107,8 +131,17 @@ async fn a_capability_the_session_lacks_never_leaves_the_computer() {
     let mut request = Request::new();
     request.call(SIEVE, "SieveScript/get", json!({"accountId": "A1"}));
     let refused = client(&server).send(&request).await;
-    assert_eq!(refused.unwrap_err(), JmapError::UnknownCapability(SIEVE.into()));
-    let posts = server.received_requests().await.unwrap().into_iter().filter(|r| r.method.as_str() == "POST").count();
+    assert_eq!(
+        refused.unwrap_err(),
+        JmapError::UnknownCapability(SIEVE.into())
+    );
+    let posts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .count();
     assert_eq!(posts, 0);
 }
 
@@ -120,7 +153,10 @@ async fn a_request_past_max_calls_is_refused_before_it_goes() {
     for _ in 0..5 {
         request.call(MAIL, "Mailbox/get", json!({"accountId": "A1"}));
     }
-    assert_eq!(client(&server).send(&request).await.unwrap_err(), JmapError::RequestTooLarge);
+    assert_eq!(
+        client(&server).send(&request).await.unwrap_err(),
+        JmapError::RequestTooLarge
+    );
 }
 
 #[tokio::test]
@@ -136,7 +172,10 @@ async fn a_problem_answer_becomes_its_kind() {
     let mut request = Request::new();
     request.call(MAIL, "Mailbox/get", json!({"accountId": "A1"}));
     let refused = client(&server).send(&request).await.unwrap_err();
-    assert_eq!(refused, JmapError::UnknownCapability("urn:ietf:params:jmap:mail".into()));
+    assert_eq!(
+        refused,
+        JmapError::UnknownCapability("urn:ietf:params:jmap:mail".into())
+    );
 }
 
 #[tokio::test]
@@ -150,7 +189,12 @@ async fn a_rate_limit_carries_its_retry_after() {
     let mut request = Request::new();
     request.call(MAIL, "Mailbox/get", json!({"accountId": "A1"}));
     let refused = client(&server).send(&request).await.unwrap_err();
-    assert_eq!(refused, JmapError::RateLimited { retry_after: Some(Duration::from_secs(7)) });
+    assert_eq!(
+        refused,
+        JmapError::RateLimited {
+            retry_after: Some(Duration::from_secs(7))
+        }
+    );
 }
 
 #[tokio::test]
@@ -165,7 +209,10 @@ async fn an_answer_past_the_cap_is_refused() {
     let mut request = Request::new();
     request.call(MAIL, "Mailbox/get", json!({"accountId": "A1"}));
     let refused = client(&server).send(&request).await.unwrap_err();
-    assert!(matches!(refused, JmapError::AnswerTooLarge { .. }), "{refused:?}");
+    assert!(
+        matches!(refused, JmapError::AnswerTooLarge { .. }),
+        "{refused:?}"
+    );
 }
 
 #[tokio::test]
@@ -173,7 +220,10 @@ async fn a_new_session_state_makes_the_next_call_read_the_session_again() {
     let server = MockServer::start().await;
     serving_session(&server).await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"methodResponses": [], "sessionState": "s2"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"methodResponses": [], "sessionState": "s2"})),
+        )
         .mount(&server)
         .await;
     let client = client(&server);
@@ -181,8 +231,17 @@ async fn a_new_session_state_makes_the_next_call_read_the_session_again() {
     request.call(MAIL, "Mailbox/get", json!({"accountId": "A1"}));
     client.send(&request).await.unwrap();
     client.send(&request).await.unwrap();
-    let gets = server.received_requests().await.unwrap().into_iter().filter(|r| r.method.as_str() == "GET").count();
-    assert_eq!(gets, 2, "the session is read once, then again after the state moved");
+    let gets = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "GET")
+        .count();
+    assert_eq!(
+        gets, 2,
+        "the session is read once, then again after the state moved"
+    );
 }
 
 #[tokio::test]
@@ -195,7 +254,10 @@ async fn a_session_url_on_another_host_in_the_session_is_refused() {
         .mount(&server)
         .await;
     let refused = client(&server).session().await.unwrap_err();
-    assert!(matches!(refused, JmapError::BadUrl(_)), "plain HTTP off this computer: {refused:?}");
+    assert!(
+        matches!(refused, JmapError::BadUrl(_)),
+        "plain HTTP off this computer: {refused:?}"
+    );
 }
 
 #[tokio::test]
@@ -212,7 +274,10 @@ async fn calls_on_a_fresh_client_wait_for_one_session_read() {
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"methodResponses": [], "sessionState": "s1"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"methodResponses": [], "sessionState": "s1"})),
+        )
         .mount(&server)
         .await;
     let client = client(&server);
@@ -234,7 +299,10 @@ async fn calls_on_a_fresh_client_wait_for_one_session_read() {
 
 #[test]
 fn a_session_url_with_a_user_or_password_is_refused_and_not_repeated() {
-    for url in ["https://me:hunter2@example.org/jmap", "https://me@example.org/jmap"] {
+    for url in [
+        "https://me:hunter2@example.org/jmap",
+        "https://me@example.org/jmap",
+    ] {
         let refused = JmapClient::new(url, Auth::Bearer("t".into())).unwrap_err();
         assert!(matches!(refused, JmapError::BadUrl(_)), "{refused:?}");
         let said = refused.to_string();
@@ -258,7 +326,11 @@ async fn a_session_naming_a_url_with_a_password_is_refused() {
 
 #[test]
 fn a_session_url_that_does_not_parse_is_not_repeated() {
-    let refused = JmapClient::new("https://me:hunter2@exa mple.org/jmap", Auth::Bearer("t".into())).unwrap_err();
+    let refused = JmapClient::new(
+        "https://me:hunter2@exa mple.org/jmap",
+        Auth::Bearer("t".into()),
+    )
+    .unwrap_err();
     assert!(matches!(refused, JmapError::BadUrl(_)), "{refused:?}");
     let said = refused.to_string();
     assert!(!said.contains("hunter2") && !said.contains("me:"), "{said}");
@@ -284,13 +356,20 @@ async fn a_same_host_redirect_with_a_password_in_it_is_refused_not_followed() {
     let port = server.address().port();
     Mock::given(method("GET"))
         .and(path("/jmap/session"))
-        .respond_with(ResponseTemplate::new(302).insert_header("Location", format!("http://u:hunter2@127.0.0.1:{port}/other")))
+        .respond_with(ResponseTemplate::new(302).insert_header(
+            "Location",
+            format!("http://u:hunter2@127.0.0.1:{port}/other"),
+        ))
         .mount(&server)
         .await;
     let refused = client(&server).session().await.unwrap_err();
     assert!(matches!(refused, JmapError::BadUrl(_)), "{refused:?}");
     assert!(!refused.to_string().contains("hunter2"), "{refused}");
-    assert_eq!(server.received_requests().await.unwrap().len(), 1, "the target is never fetched");
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        1,
+        "the target is never fetched"
+    );
 }
 
 #[tokio::test]
@@ -299,7 +378,10 @@ async fn a_redirect_from_the_api_url_is_not_followed_and_gets_no_credentials() {
     serving_session(&server).await;
     Mock::given(method("POST"))
         .and(path("/api/"))
-        .respond_with(ResponseTemplate::new(307).insert_header("Location", format!("{}/api/", elsewhere.uri())))
+        .respond_with(
+            ResponseTemplate::new(307)
+                .insert_header("Location", format!("{}/api/", elsewhere.uri())),
+        )
         .mount(&server)
         .await;
     let mut request = Request::new();
@@ -325,5 +407,8 @@ async fn a_malformed_answer_does_not_repeat_what_it_carried() {
     request.call(MAIL, "Mailbox/get", json!({"accountId": "A1", "ids": null}));
     let refused = client(&server).send(&request).await.unwrap_err();
     assert!(matches!(refused, JmapError::Decode(_)), "{refused:?}");
-    assert!(!refused.to_string().contains("secret@example.org"), "{refused}");
+    assert!(
+        !refused.to_string().contains("secret@example.org"),
+        "{refused}"
+    );
 }

@@ -237,7 +237,10 @@ mod tests {
         assert_eq!(found.verdict, Verdict::Servers);
         assert_eq!(found.candidates[0].source, Source::Table);
         assert_eq!(
-            found.candidates[0].provider.as_ref().map(|p| p.name.as_str()),
+            found.candidates[0]
+                .provider
+                .as_ref()
+                .map(|p| p.name.as_str()),
             Some("Fastmail")
         );
     }
@@ -245,9 +248,19 @@ mod tests {
     #[test]
     fn a_table_domain_offers_its_pop3_server_beside_imap() {
         let found = table_only("fastmail.com");
-        let pop3 = found.candidates[0].pop3.as_ref().expect("Fastmail lists POP3");
-        assert_eq!((pop3.host.as_str(), pop3.port, pop3.security), ("pop.fastmail.com", 995, Security::Tls));
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, "imap.fastmail.com", "IMAP stays first");
+        let pop3 = found.candidates[0]
+            .pop3
+            .as_ref()
+            .expect("Fastmail lists POP3");
+        assert_eq!(
+            (pop3.host.as_str(), pop3.port, pop3.security),
+            ("pop.fastmail.com", 995, Security::Tls)
+        );
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().host,
+            "imap.fastmail.com",
+            "IMAP stays first"
+        );
     }
 
     #[test]
@@ -269,7 +282,10 @@ mod tests {
         let net = FakeNet::default().answer_mx("example.org", &["mx01.mail.icloud.com"]);
         let found = find(&net, "ann@example.org").await;
         assert_eq!(found.candidates[0].source, Source::Mx);
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, "imap.mail.me.com");
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().host,
+            "imap.mail.me.com"
+        );
     }
 
     #[tokio::test]
@@ -308,7 +324,10 @@ mod tests {
         let found = find(&net, "ann@example.org").await;
         assert_eq!(found.verdict, Verdict::Servers);
         assert_eq!(found.candidates[0].imap, None);
-        assert_eq!(found.candidates[0].pop3.as_ref().map(|s| s.host.as_str()), Some("pop.example.org"));
+        assert_eq!(
+            found.candidates[0].pop3.as_ref().map(|s| s.host.as_str()),
+            Some("pop.example.org")
+        );
         assert_eq!(found.candidates[0].smtp.host, "smtp.example.org");
     }
 
@@ -325,7 +344,10 @@ mod tests {
             );
         let found = find(&net, "ann@example.org").await;
         assert_eq!(found.candidates[0].source, Source::Autoconfig);
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, "mail.example.org");
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().host,
+            "mail.example.org"
+        );
     }
 
     #[tokio::test]
@@ -482,7 +504,10 @@ mod tests {
             .serve("https://autoconfig.hoster.net/mail/config-v1.1.xml", HOSTER);
         let found = find(&net, "ann@example.org").await;
         assert_eq!(found.candidates[0].source, Source::MxAutoconfig);
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, "mail.example.org");
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().host,
+            "mail.example.org"
+        );
         assert!(found.candidates.iter().all(|c| !c.confirm));
     }
 
@@ -545,7 +570,10 @@ mod tests {
                 MAILBOX,
             );
         let found = find(&net, "ann@example.org").await;
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, "mail.example.org");
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().host,
+            "mail.example.org"
+        );
     }
 
     #[tokio::test]

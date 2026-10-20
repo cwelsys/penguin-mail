@@ -30,7 +30,8 @@ fn with_file(size: usize) -> Vec<u8> {
 #[tokio::test]
 async fn a_small_message_is_read_whole_and_kept_for_its_files() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
     h.bootstrap().await;
 
     let body = h.sync.body("INBOX/1001/1").await.unwrap();
@@ -43,13 +44,17 @@ async fn a_small_message_is_read_whole_and_kept_for_its_files() {
 async fn a_large_message_is_read_by_its_structure_and_its_file_comes_alone() {
     let h = imap_harness().await;
     let size = RAW_LIMIT as usize;
-    h.imap.deliver_flagged("INBOX", &with_file(size), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &with_file(size), &[], days_ago(1));
     h.bootstrap().await;
 
     let body = h.sync.body("INBOX/1001/1").await.unwrap();
     let file = h.sync.attachment("INBOX/1001/1", "2").await.unwrap();
 
-    assert_eq!(body.text.as_deref().map(str::trim), Some("The plans are attached."));
+    assert_eq!(
+        body.text.as_deref().map(str::trim),
+        Some("The plans are attached.")
+    );
     assert_eq!(body.attachments[0].filename, "plans.bin");
     assert_eq!(file, vec![b'k'; size]);
     assert!(
@@ -63,7 +68,8 @@ async fn a_large_message_is_read_by_its_structure_and_its_file_comes_alone() {
 #[tokio::test]
 async fn a_conversation_exports_every_message_it_holds() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(2));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(2));
     h.imap.deliver_flagged(
         "INBOX",
         &message("b", "Re: Kites", "In-Reply-To: <a@example.com>\r\n"),
@@ -85,15 +91,24 @@ async fn a_conversation_exports_every_message_it_holds() {
 #[tokio::test]
 async fn a_text_part_the_guard_refused_is_not_asked_for_again() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &with_file(RAW_LIMIT as usize), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &with_file(RAW_LIMIT as usize), &[], days_ago(1));
     h.bootstrap().await;
-    h.imap.fail_on("body INBOX 1 1", ImapError::Protocol("nested too deep".into()));
+    h.imap.fail_on(
+        "body INBOX 1 1",
+        ImapError::Protocol("nested too deep".into()),
+    );
 
     let first = h.sync.body("INBOX/1001/1").await.unwrap();
     let second = h.sync.body("INBOX/1001/1").await.unwrap();
 
     assert_eq!(first.text, None);
     assert_eq!(second.attachments[0].filename, "plans.bin");
-    let asked = h.imap.calls().iter().filter(|c| *c == "body INBOX 1 1").count();
+    let asked = h
+        .imap
+        .calls()
+        .iter()
+        .filter(|c| *c == "body INBOX 1 1")
+        .count();
     assert_eq!(asked, 1);
 }

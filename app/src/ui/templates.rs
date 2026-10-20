@@ -74,7 +74,8 @@ fn row(
     template: Template,
 ) -> adw::ActionRow {
     let name = template.name.clone();
-    let row = adw::ActionRow::builder().use_markup(false)
+    let row = adw::ActionRow::builder()
+        .use_markup(false)
         .title(&template.name)
         .subtitle(summary(&template))
         .build();

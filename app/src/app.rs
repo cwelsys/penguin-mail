@@ -16,7 +16,7 @@ use mailrs_domain::{Account, AccountId, Address, ChangeEvent, Label, Provider, R
 use mailrs_store::{accounts, labels, messages};
 use mailrs_sync::{History, MovedFrom};
 
-use crate::app::announce::{announced, still_news};
+use crate::app::announce::{announced, in_view, still_news};
 use crate::compose::Identity;
 use crate::core::Core;
 use crate::notify;
@@ -38,9 +38,10 @@ const BLOCK_REMOTE_RULES: &str = r#"[
 mod announce;
 mod calendar_file;
 mod composing;
+mod dictionaries;
 mod dock_badge;
 mod hidden;
-mod dictionaries;
+mod notifications;
 mod reminders;
 mod sending;
 mod storage;
@@ -82,6 +83,7 @@ pub struct App {
     /// The new-mail notifications posted this run, by token, so a click
     /// acts only on mail this copy announced.
     issued: RefCell<notify::Issued>,
+    notifications: notifications::Notifications,
     skip_first_window: Cell<bool>,
     filter_requested: Cell<bool>,
     /// Main window plus open composers.
@@ -123,7 +125,7 @@ pub struct App {
     installed_dictionaries: RefCell<Option<Vec<String>>>,
     scheduler_running: Cell<bool>,
     /// How full each account's server said it was, read hourly.
-    storage: RefCell<HashMap<AccountId, mailrs_sync::Storage>>,
+    storage: Rc<storage::ServerSpace<storage::CoreStorage>>,
     /// The timer for the next event reminder check. Each check replaces
     /// it with one set for the next reminder due, at most a minute away.
     reminder_wake: RefCell<Option<glib::SourceId>>,
@@ -156,6 +158,10 @@ impl App {
         };
         let opened = Settings::open(&settings_path);
         let counted_by = Rc::clone(&core);
+        let storage = storage::ServerSpace::new(storage::CoreStorage(Rc::clone(&core)));
+        let app_id = gio_app
+            .application_id()
+            .map_or_else(|| crate::APP_ID.to_string(), |id| id.to_string());
         let app = Rc::new(App {
             gio: gio_app.clone(),
             core,
@@ -172,6 +178,7 @@ impl App {
             tray_unread: tokio::sync::watch::Sender::new((0, Vec::new())),
             chosen,
             issued: RefCell::default(),
+            notifications: notifications::Notifications::new(gio_app, core_demo),
             skip_first_window: Cell::new(background),
             filter_requested: Cell::new(false),
             open_windows: Cell::new(0),
@@ -180,7 +187,7 @@ impl App {
             pending_file: RefCell::new(calendar_file),
             tray_started: Cell::new(false),
             unread: Unread::new(CoreCounts(counted_by)),
-            dock_badge: dock_badge::Badge::default(),
+            dock_badge: dock_badge::Badge::new(&app_id),
             asked_to_replace: RefCell::default(),
             settings: RefCell::new(Settings {
                 // The demo's contacts are already in its throwaway store,
@@ -197,7 +204,7 @@ impl App {
             dictionaries: dictionaries::Shared::default(),
             installed_dictionaries: RefCell::new(None),
             scheduler_running: Cell::new(false),
-            storage: RefCell::new(HashMap::new()),
+            storage,
             reminder_wake: RefCell::new(None),
             reminders_running: Cell::new(false),
             updater: crate::update::Updater::for_this_copy(core_demo).map(Rc::new),
@@ -215,11 +222,13 @@ impl App {
         // no-op.
         let weak = Rc::downgrade(&app);
         gio_app.connect_shutdown(move |_| {
-            if let Some(app) = weak.upgrade()
-                && let Some(window) = app.window()
-            {
+            let Some(app) = weak.upgrade() else { return };
+            if let Some(window) = app.window() {
                 window.calendar.commit_all_now();
             }
+            // A Linux dock keeps the last count it heard, so the badge
+            // would outlive the app.
+            app.dock_badge.hide_now();
         });
         // The tray is a D-Bus service of Linux desktops. macOS has no
         // session bus, and GIO answers a watch on it with a vanished
@@ -551,7 +560,8 @@ impl App {
     /// and each account's own address first.
     pub fn identities(&self) -> Vec<Identity> {
         let settings = self.settings.borrow();
-        let accounts = self.accounts.borrow();
+        // A calendar account sends nothing, so it has no place in From.
+        let accounts = self.mail_accounts();
         let emails: Vec<&str> = accounts.iter().map(|a| a.email.as_str()).collect();
         let mut identities = Vec::new();
         for email in settings.ordered(&emails) {
@@ -601,8 +611,14 @@ impl App {
                 sender.name = self.names.borrow().get(&account_id).cloned();
             }
         }
-        let mail = self.core.account(account_id).map(|sync| sync.services().mail.clone());
-        let masked = |email: &str| mail.as_ref().is_some_and(|mail| mail.is_masked(email) == Some(true));
+        let mail = self
+            .core
+            .account(account_id)
+            .map(|sync| sync.services().mail.clone());
+        let masked = |email: &str| {
+            mail.as_ref()
+                .is_some_and(|mail| mail.is_masked(email) == Some(true))
+        };
         crate::compose::reply_addresses(&senders, original, masked)
     }
 
@@ -721,9 +737,19 @@ impl App {
         self.refresh_send_as(std::slice::from_ref(account));
     }
 
-    /// Every account, in the order the store lists them.
+    /// Every account in the order chosen in Preferences or the sidebar.
     pub fn accounts(&self) -> Vec<Account> {
-        self.accounts.borrow().clone()
+        let mut accounts = self.accounts.borrow().clone();
+        let settings = self.settings.borrow();
+        accounts.sort_by_key(|account| settings.account_rank(&account.email));
+        accounts
+    }
+
+    /// The accounts with mail in sidebar order, which leaves out a
+    /// calendar account: what the mail window and the mail pages of
+    /// Preferences list.
+    pub fn mail_accounts(&self) -> Vec<Account> {
+        mailrs_domain::mail_accounts(&self.accounts())
     }
 
     pub fn account(&self, account_id: AccountId) -> Option<Account> {
@@ -766,7 +792,7 @@ impl App {
     /// shown up as a stray unnamed control to a screen reader already
     /// walking the page.
     pub async fn reload_accounts(self: &Rc<Self>) -> anyhow::Result<Vec<(Account, Vec<Label>)>> {
-        let (loaded, order, consent, through_browser) = self
+        let (mut loaded, order, consent, through_browser) = self
             .core
             .read(|c| {
                 let mut out: Vec<(Account, Vec<Label>)> = Vec::new();
@@ -787,11 +813,17 @@ impl App {
                 Ok((out, order, consent, through_browser))
             })
             .await?;
+        loaded.sort_by_key(|(account, _)| self.settings.borrow().account_rank(&account.email));
         *self.label_order.borrow_mut() = order;
         *self.through_browser.borrow_mut() = through_browser;
         let known: Vec<AccountId> = self.accounts.borrow().iter().map(|a| a.id).collect();
         *self.accounts.borrow_mut() = loaded.iter().map(|(a, _)| a.clone()).collect();
-        self.unread.set_accounts(loaded.iter().map(|(a, _)| a.id).collect());
+        // A calendar account has no inbox for the tray and the Dock to count.
+        let with_mail = mailrs_domain::mail_accounts(&self.accounts.borrow());
+        self.unread
+            .set_accounts(with_mail.iter().map(|a| a.id).collect());
+        self.storage
+            .set_accounts(loaded.iter().map(|(a, _)| a.id).collect());
         self.accounts_read.set(true);
         *self.labels.borrow_mut() = loaded.iter().map(|(a, l)| (a.id, l.clone())).collect();
         *self.consent.borrow_mut() = consent;
@@ -823,7 +855,9 @@ impl App {
     /// send-as addresses Preferences keeps when they hold one, so a restart
     /// asks Gmail only for what it has never told this computer.
     fn remember_accounts(self: &Rc<Self>, arrived: &[Account]) {
-        for account in arrived {
+        // The name is the one mail goes out under, and a calendar account
+        // sends none.
+        for account in &mailrs_domain::mail_accounts(arrived) {
             if self.names.borrow().contains_key(&account.id) {
                 continue;
             }
@@ -862,9 +896,17 @@ impl App {
             if !sync.services().offers().masked_email {
                 continue;
             }
-            let (core, settings, id) = (Rc::clone(&self.core), self.core.gmail_settings(), account.id);
+            let (core, settings, id) = (
+                Rc::clone(&self.core),
+                self.core.gmail_settings(),
+                account.id,
+            );
             glib::spawn_future_local(async move {
-                if core.call(async move { settings.masked_addresses(id).await }).await.is_err() {
+                if core
+                    .call(async move { settings.masked_addresses(id).await })
+                    .await
+                    .is_err()
+                {
                     tracing::warn!(account = id, "could not list the masked addresses");
                 }
             });
@@ -1079,13 +1121,18 @@ impl App {
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let copy = this.core.calendar_copy();
-            let sent = this.core.call(async move { copy.send(account_id).await }).await;
+            let sent = this
+                .core
+                .call(async move { copy.send(account_id).await })
+                .await;
             let Some(window) = this.window() else { return };
             match sent {
-                Ok(turned_down) => window.calendar_refreshed(&mailrs_sync::calendar_copy::Refreshed {
-                    turned_down,
-                    ..mailrs_sync::calendar_copy::Refreshed::default()
-                }),
+                Ok(turned_down) => {
+                    window.calendar_refreshed(&mailrs_sync::calendar_copy::Refreshed {
+                        turned_down,
+                        ..mailrs_sync::calendar_copy::Refreshed::default()
+                    })
+                }
                 Err(err) => tracing::info!(%err, "calendar changes wait for the next try"),
             }
         });
@@ -1202,10 +1249,13 @@ impl App {
         // when the main window is closed or a composer has the focus.
         #[cfg(target_os = "macos")]
         for name in ["preferences", "about"] {
-            add(name, Box::new(move |app| {
-                let window = app.show_window();
-                let _ = window.window.activate_action(&format!("win.{name}"), None);
-            }));
+            add(
+                name,
+                Box::new(move |app| {
+                    let window = app.show_window();
+                    let _ = window.window.activate_action(&format!("win.{name}"), None);
+                }),
+            );
         }
         let compose_to = gio::SimpleAction::new("compose-to", Some(glib::VariantTy::STRING));
         let weak = Rc::downgrade(self);
@@ -1218,7 +1268,8 @@ impl App {
         });
         self.gio.add_action(&compose_to);
         // A byte string, so a file name that is not UTF-8 arrives whole.
-        let open_file = gio::SimpleAction::new("open-calendar-file", Some(glib::VariantTy::BYTE_STRING));
+        let open_file =
+            gio::SimpleAction::new("open-calendar-file", Some(glib::VariantTy::BYTE_STRING));
         let weak = Rc::downgrade(self);
         open_file.connect_activate(move |_, parameter| {
             if let (Some(app), Some(path)) =
@@ -1244,7 +1295,14 @@ impl App {
             return;
         };
         let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-        match std::process::Command::new(exe).args(args).spawn() {
+        let mut command = std::process::Command::new(exe);
+        command.args(args);
+        if crate::exe::restarts_in_place() {
+            let err = self.exec_into(command);
+            tracing::warn!(error = %err, "could not restart in place");
+            return;
+        }
+        match command.spawn() {
             Ok(_) => self.quit(),
             Err(err) => tracing::warn!(error = %err, "could not start the new copy"),
         }
@@ -1274,14 +1332,21 @@ impl App {
         glib::spawn_future_local(async move {
             while let Ok(event) = this.core.events.recv().await {
                 this.unread.heard(&event);
+                this.storage.heard(&event);
                 this.tell_window(Notice::Engine(&event));
-                if let ChangeEvent::NewMail {
-                    account_id,
-                    message_ids,
-                } = &event
-                {
-                    this.contacts_stale.set(true);
-                    this.after_rules(*account_id, message_ids.clone());
+                match &event {
+                    ChangeEvent::NewMail {
+                        account_id,
+                        message_ids,
+                    } => {
+                        this.contacts_stale.set(true);
+                        this.after_rules(*account_id, message_ids.clone());
+                    }
+                    ChangeEvent::ThreadsChanged {
+                        account_id,
+                        thread_ids,
+                    } => this.settle_notifications(*account_id, thread_ids),
+                    _ => {}
                 }
             }
         });
@@ -1308,8 +1373,9 @@ impl App {
         });
     }
 
-    /// Posts the new-mail notifications for `messages`. Each one that acts
-    /// on a message gets a fresh token, which its clicks carry back.
+    /// Posts the new-mail notifications for `messages`. Each gets a fresh
+    /// token: clicks carry it back, and the app withdraws by it once the
+    /// mail is read.
     pub(crate) fn announce_mail(
         &self,
         messages: Vec<mailrs_domain::MessageMeta>,
@@ -1318,29 +1384,62 @@ impl App {
     ) {
         use rand::distr::{Alphanumeric, SampleString};
         for notice in notify::notices(messages, previews, buttons) {
-            let notification = gio::Notification::new(&notice.title);
-            if !notice.body.is_empty() {
-                notification.set_body(Some(&notice.body));
-            }
-            notification.set_icon(&gio::ThemedIcon::new(crate::APP_ID));
-            notification.set_category(Some("email.arrived"));
-            let action = format!("app.{}", notify::CHOSEN);
             let token = Alphanumeric.sample_string(&mut rand::rng(), 24);
-            if let Some(target) = notice.target {
-                let open = notify::parameter(&token, notify::OPEN_KEY);
-                notification.set_default_action_and_target_value(&action, Some(&open.to_variant()));
-                for button in &notice.buttons {
-                    let pressed = notify::parameter(&token, button.key());
-                    notification.add_button_with_target_value(
-                        &button.label(),
-                        &action,
-                        Some(&pressed.to_variant()),
-                    );
-                }
-                self.issued.borrow_mut().issue(token.clone(), target, notice.buttons);
+            let evicted = if let Some(target) = &notice.target {
+                self.issued.borrow_mut().issue(
+                    token.clone(),
+                    target.clone(),
+                    notice.buttons.clone(),
+                )
+            } else {
+                self.issued
+                    .borrow_mut()
+                    .issue_summary(token.clone(), notice.counted.clone())
+            };
+            // One pushed out of the list would stay on screen with clicks
+            // that do nothing, so it goes now.
+            if let Some(evicted) = evicted {
+                self.notifications.withdraw(&evicted);
             }
-            self.gio.send_notification(Some(&token), &notification);
+            self.notifications.mail(&token, &notice);
         }
+    }
+
+    /// Takes back the notifications for mail in `thread_ids` that was read,
+    /// archived or trashed since it arrived, here or on another device.
+    /// The desktop keeps a notification until the app withdraws it, long
+    /// after the mail it announced was read in the window. Only the
+    /// messages still waited on in those threads are asked about, as ids
+    /// alone: a summary after days away waits on thousands, and the
+    /// store answers from its membership tables without building a row.
+    /// Each that settled drops out, and a notification goes once none is
+    /// left.
+    fn settle_notifications(self: &Rc<Self>, account_id: AccountId, thread_ids: &[String]) {
+        let asked = self.issued.borrow().in_threads(account_id, thread_ids);
+        if asked.is_empty() {
+            return;
+        }
+        let this = Rc::clone(self);
+        glib::spawn_future_local(async move {
+            let ids: Vec<String> = asked.iter().flat_map(|(_, ids)| ids.clone()).collect();
+            let still = this
+                .core
+                .read(move |c| messages::unread_in_inbox(c, account_id, &ids))
+                .await;
+            let still = match still {
+                Ok(still) => still,
+                Err(err) => {
+                    tracing::warn!(error = %err, "could not read the mail behind a notification");
+                    return;
+                }
+            };
+            for (token, ids) in asked {
+                let settled = notify::settled_among(&ids, &still);
+                if this.issued.borrow_mut().settle(&token, &settled) {
+                    this.notifications.withdraw(&token);
+                }
+            }
+        });
     }
 
     /// Does what somebody picked on a notification. The mail may have been
@@ -1377,7 +1476,12 @@ impl App {
         };
         let outcome = self
             .core
-            .act(vec![target], action.clone(), History::Record, MovedFrom::nowhere())
+            .act(
+                vec![target],
+                action.clone(),
+                History::Record,
+                MovedFrom::nowhere(),
+            )
             .await;
         self.tell_window(Notice::MailChanged {
             action: &action,
@@ -1404,28 +1508,26 @@ impl App {
             if let Err(err) = this.core.run_rules(account_id).await {
                 tracing::warn!(account = account_id, %err, "local rules did not run");
             }
-            let ids = message_ids.clone();
-            let kept = this
+            // The rows read here are the ones announced, rather than
+            // their ids read again: thousands can arrive in one event
+            // after days away, and each row is built from its JSON.
+            match this
                 .core
-                .read(move |c| {
-                    Ok(messages::by_ids(c, account_id, &ids)?
-                        .into_iter()
-                        .filter(|m| still_news(m.in_role(Role::Inbox), m.is_unread()))
-                        .map(|m| m.id)
-                        .collect::<Vec<String>>())
-                })
+                .read(move |c| announced(c, account_id, &message_ids))
                 .await
-                .unwrap_or(message_ids);
-            if !kept.is_empty() {
-                this.announce(account_id, kept);
+            {
+                Ok(found) => this.announce_found(account_id, found),
+                Err(err) => {
+                    tracing::warn!(account = account_id, %err, "could not read the mail behind a notification")
+                }
             }
         });
     }
 
-    /// Every minute: local rules over mail that came while the app was
-    /// closed or arrived already read, which no new-mail event names, and
-    /// rule changes that waited for a ManageSieve server. Ten seconds
-    /// after start first, once the accounts have started.
+    /// Every minute: local rules over mail no new-mail event names, which
+    /// is what an account's first listing brought and what arrived already
+    /// read, and rule changes that waited for a ManageSieve server. Ten
+    /// seconds after start first, once the accounts have started.
     fn watch_rules(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         glib::timeout_add_seconds_local_once(10, {
@@ -1474,7 +1576,9 @@ impl App {
                             this.ask_to_replace(account_id, &script);
                         }
                     }
-                    Err(err) => tracing::info!(account = account_id, %err, "rule changes still wait"),
+                    Err(err) => {
+                        tracing::info!(account = account_id, %err, "rule changes still wait")
+                    }
                 }
             }
         });
@@ -1520,35 +1624,70 @@ impl App {
         dialog.present(Some(&window.window));
     }
 
+    /// Reads the mail behind `message_ids` and announces what deserves
+    /// it. An account whose rules run here goes through
+    /// [`Self::announce_found`] instead, with the rows it read already.
     fn announce(self: &Rc<Self>, account_id: AccountId, message_ids: Vec<String>) {
-        let settings = self.settings();
-        if self.core.demo || !settings.notifications || self.window().is_some_and(|w| w.is_active())
-        {
+        if self.core.demo || !self.settings().notifications {
             return;
         }
-        let previews = settings.notification_previews;
-        let buttons = settings.notification_buttons.clone();
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let found = this
+            match this
                 .core
                 .read(move |c| announced(c, account_id, &message_ids))
-                .await;
-            let found = found.map(|found| {
-                found
-                    .into_iter()
-                    .filter(|m| {
-                        !settings.notify_vips_only
-                            || m.from.as_ref().is_some_and(|a| settings.is_vip(&a.email))
-                    })
-                    .collect::<Vec<_>>()
-            });
-            if let Ok(found) = found
-                && !found.is_empty()
+                .await
             {
-                this.announce_mail(found, previews, buttons);
+                Ok(found) => this.announce_found(account_id, found),
+                Err(err) => {
+                    tracing::warn!(account = account_id, %err, "could not read the mail behind a notification")
+                }
             }
         });
+    }
+
+    /// Announces the new mail among `found`, as the store held it when
+    /// read, then asks the store again for the threads announced. Mail
+    /// read elsewhere between that read and the notifications
+    /// registering had its change event arrive with nothing to settle,
+    /// and this second look is what withdraws its notification.
+    fn announce_found(
+        self: &Rc<Self>,
+        account_id: AccountId,
+        mut found: Vec<mailrs_domain::MessageMeta>,
+    ) {
+        let settings = self.settings();
+        if self.core.demo || !settings.notifications {
+            return;
+        }
+        // Mail read or filed between the engine's word and the read would
+        // get a notification nothing withdraws, so it gets none. Nor does
+        // mail in the conversation on screen, which the person is looking
+        // at; the rest is announced even while the window has focus, as
+        // the mail that came while the app was closed arrives right after
+        // it opens.
+        let viewed = self.window().and_then(|w| w.viewed());
+        found.retain(|m| {
+            still_news(m.in_role(Role::Inbox), m.is_unread())
+                && (!settings.notify_vips_only
+                    || m.from.as_ref().is_some_and(|a| settings.is_vip(&a.email)))
+                && !in_view(m, viewed.as_ref())
+        });
+        if found.is_empty() {
+            return;
+        }
+        let threads: Vec<String> = found
+            .iter()
+            .map(|m| m.thread_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        self.announce_mail(
+            found,
+            settings.notification_previews,
+            settings.notification_buttons.clone(),
+        );
+        self.settle_notifications(account_id, &threads);
     }
 
     /// Registers the tray icon whenever a tray host appears on the session
@@ -1686,14 +1825,12 @@ impl App {
     fn show_unread(&self, counted: &Counted) {
         let total = counted.all_inboxes();
         self.dock_badge.show(total);
-        let accounts: Vec<AccountUnread> = self
-            .accounts
-            .borrow()
-            .iter()
+        let accounts: Vec<AccountUnread> = mailrs_domain::mail_accounts(&self.accounts.borrow())
+            .into_iter()
             .map(|account| AccountUnread {
                 id: account.id,
-                email: account.email.clone(),
                 unread: counted.inbox(account.id),
+                email: account.email,
             })
             .collect();
         // One task hands the counts to the tray, so an older one cannot

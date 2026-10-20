@@ -360,9 +360,17 @@ mod tests {
         assert_eq!(keeps(room, core_hidden, extras), [true, true, true]);
         let mut state = Steady::default();
         let first = state.decide(room, core_shown, extras);
-        assert_ne!(first, [true, true, true], "no room for every extra at the high estimate");
+        assert_ne!(
+            first,
+            [true, true, true],
+            "no room for every extra at the high estimate"
+        );
         for _ in 0..5 {
-            assert_eq!(state.decide(room, core_hidden, extras), first, "nothing comes back at the same width");
+            assert_eq!(
+                state.decide(room, core_hidden, extras),
+                first,
+                "nothing comes back at the same width"
+            );
         }
     }
 

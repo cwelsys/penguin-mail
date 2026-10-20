@@ -194,7 +194,10 @@ impl Attachment {
 /// `held` still has waiting to upload, which the provider has never seen.
 pub fn keep_local(fresh: &mut Vec<Attachment>, held: &[Attachment]) {
     for file in fresh.iter_mut() {
-        if let Some(old) = held.iter().find(|old| !old.file_id.is_empty() && old.file_id == file.file_id) {
+        if let Some(old) = held
+            .iter()
+            .find(|old| !old.file_id.is_empty() && old.file_id == file.file_id)
+        {
             file.share = old.share;
             file.shared_with = old.shared_with.clone();
         }
@@ -217,7 +220,12 @@ pub fn to_share<'a>(file: &Attachment, guests: &'a [Guest]) -> Vec<&'a str> {
     guests
         .iter()
         .filter(|guest| !guest.me && !guest.email.is_empty())
-        .filter(|guest| !file.shared_with.iter().any(|done| done.eq_ignore_ascii_case(&guest.email)))
+        .filter(|guest| {
+            !file
+                .shared_with
+                .iter()
+                .any(|done| done.eq_ignore_ascii_case(&guest.email))
+        })
         .map(|guest| guest.email.as_str())
         .collect()
 }
@@ -238,7 +246,11 @@ impl Notify {
     /// change: telling the guests wins, since the earlier write may have
     /// been the one that invited them.
     pub fn and(self, other: Notify) -> Notify {
-        if self == Notify::Guests || other == Notify::Guests { Notify::Guests } else { Notify::Nobody }
+        if self == Notify::Guests || other == Notify::Guests {
+            Notify::Guests
+        } else {
+            Notify::Nobody
+        }
     }
 
     /// How the store keeps it: `None` for [`Notify::Guests`], which every
@@ -264,7 +276,11 @@ impl Notify {
 /// goes out quiet: a cancellation from a guest would reach every other
 /// guest of a meeting they do not run.
 pub fn removal_notify(event: &Event, asked: Notify) -> Notify {
-    if event.limited() { Notify::Nobody } else { asked }
+    if event.limited() {
+        Notify::Nobody
+    } else {
+        asked
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -520,13 +536,19 @@ pub const EVENT_COLORS: [(&str, &str); 11] = [
 /// The `#rrggbb` for one of Google's colour ids, or `None` for an id
 /// Google has not defined.
 pub fn event_color(id: &str) -> Option<&'static str> {
-    EVENT_COLORS.iter().find(|(i, _)| *i == id).map(|(_, hex)| *hex)
+    EVENT_COLORS
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, hex)| *hex)
 }
 
 /// The colour id for a hex value in [`EVENT_COLORS`], read without
 /// regard to case, or `None` when the palette holds no such colour.
 pub fn color_id(hex: &str) -> Option<&'static str> {
-    EVENT_COLORS.iter().find(|(_, h)| h.eq_ignore_ascii_case(hex)).map(|(id, _)| *id)
+    EVENT_COLORS
+        .iter()
+        .find(|(_, h)| h.eq_ignore_ascii_case(hex))
+        .map(|(id, _)| *id)
 }
 
 /// One showing of an event on the grid. `event` is shared rather than
@@ -572,7 +594,11 @@ pub fn occurrence_id(series: &Event, original_start: EpochMillis) -> String {
     let Some(start) = DateTime::<Utc>::from_timestamp_millis(original_start) else {
         return series.id.clone();
     };
-    let form = if series.all_day { "%Y%m%d" } else { "%Y%m%dT%H%M%SZ" };
+    let form = if series.all_day {
+        "%Y%m%d"
+    } else {
+        "%Y%m%dT%H%M%SZ"
+    };
     format!("{}_{}", series.id, start.format(form))
 }
 
@@ -586,7 +612,9 @@ pub fn split_occurrence_id(id: &str) -> Option<(&str, EpochMillis)> {
     }
     let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
     let at = match stamp.len() {
-        8 if digits(stamp) => chrono::NaiveDate::parse_from_str(stamp, "%Y%m%d").ok()?.and_hms_opt(0, 0, 0)?,
+        8 if digits(stamp) => chrono::NaiveDate::parse_from_str(stamp, "%Y%m%d")
+            .ok()?
+            .and_hms_opt(0, 0, 0)?,
         16 if stamp.ends_with('Z') && digits(&stamp[..8]) && digits(&stamp[9..15]) => {
             chrono::NaiveDateTime::parse_from_str(&stamp[..15], "%Y%m%dT%H%M%S").ok()?
         }
@@ -644,7 +672,13 @@ impl EventEdit {
             event.description = description.clone();
         }
         if let Some(guests) = &self.guests {
-            event.guests = guests.iter().map(|email| Guest { email: email.clone(), ..Guest::default() }).collect();
+            event.guests = guests
+                .iter()
+                .map(|email| Guest {
+                    email: email.clone(),
+                    ..Guest::default()
+                })
+                .collect();
         }
     }
 }
@@ -667,13 +701,21 @@ impl Series {
     /// does not repeat.
     pub fn of(event: &Event, from: EpochMillis) -> Option<Series> {
         let line = event.rules.iter().find(|line| is_rule_line(line))?;
-        let rule = line.split_once(':').map_or(line.as_str(), |(_, rule)| rule).to_string();
-        let counted = rule.split(';').any(|part| part.trim().to_ascii_uppercase().starts_with("COUNT="));
+        let rule = line
+            .split_once(':')
+            .map_or(line.as_str(), |(_, rule)| rule)
+            .to_string();
+        let counted = rule
+            .split(';')
+            .any(|part| part.trim().to_ascii_uppercase().starts_with("COUNT="));
         // `series_end` gives up on a series longer than `expand` would
         // list, and then nothing is counted rather than a short count.
         let left = match (counted, series_end(event)) {
             (true, Some(end)) => {
-                let left = expand(event, from, end + 1).iter().filter(|(start, _)| *start >= from).count();
+                let left = expand(event, from, end + 1)
+                    .iter()
+                    .filter(|(start, _)| *start >= from)
+                    .count();
                 Some(u32::try_from(left).unwrap_or(u32::MAX))
             }
             _ => None,
@@ -706,23 +748,37 @@ pub struct EventPage {
 /// `to`, earliest first. A one-off event gives itself or nothing. A rule
 /// the `rrule` crate cannot read gives the first occurrence, so the
 /// event stays visible, and the log names the rule.
-pub fn expand(event: &Event, from: EpochMillis, to: EpochMillis) -> Vec<(EpochMillis, EpochMillis)> {
+pub fn expand(
+    event: &Event,
+    from: EpochMillis,
+    to: EpochMillis,
+) -> Vec<(EpochMillis, EpochMillis)> {
     expand_in(event, from, to, local::zone())
 }
 
 /// [`expand`] on a computer in zone `here`.
-pub fn expand_in(event: &Event, from: EpochMillis, to: EpochMillis, here: chrono_tz::Tz) -> Vec<(EpochMillis, EpochMillis)> {
+pub fn expand_in(
+    event: &Event,
+    from: EpochMillis,
+    to: EpochMillis,
+    here: chrono_tz::Tz,
+) -> Vec<(EpochMillis, EpochMillis)> {
     let length = event.end - event.start;
     let overlaps = |start: EpochMillis| start < to && start + length > from;
     if event.rules.is_empty() {
-        return if overlaps(event.start) || (length == 0 && event.start >= from && event.start < to) {
+        return if overlaps(event.start) || (length == 0 && event.start >= from && event.start < to)
+        {
             vec![(event.start, event.end)]
         } else {
             Vec::new()
         };
     }
     let Some(set) = rule_set(event, here) else {
-        return if overlaps(event.start) { vec![(event.start, event.end)] } else { Vec::new() };
+        return if overlaps(event.start) {
+            vec![(event.start, event.end)]
+        } else {
+            Vec::new()
+        };
     };
     let tz = zone(event, here);
     let (Some(after), Some(before)) = (at(from - length, tz), at(to, tz)) else {
@@ -767,7 +823,10 @@ pub fn series_end_in(event: &Event, here: chrono_tz::Tz) -> Option<EpochMillis> 
     if result.limited {
         return None;
     }
-    result.dates.last().map(|start| start.timestamp_millis() + length)
+    result
+        .dates
+        .last()
+        .map(|start| start.timestamp_millis() + length)
 }
 
 /// The zone `name` names: an IANA name, or a Windows name such as
@@ -859,7 +918,12 @@ fn rule_set(event: &Event, here: chrono_tz::Tz) -> Option<RRuleSet> {
     };
     // A zone `rrule` cannot read, such as Outlook's Windows names in rows
     // stored before the readers renamed them, reads as the series' own.
-    let iana = |tzid: &str| Some(crate::invitation::zone::named(tzid).map_or_else(|| name.clone(), |tz| tz.name().to_string()));
+    let iana = |tzid: &str| {
+        Some(
+            crate::invitation::zone::named(tzid)
+                .map_or_else(|| name.clone(), |tz| tz.name().to_string()),
+        )
+    };
     let rules: Vec<String> = event
         .rules
         .iter()
@@ -896,7 +960,9 @@ fn floating_in(line: &str, zone: chrono_tz::Tz) -> String {
         let Some((head, values)) = line.split_once(':') else {
             return line.to_string();
         };
-        let zoned = head.split(';').any(|p| p.to_ascii_uppercase().starts_with("TZID="));
+        let zoned = head
+            .split(';')
+            .any(|p| p.to_ascii_uppercase().starts_with("TZID="));
         if zoned || !values.split(',').all(floating) {
             return line.to_string();
         }
@@ -906,7 +972,9 @@ fn floating_in(line: &str, zone: chrono_tz::Tz) -> String {
         return line.to_string();
     };
     let start = at + "UNTIL=".len();
-    let end = line[start..].find(';').map_or(line.len(), |offset| start + offset);
+    let end = line[start..]
+        .find(';')
+        .map_or(line.len(), |offset| start + offset);
     let value = &line[start..end];
     if !floating(value) {
         return line.to_string();
@@ -918,7 +986,12 @@ fn floating_in(line: &str, zone: chrono_tz::Tz) -> String {
     else {
         return line.to_string();
     };
-    format!("{}{}{}", &line[..start], utc.format("%Y%m%dT%H%M%SZ"), &line[end..])
+    format!(
+        "{}{}{}",
+        &line[..start],
+        utc.format("%Y%m%dT%H%M%SZ"),
+        &line[end..]
+    )
 }
 
 /// Google writes an all-day series' `UNTIL` as a bare date
@@ -960,10 +1033,19 @@ fn dates_in_utc(line: &str) -> String {
     if !values.split(',').any(bare) {
         return line.to_string();
     }
-    let params: Vec<&str> = head.split(';').filter(|p| !p.eq_ignore_ascii_case("VALUE=DATE")).collect();
+    let params: Vec<&str> = head
+        .split(';')
+        .filter(|p| !p.eq_ignore_ascii_case("VALUE=DATE"))
+        .collect();
     let values: Vec<String> = values
         .split(',')
-        .map(|value| if bare(value) { format!("{value}T000000Z") } else { value.to_string() })
+        .map(|value| {
+            if bare(value) {
+                format!("{value}T000000Z")
+            } else {
+                value.to_string()
+            }
+        })
         .collect();
     format!("{}:{}", params.join(";"), values.join(","))
 }
@@ -976,7 +1058,12 @@ mod tests {
 
     fn lisbon(y: i32, m: u32, d: u32, h: u32, min: u32) -> EpochMillis {
         Lisbon
-            .from_local_datetime(&NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 0).unwrap())
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(y, m, d)
+                    .unwrap()
+                    .and_hms_opt(h, min, 0)
+                    .unwrap(),
+            )
             .single()
             .unwrap()
             .timestamp_millis()
@@ -1003,17 +1090,32 @@ mod tests {
             "RRULE:FREQ=DAILY;COUNT=3",
             "EXDATE;TZID=\"GMT Standard Time\":20261020T090000",
         ]);
-        let got = expand(&event, lisbon(2026, 10, 19, 0, 0), lisbon(2026, 10, 23, 0, 0));
+        let got = expand(
+            &event,
+            lisbon(2026, 10, 19, 0, 0),
+            lisbon(2026, 10, 23, 0, 0),
+        );
         let starts: Vec<EpochMillis> = got.iter().map(|(start, _)| *start).collect();
-        assert_eq!(starts, vec![lisbon(2026, 10, 19, 9, 0), lisbon(2026, 10, 21, 9, 0)]);
+        assert_eq!(
+            starts,
+            vec![lisbon(2026, 10, 19, 9, 0), lisbon(2026, 10, 21, 9, 0)]
+        );
     }
 
     #[test]
     fn a_zone_parameter_is_renamed_and_the_rest_kept() {
         let line = "EXDATE;VALUE=DATE-TIME;TZID=\"W. Europe Standard Time\":20261027T140000";
-        let renamed = rename_zone(line, &|tzid| (tzid == "W. Europe Standard Time").then(|| "Europe/Berlin".to_string()));
-        assert_eq!(renamed, "EXDATE;VALUE=DATE-TIME;TZID=Europe/Berlin:20261027T140000");
-        assert_eq!(rename_zone("RRULE:FREQ=DAILY", &|_| Some("Europe/Berlin".into())), "RRULE:FREQ=DAILY");
+        let renamed = rename_zone(line, &|tzid| {
+            (tzid == "W. Europe Standard Time").then(|| "Europe/Berlin".to_string())
+        });
+        assert_eq!(
+            renamed,
+            "EXDATE;VALUE=DATE-TIME;TZID=Europe/Berlin:20261027T140000"
+        );
+        assert_eq!(
+            rename_zone("RRULE:FREQ=DAILY", &|_| Some("Europe/Berlin".into())),
+            "RRULE:FREQ=DAILY"
+        );
         assert_eq!(rename_zone(line, &|_| None), line);
     }
 
@@ -1022,14 +1124,25 @@ mod tests {
         let event = standup(&[]);
         let day = (lisbon(2026, 10, 19, 0, 0), lisbon(2026, 10, 20, 0, 0));
         assert_eq!(expand(&event, day.0, day.1), vec![(event.start, event.end)]);
-        assert!(expand(&event, lisbon(2026, 10, 20, 0, 0), lisbon(2026, 10, 21, 0, 0)).is_empty());
+        assert!(
+            expand(
+                &event,
+                lisbon(2026, 10, 20, 0, 0),
+                lisbon(2026, 10, 21, 0, 0)
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn a_series_keeps_its_local_hour_across_the_clock_change() {
         // Portugal leaves summer time on 25 October 2026.
         let event = standup(&["RRULE:FREQ=DAILY;COUNT=10"]);
-        let got = expand(&event, lisbon(2026, 10, 24, 0, 0), lisbon(2026, 10, 27, 0, 0));
+        let got = expand(
+            &event,
+            lisbon(2026, 10, 24, 0, 0),
+            lisbon(2026, 10, 27, 0, 0),
+        );
         assert_eq!(
             got,
             vec![
@@ -1043,7 +1156,11 @@ mod tests {
     #[test]
     fn a_count_stops_the_series() {
         let event = standup(&["RRULE:FREQ=DAILY;COUNT=3"]);
-        let got = expand(&event, lisbon(2026, 10, 19, 0, 0), lisbon(2026, 11, 1, 0, 0));
+        let got = expand(
+            &event,
+            lisbon(2026, 10, 19, 0, 0),
+            lisbon(2026, 11, 1, 0, 0),
+        );
         assert_eq!(got.len(), 3);
         assert_eq!(series_end(&event), Some(lisbon(2026, 10, 21, 9, 15)));
     }
@@ -1051,7 +1168,11 @@ mod tests {
     #[test]
     fn an_until_stops_the_series() {
         let event = standup(&["RRULE:FREQ=DAILY;UNTIL=20261021T235959Z"]);
-        let got = expand(&event, lisbon(2026, 10, 19, 0, 0), lisbon(2026, 11, 1, 0, 0));
+        let got = expand(
+            &event,
+            lisbon(2026, 10, 19, 0, 0),
+            lisbon(2026, 11, 1, 0, 0),
+        );
         assert_eq!(got.len(), 3);
     }
 
@@ -1066,7 +1187,11 @@ mod tests {
             "RRULE:FREQ=DAILY;COUNT=3",
             "EXDATE;TZID=Europe/Lisbon:20261020T090000",
         ]);
-        let got = expand(&event, lisbon(2026, 10, 19, 0, 0), lisbon(2026, 11, 1, 0, 0));
+        let got = expand(
+            &event,
+            lisbon(2026, 10, 19, 0, 0),
+            lisbon(2026, 11, 1, 0, 0),
+        );
         assert_eq!(
             got.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
             vec![lisbon(2026, 10, 19, 9, 0), lisbon(2026, 10, 21, 9, 0)]
@@ -1075,7 +1200,14 @@ mod tests {
 
     #[test]
     fn an_all_day_series_repeats_by_date() {
-        let midnight = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
+        let midnight = |d| {
+            NaiveDate::from_ymd_opt(2026, 10, d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
         let event = Event {
             start: midnight(19),
             end: midnight(20),
@@ -1085,14 +1217,24 @@ mod tests {
             ..standup(&[])
         };
         let got = expand(&event, midnight(1), midnight(31));
-        assert_eq!(got, vec![(midnight(19), midnight(20)), (midnight(26), midnight(27))]);
+        assert_eq!(
+            got,
+            vec![(midnight(19), midnight(20)), (midnight(26), midnight(27))]
+        );
     }
 
     #[test]
     fn an_all_day_series_stops_on_a_bare_until_date() {
         // Google writes UNTIL for an all-day series as a bare date, with no
         // time and no Z: it never carries a UTC offset of its own.
-        let midnight = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
+        let midnight = |d| {
+            NaiveDate::from_ymd_opt(2026, 10, d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
         let event = Event {
             start: midnight(19),
             end: midnight(20),
@@ -1102,7 +1244,10 @@ mod tests {
             ..standup(&[])
         };
         let got = expand(&event, midnight(1), midnight(31));
-        assert_eq!(got, vec![(midnight(19), midnight(20)), (midnight(26), midnight(27))]);
+        assert_eq!(
+            got,
+            vec![(midnight(19), midnight(20)), (midnight(26), midnight(27))]
+        );
     }
 
     /// Google writes an all-day series' skipped days as bare dates. The
@@ -1110,34 +1255,64 @@ mod tests {
     /// in: run this under `TZ=Europe/Lisbon` as well as `TZ=UTC`.
     #[test]
     fn an_all_day_series_skips_a_bare_excluded_date() {
-        let midnight = |m, d| NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
-        let event = Event {
-            start: midnight(7, 6),
-            end: midnight(7, 7),
-            zone: "UTC".into(),
-            all_day: true,
-            rules: vec!["RRULE:FREQ=WEEKLY;COUNT=3".into(), "EXDATE;VALUE=DATE:20260713".into()],
-            ..standup(&[])
+        let midnight = |m, d| {
+            NaiveDate::from_ymd_opt(2026, m, d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
         };
-        let got = expand(&event, midnight(7, 1), midnight(8, 1));
-        assert_eq!(got, vec![(midnight(7, 6), midnight(7, 7)), (midnight(7, 20), midnight(7, 21))]);
-    }
-
-    #[test]
-    fn an_all_day_series_adds_a_bare_extra_date_on_its_own_day() {
-        let midnight = |m, d| NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
         let event = Event {
             start: midnight(7, 6),
             end: midnight(7, 7),
             zone: "UTC".into(),
             all_day: true,
-            rules: vec!["RRULE:FREQ=WEEKLY;COUNT=1".into(), "RDATE;VALUE=DATE:20260709,20260710".into()],
+            rules: vec![
+                "RRULE:FREQ=WEEKLY;COUNT=3".into(),
+                "EXDATE;VALUE=DATE:20260713".into(),
+            ],
             ..standup(&[])
         };
         let got = expand(&event, midnight(7, 1), midnight(8, 1));
         assert_eq!(
             got,
-            vec![(midnight(7, 6), midnight(7, 7)), (midnight(7, 9), midnight(7, 10)), (midnight(7, 10), midnight(7, 11))]
+            vec![
+                (midnight(7, 6), midnight(7, 7)),
+                (midnight(7, 20), midnight(7, 21))
+            ]
+        );
+    }
+
+    #[test]
+    fn an_all_day_series_adds_a_bare_extra_date_on_its_own_day() {
+        let midnight = |m, d| {
+            NaiveDate::from_ymd_opt(2026, m, d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
+        let event = Event {
+            start: midnight(7, 6),
+            end: midnight(7, 7),
+            zone: "UTC".into(),
+            all_day: true,
+            rules: vec![
+                "RRULE:FREQ=WEEKLY;COUNT=1".into(),
+                "RDATE;VALUE=DATE:20260709,20260710".into(),
+            ],
+            ..standup(&[])
+        };
+        let got = expand(&event, midnight(7, 1), midnight(8, 1));
+        assert_eq!(
+            got,
+            vec![
+                (midnight(7, 6), midnight(7, 7)),
+                (midnight(7, 9), midnight(7, 10)),
+                (midnight(7, 10), midnight(7, 11))
+            ]
         );
     }
 
@@ -1154,7 +1329,11 @@ mod tests {
         let mut event = standup(&["RRULE:FREQ=DAILY;COUNT=2"]);
         event.end = event.start + 3 * 60 * 60 * 1000;
         // The range opens an hour into the first occurrence.
-        let got = expand(&event, lisbon(2026, 10, 19, 10, 0), lisbon(2026, 10, 19, 11, 0));
+        let got = expand(
+            &event,
+            lisbon(2026, 10, 19, 10, 0),
+            lisbon(2026, 10, 19, 11, 0),
+        );
         assert_eq!(got.len(), 1);
     }
 
@@ -1162,25 +1341,55 @@ mod tests {
     fn an_occurrence_of_a_timed_series_is_named_by_its_utc_start() {
         let event = Arc::new(standup(&["RRULE:FREQ=DAILY;COUNT=5"]));
         let thursday = lisbon(2026, 10, 22, 9, 0);
-        let one = Occurrence { account_id: 1, event, start: thursday, end: thursday + 15 * 60_000 };
+        let one = Occurrence {
+            account_id: 1,
+            event,
+            start: thursday,
+            end: thursday + 15 * 60_000,
+        };
         // 09:00 in Lisbon is 08:00 UTC in October's summer time.
         assert_eq!(one.id(), "standup_20261022T080000Z");
-        assert_eq!(split_occurrence_id("standup_20261022T080000Z"), Some(("standup", thursday)));
+        assert_eq!(
+            split_occurrence_id("standup_20261022T080000Z"),
+            Some(("standup", thursday))
+        );
     }
 
     #[test]
     fn an_occurrence_of_an_all_day_series_is_named_by_its_date() {
-        let midnight = NaiveDate::from_ymd_opt(2026, 10, 26).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
-        let event = Arc::new(Event { all_day: true, zone: "UTC".into(), ..standup(&["RRULE:FREQ=WEEKLY"]) });
-        let one = Occurrence { account_id: 1, event, start: midnight, end: midnight + 24 * 60 * 60_000 };
+        let midnight = NaiveDate::from_ymd_opt(2026, 10, 26)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_millis();
+        let event = Arc::new(Event {
+            all_day: true,
+            zone: "UTC".into(),
+            ..standup(&["RRULE:FREQ=WEEKLY"])
+        });
+        let one = Occurrence {
+            account_id: 1,
+            event,
+            start: midnight,
+            end: midnight + 24 * 60 * 60_000,
+        };
         assert_eq!(one.id(), "standup_20261026");
-        assert_eq!(split_occurrence_id("standup_20261026"), Some(("standup", midnight)));
+        assert_eq!(
+            split_occurrence_id("standup_20261026"),
+            Some(("standup", midnight))
+        );
     }
 
     #[test]
     fn an_event_that_does_not_repeat_keeps_its_own_id() {
         let event = Arc::new(standup(&[]));
-        let one = Occurrence { account_id: 1, start: event.start, end: event.end, event };
+        let one = Occurrence {
+            account_id: 1,
+            start: event.start,
+            end: event.end,
+            event,
+        };
         assert_eq!(one.id(), "standup");
         assert_eq!(split_occurrence_id("standup"), None);
         assert_eq!(split_occurrence_id("team_lunch"), None);
@@ -1190,11 +1399,46 @@ mod tests {
     fn only_an_event_the_account_attends_in_hours_blocks_time() {
         let meeting = standup(&[]);
         assert!(meeting.blocks_time());
-        assert!(!Event { busy: false, ..meeting.clone() }.blocks_time(), "marked free");
-        assert!(!Event { all_day: true, ..meeting.clone() }.blocks_time(), "all day");
-        assert!(!Event { status: Status::Cancelled, ..meeting.clone() }.blocks_time(), "cancelled");
-        assert!(!Event { my_answer: Some(invitation::Answer::No), ..meeting.clone() }.blocks_time(), "declined");
-        assert!(Event { my_answer: Some(invitation::Answer::Maybe), ..meeting }.blocks_time(), "a maybe still counts");
+        assert!(
+            !Event {
+                busy: false,
+                ..meeting.clone()
+            }
+            .blocks_time(),
+            "marked free"
+        );
+        assert!(
+            !Event {
+                all_day: true,
+                ..meeting.clone()
+            }
+            .blocks_time(),
+            "all day"
+        );
+        assert!(
+            !Event {
+                status: Status::Cancelled,
+                ..meeting.clone()
+            }
+            .blocks_time(),
+            "cancelled"
+        );
+        assert!(
+            !Event {
+                my_answer: Some(invitation::Answer::No),
+                ..meeting.clone()
+            }
+            .blocks_time(),
+            "declined"
+        );
+        assert!(
+            Event {
+                my_answer: Some(invitation::Answer::Maybe),
+                ..meeting
+            }
+            .blocks_time(),
+            "a maybe still counts"
+        );
     }
 
     #[test]
@@ -1237,18 +1481,30 @@ mod tests {
     }
 
     fn linked(url: &str) -> Attachment {
-        Attachment { file_url: url.into(), ..Attachment::default() }
+        Attachment {
+            file_url: url.into(),
+            ..Attachment::default()
+        }
     }
 
     #[test]
     fn an_attachment_opens_an_https_link() {
         let file = linked("https://drive.google.com/file/d/1abc/view");
-        assert_eq!(file.link(), Some("https://drive.google.com/file/d/1abc/view"));
+        assert_eq!(
+            file.link(),
+            Some("https://drive.google.com/file/d/1abc/view")
+        );
     }
 
     #[test]
     fn an_attachment_opens_nothing_but_https() {
-        for url in ["http://example.com/a", "file:///etc/passwd", "javascript:alert(1)", "", "https://"] {
+        for url in [
+            "http://example.com/a",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "",
+            "https://",
+        ] {
             assert_eq!(linked(url).link(), None, "{url}");
         }
     }
@@ -1265,18 +1521,38 @@ mod tests {
     }
 
     fn waiting_at(path: &str) -> Attachment {
-        Attachment { title: path.into(), waiting: Some(path.into()), ..Attachment::default() }
+        Attachment {
+            title: path.into(),
+            waiting: Some(path.into()),
+            ..Attachment::default()
+        }
     }
 
     #[test]
     fn a_provider_read_keeps_what_this_computer_knows_of_its_files() {
-        let held = vec![ours("1abc", false, &["ana@example.com"]), waiting_at("/home/me/Notes.txt")];
-        let mut fresh = vec![Attachment { share: None, ..ours("1abc", true, &[]) }, linked("https://x.example/other")];
+        let held = vec![
+            ours("1abc", false, &["ana@example.com"]),
+            waiting_at("/home/me/Notes.txt"),
+        ];
+        let mut fresh = vec![
+            Attachment {
+                share: None,
+                ..ours("1abc", true, &[])
+            },
+            linked("https://x.example/other"),
+        ];
         keep_local(&mut fresh, &held);
         assert_eq!(fresh[0].share, Some(false));
         assert_eq!(fresh[0].shared_with, ["ana@example.com"]);
-        assert_eq!(fresh[1].share, None, "a file nobody here uploaded stays unshared");
-        assert_eq!(fresh[2], waiting_at("/home/me/Notes.txt"), "a waiting file outlives the read");
+        assert_eq!(
+            fresh[1].share, None,
+            "a file nobody here uploaded stays unshared"
+        );
+        assert_eq!(
+            fresh[2],
+            waiting_at("/home/me/Notes.txt"),
+            "a waiting file outlives the read"
+        );
         assert_eq!(fresh.len(), 3);
     }
 
@@ -1288,13 +1564,24 @@ mod tests {
     }
 
     fn guest(email: &str, me: bool) -> Guest {
-        Guest { email: email.into(), me, ..Guest::default() }
+        Guest {
+            email: email.into(),
+            me,
+            ..Guest::default()
+        }
     }
 
     #[test]
     fn a_shared_file_goes_to_each_guest_not_yet_given_it() {
-        let guests = [guest("me@example.com", true), guest("ana@example.com", false), guest("bo@example.com", false)];
-        assert_eq!(to_share(&ours("1abc", true, &["ANA@example.com"]), &guests), ["bo@example.com"]);
+        let guests = [
+            guest("me@example.com", true),
+            guest("ana@example.com", false),
+            guest("bo@example.com", false),
+        ];
+        assert_eq!(
+            to_share(&ours("1abc", true, &["ANA@example.com"]), &guests),
+            ["bo@example.com"]
+        );
     }
 
     #[test]
@@ -1306,14 +1593,29 @@ mod tests {
     #[test]
     fn a_file_someone_else_attached_is_not_shared() {
         let guests = [guest("ana@example.com", false)];
-        let theirs = Attachment { share: None, ..ours("1abc", true, &[]) };
+        let theirs = Attachment {
+            share: None,
+            ..ours("1abc", true, &[])
+        };
         assert!(to_share(&theirs, &guests).is_empty());
-        assert!(to_share(&Attachment { share: Some(true), ..waiting_at("/tmp/a") }, &guests).is_empty());
+        assert!(
+            to_share(
+                &Attachment {
+                    share: Some(true),
+                    ..waiting_at("/tmp/a")
+                },
+                &guests
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn an_attachment_link_reads_the_scheme_in_any_case() {
-        assert_eq!(linked("HTTPS://docs.google.com/d").link(), Some("HTTPS://docs.google.com/d"));
+        assert_eq!(
+            linked("HTTPS://docs.google.com/d").link(),
+            Some("HTTPS://docs.google.com/d")
+        );
     }
 
     #[test]
@@ -1335,13 +1637,28 @@ mod tests {
         let event = standup(&["RRULE:FREQ=DAILY;COUNT=10"]);
         // A moment after the fourth one starts, six are still to come.
         let series = Series::of(&event, lisbon(2026, 10, 22, 9, 0) + 1).expect("it repeats");
-        assert_eq!(series, Series { rule: "FREQ=DAILY;COUNT=10".into(), left: Some(6) });
+        assert_eq!(
+            series,
+            Series {
+                rule: "FREQ=DAILY;COUNT=10".into(),
+                left: Some(6)
+            }
+        );
     }
 
     #[test]
     fn a_series_with_no_count_counts_nothing() {
-        let series = Series::of(&standup(&["RRULE:FREQ=WEEKLY", "EXDATE:20261026T080000Z"]), 0);
-        assert_eq!(series, Some(Series { rule: "FREQ=WEEKLY".into(), left: None }));
+        let series = Series::of(
+            &standup(&["RRULE:FREQ=WEEKLY", "EXDATE:20261026T080000Z"]),
+            0,
+        );
+        assert_eq!(
+            series,
+            Some(Series {
+                rule: "FREQ=WEEKLY".into(),
+                left: None
+            })
+        );
     }
 
     #[test]
@@ -1352,24 +1669,48 @@ mod tests {
     #[test]
     fn an_edit_sets_what_it_names_and_keeps_the_rest() {
         let mut event = standup(&[]);
-        let edit = EventEdit { title: Some("Retro".into()), place: Some("Room 2".into()), ..EventEdit::default() };
+        let edit = EventEdit {
+            title: Some("Retro".into()),
+            place: Some("Room 2".into()),
+            ..EventEdit::default()
+        };
         edit.apply(&mut event);
-        assert_eq!((event.title.as_str(), event.place.as_str()), ("Retro", "Room 2"));
-        assert_eq!((event.start, event.end), (lisbon(2026, 10, 19, 9, 0), lisbon(2026, 10, 19, 9, 15)));
+        assert_eq!(
+            (event.title.as_str(), event.place.as_str()),
+            ("Retro", "Room 2")
+        );
+        assert_eq!(
+            (event.start, event.end),
+            (lisbon(2026, 10, 19, 9, 0), lisbon(2026, 10, 19, 9, 15))
+        );
         assert!(EventEdit::default().is_empty() && !edit.is_empty());
     }
 
     #[test]
     fn a_new_start_alone_keeps_the_length() {
         let mut event = standup(&[]);
-        EventEdit { start: Some(lisbon(2026, 10, 19, 14, 0)), ..EventEdit::default() }.apply(&mut event);
-        assert_eq!((event.start, event.end), (lisbon(2026, 10, 19, 14, 0), lisbon(2026, 10, 19, 14, 15)));
+        EventEdit {
+            start: Some(lisbon(2026, 10, 19, 14, 0)),
+            ..EventEdit::default()
+        }
+        .apply(&mut event);
+        assert_eq!(
+            (event.start, event.end),
+            (lisbon(2026, 10, 19, 14, 0), lisbon(2026, 10, 19, 14, 15))
+        );
     }
 
     #[test]
     fn an_edit_to_whole_days_marks_the_event_all_day_and_names_its_guests() {
         let mut event = standup(&[]);
-        let day = |d: u32| NaiveDate::from_ymd_opt(2026, 10, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
+        let day = |d: u32| {
+            NaiveDate::from_ymd_opt(2026, 10, d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
         EventEdit {
             start: Some(day(20)),
             end: Some(day(22)),
@@ -1380,7 +1721,13 @@ mod tests {
         .apply(&mut event);
         assert!(event.all_day);
         assert_eq!((event.start, event.end), (day(20), day(22)));
-        assert_eq!(event.guests, vec![Guest { email: "ann@example.com".into(), ..Guest::default() }]);
+        assert_eq!(
+            event.guests,
+            vec![Guest {
+                email: "ann@example.com".into(),
+                ..Guest::default()
+            }]
+        );
     }
 }
 
@@ -1395,8 +1742,14 @@ mod computer_zone_tests {
     use chrono_tz::Europe::Lisbon;
 
     fn at(zone: chrono_tz::Tz, m: u32, d: u32, h: u32) -> EpochMillis {
-        let naive = NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(h, 0, 0).unwrap();
-        zone.from_local_datetime(&naive).single().unwrap().timestamp_millis()
+        let naive = NaiveDate::from_ymd_opt(2026, m, d)
+            .unwrap()
+            .and_hms_opt(h, 0, 0)
+            .unwrap();
+        zone.from_local_datetime(&naive)
+            .single()
+            .unwrap()
+            .timestamp_millis()
     }
 
     /// A weekly 09:00 series from 18 March to 4 November 2026, which spans
@@ -1414,7 +1767,14 @@ mod computer_zone_tests {
     }
 
     fn hours_in(zone: chrono_tz::Tz, got: &[(EpochMillis, EpochMillis)]) -> Vec<u32> {
-        got.iter().map(|(start, _)| DateTime::from_timestamp_millis(*start).unwrap().with_timezone(&zone).hour()).collect()
+        got.iter()
+            .map(|(start, _)| {
+                DateTime::from_timestamp_millis(*start)
+                    .unwrap()
+                    .with_timezone(&zone)
+                    .hour()
+            })
+            .collect()
     }
 
     fn whole_year(event: &Event, here: chrono_tz::Tz) -> Vec<(EpochMillis, EpochMillis)> {
@@ -1459,7 +1819,14 @@ mod computer_zone_tests {
 
     #[test]
     fn an_all_day_series_keeps_its_dates_wherever_the_computer_is() {
-        let midnight = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
+        let midnight = |d| {
+            NaiveDate::from_ymd_opt(2026, 10, d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
         let event = Event {
             start: midnight(19),
             end: midnight(20),
@@ -1469,7 +1836,10 @@ mod computer_zone_tests {
             ..weekly("UTC", 0)
         };
         let got = expand_in(&event, midnight(1), midnight(31), New_York);
-        assert_eq!(got, vec![(midnight(19), midnight(20)), (midnight(26), midnight(27))]);
+        assert_eq!(
+            got,
+            vec![(midnight(19), midnight(20)), (midnight(26), midnight(27))]
+        );
     }
 
     /// `rrule` reads a date-time with neither TZID nor Z in the machine's
@@ -1478,17 +1848,36 @@ mod computer_zone_tests {
     #[test]
     fn a_floating_exclusion_leaves_out_its_occurrence_in_the_computers_zone() {
         let mut event = weekly("", at(New_York, 10, 21, 9));
-        event.rules = vec!["RRULE:FREQ=WEEKLY;COUNT=3".into(), "EXDATE:20261028T090000".into()];
-        let got = expand_in(&event, at(New_York, 10, 1, 0), at(New_York, 12, 1, 0), New_York);
+        event.rules = vec![
+            "RRULE:FREQ=WEEKLY;COUNT=3".into(),
+            "EXDATE:20261028T090000".into(),
+        ];
+        let got = expand_in(
+            &event,
+            at(New_York, 10, 1, 0),
+            at(New_York, 12, 1, 0),
+            New_York,
+        );
         let starts: Vec<EpochMillis> = got.iter().map(|(start, _)| *start).collect();
-        assert_eq!(starts, vec![at(New_York, 10, 21, 9), at(New_York, 11, 4, 9)]);
+        assert_eq!(
+            starts,
+            vec![at(New_York, 10, 21, 9), at(New_York, 11, 4, 9)]
+        );
     }
 
     #[test]
     fn a_floating_extra_date_lands_at_its_clock_time_in_the_computers_zone() {
         let mut event = weekly("", at(New_York, 10, 21, 9));
-        event.rules = vec!["RRULE:FREQ=WEEKLY;COUNT=1".into(), "RDATE:20261105T090000".into()];
-        let got = expand_in(&event, at(New_York, 10, 1, 0), at(New_York, 12, 1, 0), New_York);
+        event.rules = vec![
+            "RRULE:FREQ=WEEKLY;COUNT=1".into(),
+            "RDATE:20261105T090000".into(),
+        ];
+        let got = expand_in(
+            &event,
+            at(New_York, 10, 1, 0),
+            at(New_York, 12, 1, 0),
+            New_York,
+        );
         assert_eq!(hours_in(New_York, &got), vec![9, 9]);
     }
 
@@ -1496,7 +1885,12 @@ mod computer_zone_tests {
     fn a_floating_until_stops_the_series_at_its_clock_time() {
         let mut event = weekly("", at(New_York, 10, 21, 9));
         event.rules = vec!["RRULE:FREQ=WEEKLY;UNTIL=20261104T090000".into()];
-        let got = expand_in(&event, at(New_York, 10, 1, 0), at(New_York, 12, 1, 0), New_York);
+        let got = expand_in(
+            &event,
+            at(New_York, 10, 1, 0),
+            at(New_York, 12, 1, 0),
+            New_York,
+        );
         assert_eq!(hours_in(New_York, &got), vec![9, 9, 9]);
     }
 

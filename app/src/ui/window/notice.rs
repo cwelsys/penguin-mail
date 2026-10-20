@@ -5,8 +5,8 @@
 
 use std::rc::Rc;
 
-use mailrs_domain::{AccountId, Address, ChangeEvent};
 use mailrs_domain::translate::{fill, gettext};
+use mailrs_domain::{AccountId, Address, ChangeEvent};
 use mailrs_sync::{MailAction, Outcome};
 
 use super::MainWindow;

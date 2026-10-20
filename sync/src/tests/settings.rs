@@ -19,7 +19,12 @@ fn settings(h: &Harness) -> AccountSettings<Connected> {
 /// the full fake.
 fn settings_over(h: &Harness, services: AccountServices) -> AccountSettings<Connected> {
     let (sender, _events) = async_channel::unbounded();
-    let sync = Arc::new(AccountSync::new(h.account_id, services, h.db.clone(), sender));
+    let sync = Arc::new(AccountSync::new(
+        h.account_id,
+        services,
+        h.db.clone(),
+        sender,
+    ));
     let connected = HashMap::from([(h.account_id, sync)]);
     AccountSettings::new(Arc::new(Connected(connected)), h.db.clone())
 }
@@ -217,7 +222,10 @@ async fn a_read_only_rule_is_never_replaced() {
     let result = settings
         .replace_rule(h.account_id, &old, marks_read(&old))
         .await;
-    assert!(matches!(result, Err(SyncError::Backend(BackendError::Refused(_)))), "{result:?}");
+    assert!(
+        matches!(result, Err(SyncError::Backend(BackendError::Refused(_)))),
+        "{result:?}"
+    );
     assert_eq!(h.fake.with(|s| s.filters.len()), 1);
 }
 
@@ -240,7 +248,8 @@ async fn a_refused_create_keeps_the_old_rule() {
         .await;
     assert!(result.is_err(), "{result:?}");
     assert_eq!(
-        h.fake.with(|s| s.usage.calls_to("users.settings.filters.delete")),
+        h.fake
+            .with(|s| s.usage.calls_to("users.settings.filters.delete")),
         0,
         "nothing deletes the old rule when the new one never came"
     );
@@ -284,17 +293,27 @@ async fn an_unchanged_rule_is_left_alone() {
     let h = harness().await;
     let settings = settings(&h);
     let old = a_news_rule(&h, &settings).await;
-    let made = h.fake.with(|s| s.usage.calls_to("users.settings.filters.create"));
+    let made = h
+        .fake
+        .with(|s| s.usage.calls_to("users.settings.filters.create"));
 
     let replaced = settings
-        .replace_rule(h.account_id, &old, Filter { id: None, ..old.clone() })
+        .replace_rule(
+            h.account_id,
+            &old,
+            Filter {
+                id: None,
+                ..old.clone()
+            },
+        )
         .await
         .unwrap()
         .done()
         .unwrap();
     assert!(matches!(replaced, Replaced::Swapped(ref kept) if *kept == old));
     assert_eq!(
-        h.fake.with(|s| s.usage.calls_to("users.settings.filters.create")),
+        h.fake
+            .with(|s| s.usage.calls_to("users.settings.filters.create")),
         made
     );
 }
@@ -441,7 +460,11 @@ async fn an_account_without_rules_says_the_server_cannot() {
         settings.rules(h.account_id).await,
         Err(SyncError::Backend(BackendError::Unsupported))
     ));
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.settings.filters.list")), 0);
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.settings.filters.list")),
+        0
+    );
 }
 
 #[tokio::test]
@@ -452,7 +475,9 @@ async fn a_gmail_account_lists_its_rules_as_run_by_the_server() {
         .add_rule(h.account_id, Filter::block("pest@example.com"))
         .await
         .unwrap();
-    let Permitted::Done(made) = made else { panic!("permission") };
+    let Permitted::Done(made) = made else {
+        panic!("permission")
+    };
     let Permitted::Done(list) = settings.rule_list(h.account_id).await.unwrap() else {
         panic!("permission")
     };
@@ -468,9 +493,15 @@ async fn a_gmail_account_lists_its_rules_as_run_by_the_server() {
 async fn a_reply_ending_on_a_long_day_stops_at_the_next_midnight() {
     let h = harness().await;
     let settings = settings(&h);
-    for (last, after) in [((2026, 10, 25), (2026, 10, 26)), ((2026, 3, 29), (2026, 3, 30))] {
+    for (last, after) in [
+        ((2026, 10, 25), (2026, 10, 26)),
+        ((2026, 3, 29), (2026, 3, 30)),
+    ] {
         let reply = away(day(2026, 3, 1), day(last.0, last.1, last.2));
-        settings.set_automatic_reply(h.account_id, &reply).await.unwrap();
+        settings
+            .set_automatic_reply(h.account_id, &reply)
+            .await
+            .unwrap();
         let gmail = h.fake.with(|s| s.vacation.clone());
         assert_eq!(gmail.end, Some(day(after.0, after.1, after.2)), "{last:?}");
     }

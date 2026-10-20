@@ -4,10 +4,11 @@ mod basics;
 mod bootstrap;
 mod caldav;
 mod calendar;
+mod calendar_account;
 mod calendar_attach;
 mod calendar_copy;
-mod calendar_read;
 mod calendar_list;
+mod calendar_read;
 mod calendar_series;
 mod calendar_switch;
 mod carddav;
@@ -24,11 +25,11 @@ mod imap;
 mod imap_services;
 mod incremental;
 mod invitations;
+mod jmap;
 mod labels;
 mod local_rules;
 mod log_lines;
 mod mailbox;
-mod jmap;
 mod microsoft;
 mod muted_replies;
 mod newsletters;
@@ -48,8 +49,8 @@ mod settings;
 mod sieve;
 mod store_mail;
 mod stored_listing;
-mod switch;
 mod structure;
+mod switch;
 mod thread_open;
 mod triage;
 mod undo;
@@ -141,7 +142,11 @@ impl ServedBy {
         sync: Arc<AccountSync>,
         services: AccountServices,
     ) -> ServedBy {
-        ServedBy { account_id, sync, services }
+        ServedBy {
+            account_id,
+            sync,
+            services,
+        }
     }
 }
 
@@ -174,7 +179,9 @@ pub(crate) async fn harness() -> Harness {
 /// `harness`, with services `services` builds over the fake: a Gmail
 /// whose mail service claims other capabilities, for a test of how the
 /// engine meets a server unlike Gmail.
-pub(crate) async fn harness_with(services: impl FnOnce(Arc<FakeGmail>) -> AccountServices) -> Harness {
+pub(crate) async fn harness_with(
+    services: impl FnOnce(Arc<FakeGmail>) -> AccountServices,
+) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("mail.db")).unwrap();
     let account_id = db
@@ -378,8 +385,7 @@ pub(crate) async fn imap_harness_on(imap: FakeImap, settings: ImapSettings) -> I
         .await
         .unwrap();
     let (imap, smtp) = (Arc::new(imap), Arc::new(FakeSmtp::default()));
-    let services =
-        AccountServices::imap(Arc::clone(&imap), Arc::clone(&smtp), settings);
+    let services = AccountServices::imap(Arc::clone(&imap), Arc::clone(&smtp), settings);
     if let AnyMail::Imap(adapter) = &services.mail {
         adapter.look_at_every_mailbox();
     }

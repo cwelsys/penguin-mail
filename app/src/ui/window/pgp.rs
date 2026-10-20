@@ -57,7 +57,10 @@ impl Effects for Ports {
                 .account(account_id)
                 .ok_or_else(|| "the account has stopped syncing".to_string())?;
             self.core
-                .call(async move { sync.raw_message(&message_id).await })
+                .call_for(
+                    account_id,
+                    async move { sync.raw_message(&message_id).await },
+                )
                 .await
                 .map(|raw| raw.as_ref().clone())
                 .map_err(|err| err.to_string())

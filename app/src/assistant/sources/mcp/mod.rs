@@ -16,8 +16,8 @@ use mailrs_ai::mcp::McpTool;
 use mailrs_ai::{BoxFuture, ToolOutcome, ToolSpec};
 use serde_json::Value;
 
-pub use command::{join_command_line, split_command_line};
 pub use crate::settings::mcp::{McpServer, McpTransport};
+pub use command::{join_command_line, split_command_line};
 pub use registry::{Status, registry};
 
 use super::Source;

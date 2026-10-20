@@ -37,7 +37,14 @@ pub(crate) async fn probe<N: Net>(net: &N, domain: &str) -> Vec<Candidate> {
     );
     // The first IMAP host that answered, with every submission server that
     // answered, in the order tried, and the first POP3 host beside them.
-    pairs(Source::Probe, None, &imap[..imap.len().min(1)], &smtp, pop3.first(), true)
+    pairs(
+        Source::Probe,
+        None,
+        &imap[..imap.len().min(1)],
+        &smtp,
+        pop3.first(),
+        true,
+    )
 }
 
 fn server(host: String, port: u16, security: Security) -> Server {
@@ -108,8 +115,14 @@ mod tests {
         let found = probe(&net, "example.org").await;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].imap, None);
-        assert_eq!(found[0].pop3.as_ref().map(|s| s.host.as_str()), Some("pop.example.org"));
-        assert!(found[0].confirm, "a guess is confirmed before the password goes out");
+        assert_eq!(
+            found[0].pop3.as_ref().map(|s| s.host.as_str()),
+            Some("pop.example.org")
+        );
+        assert!(
+            found[0].confirm,
+            "a guess is confirmed before the password goes out"
+        );
     }
 
     #[tokio::test]
@@ -155,6 +168,9 @@ mod tests {
             .accept("smtp.example.org", 465, Security::Tls)
             .accept("pop3.example.org", 995, Security::Tls);
         let found = probe(&net, "example.org").await;
-        assert_eq!(found[0].pop3.as_ref().map(|s| s.host.as_str()), Some("pop3.example.org"));
+        assert_eq!(
+            found[0].pop3.as_ref().map(|s| s.host.as_str()),
+            Some("pop3.example.org")
+        );
     }
 }

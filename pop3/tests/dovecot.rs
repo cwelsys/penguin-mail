@@ -21,7 +21,12 @@ async fn expect_greeting(port: u16, container: &str) {
         match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
             Ok(mut stream) => {
                 let mut greeting = [0u8; 3];
-                match tokio::time::timeout(std::time::Duration::from_secs(2), stream.read_exact(&mut greeting)).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    stream.read_exact(&mut greeting),
+                )
+                .await
+                {
                     Ok(Ok(_)) if &greeting == b"+OK" => return,
                     other => last = format!("read {other:?}, bytes {greeting:?}"),
                 }
@@ -30,7 +35,10 @@ async fn expect_greeting(port: u16, container: &str) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
-    let log = std::process::Command::new("docker").args(["logs", container]).output().expect("docker logs");
+    let log = std::process::Command::new("docker")
+        .args(["logs", container])
+        .output()
+        .expect("docker logs");
     panic!(
         "no POP3 greeting on port {port} ({last}). Dovecot said:\n{}{}",
         String::from_utf8_lossy(&log.stdout),
@@ -39,7 +47,12 @@ async fn expect_greeting(port: u16, container: &str) {
 }
 
 fn at(port: u16, security: Security) -> Server {
-    Server { host: "localhost".into(), port, security, user_name: UserName::Address }
+    Server {
+        host: "localhost".into(),
+        port,
+        security,
+        user_name: UserName::Address,
+    }
 }
 
 #[test]
@@ -50,7 +63,10 @@ fn the_client_downloads_and_deletes_on_dovecot() {
     let Some(certs) = Certs::make() else { return };
     // SAFETY: the only test in this binary, before any thread starts.
     unsafe { mailrs_testmail::trust(&certs.root()) };
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime");
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
     runtime.block_on(async {
         let password = mailrs_testmail::password();
         let Some(dovecot) = Dovecot::start(&certs, Profile::Full, &password).await else { return };

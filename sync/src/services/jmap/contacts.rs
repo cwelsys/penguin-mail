@@ -25,20 +25,34 @@ enum PageToken {
 }
 
 fn values<'a>(card: &'a Value, field: &str) -> impl Iterator<Item = &'a Value> + 'a {
-    card.get(field).and_then(Value::as_object).into_iter().flat_map(|m| m.values())
+    card.get(field)
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|m| m.values())
 }
 
 pub(crate) fn person_of(card: &Value) -> Person {
-    let name = card["name"]["full"].as_str().map(str::to_string).or_else(|| {
-        let parts: Vec<&str> = card["name"]["components"].as_array().into_iter().flatten().filter_map(|c| c["value"].as_str()).collect();
-        (!parts.is_empty()).then(|| parts.join(" "))
-    });
+    let name = card["name"]["full"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            let parts: Vec<&str> = card["name"]["components"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c["value"].as_str())
+                .collect();
+            (!parts.is_empty()).then(|| parts.join(" "))
+        });
     Person {
         resource: card["id"].as_str().unwrap_or_default().to_string(),
         name,
-        emails: values(card, "emails").filter_map(|e| e["address"].as_str().map(str::to_string)).collect(),
+        emails: values(card, "emails")
+            .filter_map(|e| e["address"].as_str().map(str::to_string))
+            .collect(),
         photo_url: None,
-        organization: values(card, "organizations").find_map(|o| o["name"].as_str().map(str::to_string)),
+        organization: values(card, "organizations")
+            .find_map(|o| o["name"].as_str().map(str::to_string)),
         phone: values(card, "phones").find_map(|p| p["number"].as_str().map(str::to_string)),
     }
 }
@@ -47,7 +61,11 @@ pub(crate) fn person_of(card: &Value) -> Person {
 /// `p1`, `o1`.
 fn fields_of(fields: &ContactFields) -> Map<String, Value> {
     let keyed = |prefix: &str, items: &[String], key: &str| -> Value {
-        let map: Map<String, Value> = items.iter().enumerate().map(|(i, v)| (format!("{prefix}{}", i + 1), json!({ key: v }))).collect();
+        let map: Map<String, Value> = items
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (format!("{prefix}{}", i + 1), json!({ key: v })))
+            .collect();
         Value::Object(map)
     };
     let mut card = Map::new();
@@ -61,7 +79,10 @@ fn fields_of(fields: &ContactFields) -> Map<String, Value> {
         card.insert("phones".into(), keyed("p", phones, "number"));
     }
     if let Some(organization) = &fields.organization {
-        card.insert("organizations".into(), json!({ "o1": { "name": organization } }));
+        card.insert(
+            "organizations".into(),
+            json!({ "o1": { "name": organization } }),
+        );
     }
     card
 }
@@ -80,7 +101,10 @@ fn entries<'a>(card: &'a Value, field: &str, key: &str) -> Vec<(&'a str, &'a str
 /// A key `prefix` + number that `card`'s `field` map does not hold yet.
 fn free_key(card: &Value, field: &str, prefix: &str, taken: &[String]) -> String {
     let used = |k: &str| card[field].get(k).is_some() || taken.iter().any(|t| t == k);
-    (1..).map(|n| format!("{prefix}{n}")).find(|k| !used(k)).unwrap_or_default()
+    (1..)
+        .map(|n| format!("{prefix}{n}"))
+        .find(|k| !used(k))
+        .unwrap_or_default()
 }
 
 /// The patch that brings one map of `card` in line with `wanted`, a list
@@ -98,8 +122,11 @@ fn patch_entries(
     let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
     if card.get(field).and_then(Value::as_object).is_none() {
         if !wanted.is_empty() {
-            let map: Map<String, Value> =
-                wanted.iter().enumerate().map(|(i, v)| (format!("{prefix}{}", i + 1), json!({ key: v }))).collect();
+            let map: Map<String, Value> = wanted
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (format!("{prefix}{}", i + 1), json!({ key: v })))
+                .collect();
             patch.insert(field.into(), Value::Object(map));
         }
         return;
@@ -140,11 +167,18 @@ fn patch_of(card: &Value, fields: &ContactFields) -> Map<String, Value> {
         patch.insert("name".into(), value);
     }
     if let Some(emails) = &fields.emails {
-        let seen: Vec<&str> = entries(card, "emails", "address").into_iter().map(|(k, _)| k).collect();
+        let seen: Vec<&str> = entries(card, "emails", "address")
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
         patch_entries(&mut patch, card, ("emails", "address", "e"), emails, &seen);
     }
     if let Some(phones) = &fields.phones {
-        let seen: Vec<&str> = entries(card, "phones", "number").into_iter().take(1).map(|(k, _)| k).collect();
+        let seen: Vec<&str> = entries(card, "phones", "number")
+            .into_iter()
+            .take(1)
+            .map(|(k, _)| k)
+            .collect();
         patch_entries(&mut patch, card, ("phones", "number", "p"), phones, &seen);
     }
     if let Some(organization) = &fields.organization {
@@ -158,7 +192,11 @@ fn patch_of(card: &Value, fields: &ContactFields) -> Map<String, Value> {
             }
             Some(_) => {}
             None if wanted.is_empty() => {}
-            None if card.get("organizations").and_then(Value::as_object).is_some() => {
+            None if card
+                .get("organizations")
+                .and_then(Value::as_object)
+                .is_some() =>
+            {
                 let k = free_key(card, "organizations", "o", &[]);
                 patch.insert(format!("organizations/{k}"), json!({ "name": wanted }));
             }
@@ -185,37 +223,85 @@ impl<J: JmapApi> Jmap<J> {
     /// card added while the pages go by may shift the positions, so the
     /// read ends on that first state and the changes since then bring
     /// anything the paging skipped. A card seen twice is listed once.
-    async fn read_page(&self, position: u64, first: Option<String>) -> Result<ConnectionsPage, BackendError> {
-        let page = self.api().cards_page(position, CARDS_PER_PAGE).await.map_err(backend)?;
+    async fn read_page(
+        &self,
+        position: u64,
+        first: Option<String>,
+    ) -> Result<ConnectionsPage, BackendError> {
+        let page = self
+            .api()
+            .cards_page(position, CARDS_PER_PAGE)
+            .await
+            .map_err(backend)?;
         let read = page.cards.len() as u64;
         let mut seen = HashSet::new();
-        let people = page.cards.iter().map(person_of).filter(|p| seen.insert(p.resource.clone())).collect();
+        let people = page
+            .cards
+            .iter()
+            .map(person_of)
+            .filter(|p| seen.insert(p.resource.clone()))
+            .collect();
         let state = first.unwrap_or(page.state);
-        let more = read == CARDS_PER_PAGE as u64 && page.total.is_none_or(|total| position + read < total);
+        let more =
+            read == CARDS_PER_PAGE as u64 && page.total.is_none_or(|total| position + read < total);
         let (next_page_token, next_sync_token) = match more {
-            true => (Some(json!(PageToken::Reading { position: position + read, state }).to_string()), None),
+            true => (
+                Some(
+                    json!(PageToken::Reading {
+                        position: position + read,
+                        state
+                    })
+                    .to_string(),
+                ),
+                None,
+            ),
             false => (None, Some(state)),
         };
-        Ok(ConnectionsPage { people, deleted: Vec::new(), next_page_token, next_sync_token })
+        Ok(ConnectionsPage {
+            people,
+            deleted: Vec::new(),
+            next_page_token,
+            next_sync_token,
+        })
     }
 
     async fn changes_page(&self, since: &str) -> Result<ConnectionsPage, BackendError> {
-        let page = self.api().card_changes(since, CARDS_PER_PAGE).await.map_err(backend)?;
+        let page = self
+            .api()
+            .card_changes(since, CARDS_PER_PAGE)
+            .await
+            .map_err(backend)?;
         let people = page.cards.iter().map(person_of).collect();
         let state = page.changes.new_state;
         let (next_page_token, next_sync_token) = match page.changes.has_more_changes {
-            true => (Some(json!(PageToken::Changing { since: state }).to_string()), None),
+            true => (
+                Some(json!(PageToken::Changing { since: state }).to_string()),
+                None,
+            ),
             false => (None, Some(state)),
         };
-        Ok(ConnectionsPage { people, deleted: page.changes.destroyed, next_page_token, next_sync_token })
+        Ok(ConnectionsPage {
+            people,
+            deleted: page.changes.destroyed,
+            next_page_token,
+            next_sync_token,
+        })
     }
 }
 
 impl<J: JmapApi> ContactsService for Jmap<J> {
-    async fn connections(&self, page_token: Option<&str>, sync_token: Option<&str>) -> Result<ConnectionsPage, BackendError> {
+    async fn connections(
+        &self,
+        page_token: Option<&str>,
+        sync_token: Option<&str>,
+    ) -> Result<ConnectionsPage, BackendError> {
         match (page_token, sync_token) {
-            (Some(token), _) => match serde_json::from_str::<PageToken>(token).map_err(|_| BackendError::StateLost)? {
-                PageToken::Reading { position, state } => self.read_page(position, Some(state)).await,
+            (Some(token), _) => match serde_json::from_str::<PageToken>(token)
+                .map_err(|_| BackendError::StateLost)?
+            {
+                PageToken::Reading { position, state } => {
+                    self.read_page(position, Some(state)).await
+                }
                 PageToken::Changing { since } => self.changes_page(&since).await,
             },
             (None, Some(since)) => self.changes_page(since).await,
@@ -230,19 +316,39 @@ impl<J: JmapApi> ContactsService for Jmap<J> {
 
     async fn create_contact(&self, fields: &ContactFields) -> Result<Person, BackendError> {
         let books = self.api().address_books().await.map_err(backend)?;
-        let book = books.iter().find(|b| b.is_default).or(books.first()).map(|b| b.id.clone());
-        let card = self.api().set_card(&CardWrite::Create(card_of(fields, book.as_deref()))).await.map_err(backend)?;
+        let book = books
+            .iter()
+            .find(|b| b.is_default)
+            .or(books.first())
+            .map(|b| b.id.clone());
+        let card = self
+            .api()
+            .set_card(&CardWrite::Create(card_of(fields, book.as_deref())))
+            .await
+            .map_err(backend)?;
         Ok(person_of(&card))
     }
 
     /// Reads the card first, so the edit patches only what changed.
-    async fn update_contact(&self, resource: &str, fields: &ContactFields) -> Result<Person, BackendError> {
-        let card = self.api().card(resource).await.map_err(backend)?.ok_or(BackendError::NotFound)?;
+    async fn update_contact(
+        &self,
+        resource: &str,
+        fields: &ContactFields,
+    ) -> Result<Person, BackendError> {
+        let card = self
+            .api()
+            .card(resource)
+            .await
+            .map_err(backend)?
+            .ok_or(BackendError::NotFound)?;
         let patch = patch_of(&card, fields);
         if patch.is_empty() {
             return Ok(person_of(&card));
         }
-        let write = CardWrite::Update { id: resource.to_string(), patch };
+        let write = CardWrite::Update {
+            id: resource.to_string(),
+            patch,
+        };
         let card = self.api().set_card(&write).await.map_err(backend)?;
         Ok(person_of(&card))
     }

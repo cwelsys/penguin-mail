@@ -98,7 +98,9 @@ pub fn load_pop3(conn: &Connection, account_id: AccountId) -> Result<Option<Pop3
             _ => {}
         }
     }
-    Ok(pop3.zip(smtp).map(|(pop3, smtp)| Pop3Servers { pop3, smtp }))
+    Ok(pop3
+        .zip(smtp)
+        .map(|(pop3, smtp)| Pop3Servers { pop3, smtp }))
 }
 
 fn put(conn: &Connection, account_id: AccountId, role: &str, server: &Saved) -> Result<()> {
@@ -107,7 +109,14 @@ fn put(conn: &Connection, account_id: AccountId, role: &str, server: &Saved) -> 
          VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
          ON CONFLICT (account_id, role) DO UPDATE SET host = excluded.host, \
          port = excluded.port, security = excluded.security, user_name = excluded.user_name",
-        params![account_id, role, server.host, server.port, server.security.as_str(), server.user_name],
+        params![
+            account_id,
+            role,
+            server.host,
+            server.port,
+            server.security.as_str(),
+            server.user_name
+        ],
     )?;
     Ok(())
 }
@@ -130,7 +139,10 @@ fn rows(conn: &Connection, account_id: AccountId) -> Result<Vec<(String, Saved)>
     for row in rows {
         let (role, host, port, security, user_name) = row?;
         if !matches!(role.as_str(), "imap" | "smtp" | "pop3") {
-            return Err(StoreError::Corrupt { column: "account_servers.role", value: role });
+            return Err(StoreError::Corrupt {
+                column: "account_servers.role",
+                value: role,
+            });
         }
         let port = u16::try_from(port).map_err(|_| StoreError::Corrupt {
             column: "account_servers.port",
@@ -140,7 +152,15 @@ fn rows(conn: &Connection, account_id: AccountId) -> Result<Vec<(String, Saved)>
             column: "account_servers.security",
             value: security.clone(),
         })?;
-        kept.push((role, Saved { host, port, security, user_name }));
+        kept.push((
+            role,
+            Saved {
+                host,
+                port,
+                security,
+                user_name,
+            },
+        ));
     }
     Ok(kept)
 }

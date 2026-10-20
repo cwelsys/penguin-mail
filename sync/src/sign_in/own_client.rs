@@ -56,7 +56,10 @@ pub enum OwnClientError {
     /// One is set and the other is not. Penguin Mail says so rather than
     /// sign in with the built-in client the person meant to avoid.
     #[error("{}", half(.set, .missing))]
-    Half { set: &'static str, missing: &'static str },
+    Half {
+        set: &'static str,
+        missing: &'static str,
+    },
 }
 
 fn half(set: &str, missing: &str) -> String {
@@ -71,14 +74,23 @@ fn half(set: &str, missing: &str) -> String {
 
 /// The own client two values name: `None` when neither is set, an error
 /// when only one is. A blank value counts as unset.
-pub fn from_values(id: Option<&str>, secret: Option<&str>) -> Option<Result<OwnClient, OwnClientError>> {
+pub fn from_values(
+    id: Option<&str>,
+    secret: Option<&str>,
+) -> Option<Result<OwnClient, OwnClientError>> {
     let id = id.map(str::trim).filter(|v| !v.is_empty());
     let secret = secret.map(str::trim).filter(|v| !v.is_empty());
     match (id, secret) {
         (None, None) => None,
         (Some(id), Some(secret)) => Some(Ok(OwnClient::new(id, secret))),
-        (Some(_), None) => Some(Err(OwnClientError::Half { set: ID_VAR, missing: SECRET_VAR })),
-        (None, Some(_)) => Some(Err(OwnClientError::Half { set: SECRET_VAR, missing: ID_VAR })),
+        (Some(_), None) => Some(Err(OwnClientError::Half {
+            set: ID_VAR,
+            missing: SECRET_VAR,
+        })),
+        (None, Some(_)) => Some(Err(OwnClientError::Half {
+            set: SECRET_VAR,
+            missing: ID_VAR,
+        })),
     }
 }
 
@@ -116,7 +128,13 @@ mod tests {
         let Some(Err(half)) = from_values(Some("own.apps.googleusercontent.com"), None) else {
             panic!("one value alone is an error");
         };
-        assert_eq!(half, OwnClientError::Half { set: ID_VAR, missing: SECRET_VAR });
+        assert_eq!(
+            half,
+            OwnClientError::Half {
+                set: ID_VAR,
+                missing: SECRET_VAR
+            }
+        );
     }
 
     #[test]
@@ -124,12 +142,21 @@ mod tests {
         let Some(Err(half)) = from_values(Some(""), Some("GOCSPX-own")) else {
             panic!("one value alone is an error");
         };
-        assert_eq!(half, OwnClientError::Half { set: SECRET_VAR, missing: ID_VAR });
+        assert_eq!(
+            half,
+            OwnClientError::Half {
+                set: SECRET_VAR,
+                missing: ID_VAR
+            }
+        );
     }
 
     #[test]
     fn the_error_names_both_variables() {
-        let half = OwnClientError::Half { set: ID_VAR, missing: SECRET_VAR };
+        let half = OwnClientError::Half {
+            set: ID_VAR,
+            missing: SECRET_VAR,
+        };
         assert_eq!(
             half.to_string(),
             "PENGUIN_MAIL_GOOGLE_CLIENT_ID is set but PENGUIN_MAIL_GOOGLE_CLIENT_SECRET is not. \

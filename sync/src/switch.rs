@@ -23,15 +23,17 @@ use mailrs_jmap::{Auth, Email, EmailQuery, JmapClient, JmapError, Mailbox};
 use mailrs_store::Db;
 use mailrs_store::jmap::{JmapAuth, JmapSaved, SavedOAuth};
 use mailrs_store::services::ServiceKind;
-use mailrs_store::switch::{Adoption, Moved, StoredMailbox, StoredMessage, adopt_jmap, stored_mailboxes, stored_messages};
+use mailrs_store::switch::{
+    Adoption, Moved, StoredMailbox, StoredMessage, adopt_jmap, stored_mailboxes, stored_messages,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 use crate::account::message_id_header;
 use crate::passwords::{PasswordError, PasswordStore, Secrets, first_error};
-use crate::sign_in::BrowserGrant;
 use crate::services::JmapApi;
 use crate::services::jmap::{backend, bare_message_id, has_message_id, received_millis};
+use crate::sign_in::BrowserGrant;
 use crate::{AccountServices, AccountSync, AnyJmap, AnyRules, BackendError, SyncError};
 
 /// Message-IDs one search asks for.
@@ -53,12 +55,23 @@ const RESTARTS: usize = 8;
 const KEYS_PER_QUERY: usize = 20;
 
 /// What the second look reads of each hit.
-const SECOND_LOOK: [&str; 7] = ["id", "threadId", "messageId", "receivedAt", "size", "subject", "from"];
+const SECOND_LOOK: [&str; 7] = [
+    "id",
+    "threadId",
+    "messageId",
+    "receivedAt",
+    "size",
+    "subject",
+    "from",
+];
 
 /// A mailbox path as one comparable string: IMAP's `.` or `/` separators
 /// read as `/`, the `INBOX.` prefix of a dotted namespace drops, case folds.
 fn normal(path: &str) -> String {
-    let path = path.strip_prefix("INBOX.").or_else(|| path.strip_prefix("INBOX/")).unwrap_or(path);
+    let path = path
+        .strip_prefix("INBOX.")
+        .or_else(|| path.strip_prefix("INBOX/"))
+        .unwrap_or(path);
     path.replace('.', "/").to_lowercase()
 }
 
@@ -90,11 +103,18 @@ pub fn match_mailboxes(stored: &[StoredMailbox], listed: &[Mailbox]) -> Vec<(Str
     let mut taken = BTreeSet::new();
     let mut out = Vec::new();
     for mailbox in stored {
-        let by_role = mailbox
-            .role
-            .as_deref()
-            .and_then(|role| listed.iter().find(|m| m.role.as_deref() == Some(role)).map(|m| m.id.clone()));
-        let found = by_role.or_else(|| by_path.get(&normal(&mailbox.id)).or_else(|| by_path.get(&normal(&mailbox.name))).cloned());
+        let by_role = mailbox.role.as_deref().and_then(|role| {
+            listed
+                .iter()
+                .find(|m| m.role.as_deref() == Some(role))
+                .map(|m| m.id.clone())
+        });
+        let found = by_role.or_else(|| {
+            by_path
+                .get(&normal(&mailbox.id))
+                .or_else(|| by_path.get(&normal(&mailbox.name)))
+                .cloned()
+        });
         if let Some(id) = found
             && taken.insert(id.clone())
         {
@@ -119,10 +139,18 @@ async fn found_with<J: JmapApi>(api: &J, filter: &Value) -> Result<Vec<String>, 
 /// One listing of `filter`, or None when it changed while it was read.
 /// Only an empty page ends it: a server that clamps a page to its own
 /// limit answers fewer hits than asked while more remain.
-async fn one_listing<J: JmapApi>(api: &J, filter: &Value) -> Result<Option<Vec<String>>, BackendError> {
+async fn one_listing<J: JmapApi>(
+    api: &J,
+    filter: &Value,
+) -> Result<Option<Vec<String>>, BackendError> {
     let (mut ids, mut position, mut state) = (Vec::new(), 0u64, None::<String>);
     loop {
-        let query = EmailQuery { filter: Some(filter.clone()), position, limit: PAGE, total: false };
+        let query = EmailQuery {
+            filter: Some(filter.clone()),
+            position,
+            limit: PAGE,
+            total: false,
+        };
         let page = api.query(&query).await.map_err(backend)?;
         if *state.get_or_insert_with(|| page.query_state.clone()) != page.query_state {
             return Ok(None);
@@ -137,16 +165,25 @@ async fn one_listing<J: JmapApi>(api: &J, filter: &Value) -> Result<Option<Vec<S
 
 /// What the server holds under these Message-IDs: each bare Message-ID's
 /// JMAP ids, threads and `receivedAt`. Only one chunk's hits are held.
-async fn hits<J: JmapApi>(api: &J, message_ids: &[&str]) -> Result<HashMap<String, Vec<(String, String, i64)>>, BackendError> {
+async fn hits<J: JmapApi>(
+    api: &J,
+    message_ids: &[&str],
+) -> Result<HashMap<String, Vec<(String, String, i64)>>, BackendError> {
     let conditions: Vec<_> = message_ids.iter().map(|id| has_message_id(id)).collect();
     let ids = found_with(api, &json!({ "operator": "OR", "conditions": conditions })).await?;
     let mut by_message_id: HashMap<String, Vec<(String, String, i64)>> = HashMap::new();
     for ids in ids.chunks(IDS_PER_QUERY) {
-        let got = api.emails(ids, &["id", "threadId", "messageId", "receivedAt"]).await.map_err(backend)?;
+        let got = api
+            .emails(ids, &["id", "threadId", "messageId", "receivedAt"])
+            .await
+            .map_err(backend)?;
         for email in got.list {
             let received = received_millis(&email);
             for id in email.message_id.iter().flatten() {
-                by_message_id.entry(bare_message_id(id).to_string()).or_default().push((email.id.clone(), email.thread_id.clone(), received));
+                by_message_id
+                    .entry(bare_message_id(id).to_string())
+                    .or_default()
+                    .push((email.id.clone(), email.thread_id.clone(), received));
             }
         }
     }
@@ -158,27 +195,45 @@ async fn hits<J: JmapApi>(api: &J, message_ids: &[&str]) -> Result<HashMap<Strin
 enum SecondKey<'a> {
     /// Arrived within a day of `date`, with exactly this size and
     /// subject, and no other Message-ID than this one when both have one.
-    DateAndSize { date: i64, size: u64, subject: &'a str, message_id: Option<&'a str> },
+    DateAndSize {
+        date: i64,
+        size: u64,
+        subject: &'a str,
+        message_id: Option<&'a str>,
+    },
     /// The date is unknown: the one copy under this bare Message-ID.
     MessageId(&'a str),
     /// No Message-ID and no date: the subject and the sender.
-    SubjectAndFrom { subject: &'a str, from: Option<&'a str> },
+    SubjectAndFrom {
+        subject: &'a str,
+        from: Option<&'a str>,
+    },
 }
 
 impl<'a> SecondKey<'a> {
     fn of(message: &'a StoredMessage) -> Option<SecondKey<'a>> {
-        let message_id = message.message_id.as_deref().map(bare_message_id).filter(|i| !i.is_empty());
+        let message_id = message
+            .message_id
+            .as_deref()
+            .map(bare_message_id)
+            .filter(|i| !i.is_empty());
         let from = message.from.as_deref().filter(|f| !f.trim().is_empty());
         match (message.date > 0, message_id) {
-            (true, _) => u64::try_from(message.size).ok().filter(|s| *s > 0).map(|size| SecondKey::DateAndSize {
-                date: message.date,
-                size,
-                subject: message.subject.trim(),
-                message_id,
-            }),
+            (true, _) => u64::try_from(message.size)
+                .ok()
+                .filter(|s| *s > 0)
+                .map(|size| SecondKey::DateAndSize {
+                    date: message.date,
+                    size,
+                    subject: message.subject.trim(),
+                    message_id,
+                }),
             (false, Some(id)) => Some(SecondKey::MessageId(id)),
             (false, None) if !message.subject.trim().is_empty() || from.is_some() => {
-                Some(SecondKey::SubjectAndFrom { subject: message.subject.trim(), from })
+                Some(SecondKey::SubjectAndFrom {
+                    subject: message.subject.trim(),
+                    from,
+                })
             }
             (false, None) => None,
         }
@@ -188,7 +243,9 @@ impl<'a> SecondKey<'a> {
     /// `subject` and `from` search for words; `holds` decides.
     fn condition(&self) -> Value {
         let stamp = |millis: i64| {
-            chrono::DateTime::from_timestamp_millis(millis).unwrap_or_default().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            chrono::DateTime::from_timestamp_millis(millis)
+                .unwrap_or_default()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
         };
         match self {
             SecondKey::DateAndSize { date, size, .. } => json!({
@@ -213,21 +270,41 @@ impl<'a> SecondKey<'a> {
 
     fn holds(&self, email: &Email) -> bool {
         match self {
-            SecondKey::DateAndSize { date, size, subject, message_id } => {
+            SecondKey::DateAndSize {
+                date,
+                size,
+                subject,
+                message_id,
+            } => {
                 // Mail the server no longer holds may share a day and a
                 // size with mail the store never had.
                 let other_id = message_id.is_some_and(|wanted| {
-                    email.message_id.iter().flatten().map(|m| bare_message_id(m)).any(|m| !m.is_empty() && m != wanted)
+                    email
+                        .message_id
+                        .iter()
+                        .flatten()
+                        .map(|m| bare_message_id(m))
+                        .any(|m| !m.is_empty() && m != wanted)
                 });
                 email.size == *size
                     && (received_millis(email) - date).abs() <= SAME_MESSAGE_WITHIN
                     && email.subject.as_deref().unwrap_or_default().trim() == *subject
                     && !other_id
             }
-            SecondKey::MessageId(id) => email.message_id.iter().flatten().any(|m| bare_message_id(m) == *id),
+            SecondKey::MessageId(id) => email
+                .message_id
+                .iter()
+                .flatten()
+                .any(|m| bare_message_id(m) == *id),
             SecondKey::SubjectAndFrom { subject, from } => {
                 email.subject.as_deref().unwrap_or_default().trim() == *subject
-                    && from.is_none_or(|from| email.from.iter().flatten().any(|a| a.email.eq_ignore_ascii_case(from)))
+                    && from.is_none_or(|from| {
+                        email
+                            .from
+                            .iter()
+                            .flatten()
+                            .any(|a| a.email.eq_ignore_ascii_case(from))
+                    })
             }
         }
     }
@@ -243,8 +320,11 @@ async fn match_again<J: JmapApi>(
     out: &mut Vec<Moved>,
 ) -> Result<(), BackendError> {
     let matched: BTreeSet<String> = out.iter().map(|m| m.from.clone()).collect();
-    let left: Vec<(&StoredMessage, SecondKey)> =
-        stored.iter().filter(|m| !matched.contains(&m.id)).filter_map(|m| SecondKey::of(m).map(|key| (m, key))).collect();
+    let left: Vec<(&StoredMessage, SecondKey)> = stored
+        .iter()
+        .filter(|m| !matched.contains(&m.id))
+        .filter_map(|m| SecondKey::of(m).map(|key| (m, key)))
+        .collect();
     let mut picked: Vec<Moved> = Vec::new();
     for chunk in left.chunks(KEYS_PER_QUERY) {
         let conditions: Vec<Value> = chunk.iter().map(|(_, key)| key.condition()).collect();
@@ -254,9 +334,15 @@ async fn match_again<J: JmapApi>(
             found.extend(api.emails(ids, &SECOND_LOOK).await.map_err(backend)?.list);
         }
         for (message, key) in chunk {
-            let mut answers = found.iter().filter(|e| !taken.contains(&e.id) && key.holds(e));
+            let mut answers = found
+                .iter()
+                .filter(|e| !taken.contains(&e.id) && key.holds(e));
             if let (Some(email), None) = (answers.next(), answers.next()) {
-                picked.push(Moved { from: message.id.clone(), to: email.id.clone(), thread: email.thread_id.clone() });
+                picked.push(Moved {
+                    from: message.id.clone(),
+                    to: email.id.clone(),
+                    thread: email.thread_id.clone(),
+                });
             }
         }
     }
@@ -279,24 +365,45 @@ async fn match_again<J: JmapApi>(
 /// copy stays unmatched when the server holds just one. A message this
 /// leaves out gets a second look by another key (`SecondKey`); one still
 /// unmatched after it is mail the server no longer holds.
-pub async fn match_messages<J: JmapApi>(api: &J, stored: &[StoredMessage]) -> Result<Vec<Moved>, BackendError> {
-    let with_id: Vec<&StoredMessage> = stored.iter().filter(|m| m.message_id.as_deref().is_some_and(|i| !bare_message_id(i).is_empty())).collect();
+pub async fn match_messages<J: JmapApi>(
+    api: &J,
+    stored: &[StoredMessage],
+) -> Result<Vec<Moved>, BackendError> {
+    let with_id: Vec<&StoredMessage> = stored
+        .iter()
+        .filter(|m| {
+            m.message_id
+                .as_deref()
+                .is_some_and(|i| !bare_message_id(i).is_empty())
+        })
+        .collect();
     let mut taken = BTreeSet::new();
     let mut out = Vec::new();
     for chunk in with_id.chunks(IDS_PER_QUERY) {
-        let wanted: Vec<&str> = chunk.iter().filter_map(|m| m.message_id.as_deref()).collect();
+        let wanted: Vec<&str> = chunk
+            .iter()
+            .filter_map(|m| m.message_id.as_deref())
+            .collect();
         let by_message_id = hits(api, &wanted).await?;
         for message in chunk {
-            let Some(wanted) = message.message_id.as_deref().map(bare_message_id) else { continue };
+            let Some(wanted) = message.message_id.as_deref().map(bare_message_id) else {
+                continue;
+            };
             let best = by_message_id
                 .get(wanted)
                 .into_iter()
                 .flatten()
-                .filter(|(id, _, received)| !taken.contains(id) && (received - message.date).abs() <= SAME_MESSAGE_WITHIN)
+                .filter(|(id, _, received)| {
+                    !taken.contains(id) && (received - message.date).abs() <= SAME_MESSAGE_WITHIN
+                })
                 .min_by_key(|(_, _, received)| (received - message.date).abs());
             if let Some((id, thread, _)) = best {
                 taken.insert(id.clone());
-                out.push(Moved { from: message.id.clone(), to: id.clone(), thread: thread.clone() });
+                out.push(Moved {
+                    from: message.id.clone(),
+                    to: id.clone(),
+                    thread: thread.clone(),
+                });
             }
         }
     }
@@ -306,7 +413,10 @@ pub async fn match_messages<J: JmapApi>(api: &J, stored: &[StoredMessage]) -> Re
 
 /// The ids of the stored drafts: what sits in Drafts, and what a waiting
 /// outbox row names as its draft.
-fn stored_drafts(conn: &Connection, account_id: AccountId) -> mailrs_store::Result<BTreeSet<String>> {
+fn stored_drafts(
+    conn: &Connection,
+    account_id: AccountId,
+) -> mailrs_store::Result<BTreeSet<String>> {
     let mut stmt = conn.prepare(
         "SELECT m.id FROM messages m WHERE m.account_id = ?1 AND (\
          EXISTS (SELECT 1 FROM message_mailboxes s CROSS JOIN mailboxes b ON b.key = s.mailbox \
@@ -320,7 +430,11 @@ fn stored_drafts(conn: &Connection, account_id: AccountId) -> mailrs_store::Resu
 /// A draft's bytes as kept here: its local copy, or the bytes an outbox
 /// row waits to send it from. An IMAP draft usually has neither, since
 /// its bytes live on the server.
-fn draft_bytes(conn: &Connection, account_id: AccountId, id: &str) -> mailrs_store::Result<Option<Vec<u8>>> {
+fn draft_bytes(
+    conn: &Connection,
+    account_id: AccountId,
+    id: &str,
+) -> mailrs_store::Result<Option<Vec<u8>>> {
     if let Some(raw) = mailrs_store::local_messages::get(conn, account_id, id)? {
         return Ok(Some(raw));
     }
@@ -336,7 +450,11 @@ fn draft_bytes(conn: &Connection, account_id: AccountId, id: &str) -> mailrs_sto
 /// `raw` with a `Message-ID: <id>` header first, in the line ending the
 /// message already uses.
 fn with_message_id(raw: &[u8], id: &str) -> Vec<u8> {
-    let end: &[u8] = if raw.windows(2).any(|w| w == b"\r\n") { b"\r\n" } else { b"\n" };
+    let end: &[u8] = if raw.windows(2).any(|w| w == b"\r\n") {
+        b"\r\n"
+    } else {
+        b"\n"
+    };
     let mut out = Vec::with_capacity(raw.len() + id.len() + 16);
     out.extend_from_slice(format!("Message-ID: <{id}>").as_bytes());
     out.extend_from_slice(end);
@@ -348,7 +466,12 @@ fn with_message_id(raw: &[u8], id: &str) -> Vec<u8> {
 /// already carry, else `fresh`. The row takes it, and the bytes kept
 /// here that lack one, its local copy and any outbox row that sends it,
 /// get the header. The draft's bytes as they now read, if any are kept.
-fn stamp_draft(conn: &Connection, account_id: AccountId, id: &str, fresh: String) -> mailrs_store::Result<Option<Vec<u8>>> {
+fn stamp_draft(
+    conn: &Connection,
+    account_id: AccountId,
+    id: &str,
+    fresh: String,
+) -> mailrs_store::Result<Option<Vec<u8>>> {
     let local = mailrs_store::local_messages::get(conn, account_id, id)?;
     let queued: Vec<(i64, Vec<u8>)> = conn
         .prepare("SELECT id, raw FROM outbox WHERE account_id = ?1 AND draft_id = ?2 AND raw IS NOT NULL")?
@@ -377,7 +500,10 @@ fn stamp_draft(conn: &Connection, account_id: AccountId, id: &str, fresh: String
     for (row, raw) in queued {
         let (raw, changed) = stamped(raw);
         if changed {
-            conn.execute("UPDATE outbox SET raw = ?2 WHERE id = ?1", params![row, raw])?;
+            conn.execute(
+                "UPDATE outbox SET raw = ?2 WHERE id = ?1",
+                params![row, raw],
+            )?;
         }
         first.get_or_insert(raw);
     }
@@ -386,8 +512,14 @@ fn stamp_draft(conn: &Connection, account_id: AccountId, id: &str, fresh: String
 
 /// A fresh Message-ID in the account's domain, as the composer makes one.
 fn new_message_id(address: &str) -> String {
-    let domain = address.rsplit_once('@').map_or("penguin-mail.local", |(_, d)| d);
-    format!("{}.{}@{domain}", mailrs_gmail::random_token(12), std::process::id())
+    let domain = address
+        .rsplit_once('@')
+        .map_or("penguin-mail.local", |(_, d)| d);
+    format!(
+        "{}.{}@{domain}",
+        mailrs_gmail::random_token(12),
+        std::process::id()
+    )
 }
 
 /// The reminders already shown, renamed for the JMAP calendar: each
@@ -396,7 +528,11 @@ fn new_message_id(address: &str) -> String {
 /// one). Without it a reminder shown before the switch goes up again once
 /// the JMAP calendar is read. A server that does not answer leaves the
 /// log as it is: the switch goes on, and at worst a reminder shows twice.
-async fn shown_reminders<J: JmapApi>(db: &Db, id: AccountId, api: &J) -> Vec<((String, String), (String, String))> {
+async fn shown_reminders<J: JmapApi>(
+    db: &Db,
+    id: AccountId,
+    api: &J,
+) -> Vec<((String, String), (String, String))> {
     let shown = db
         .read(move |c| {
             let mut stmt = c.prepare(
@@ -430,8 +566,17 @@ async fn shown_reminders<J: JmapApi>(db: &Db, id: AccountId, api: &J) -> Vec<((S
                 .events
                 .iter()
                 .filter_map(|object| {
-                    let calendar = object["calendarIds"].as_object()?.iter().find(|(_, on)| on.as_bool() == Some(true))?.0.clone();
-                    Some(crate::services::jmap::jscal::events_of(object, &calendar, &[]))
+                    let calendar = object["calendarIds"]
+                        .as_object()?
+                        .iter()
+                        .find(|(_, on)| on.as_bool() == Some(true))?
+                        .0
+                        .clone();
+                    Some(crate::services::jmap::jscal::events_of(
+                        object,
+                        &calendar,
+                        &[],
+                    ))
                 })
                 .flatten()
                 .collect();
@@ -439,7 +584,10 @@ async fn shown_reminders<J: JmapApi>(db: &Db, id: AccountId, api: &J) -> Vec<((S
         }
         let mut same = by_uid[&uid].iter().filter(|e| e.original_start == original);
         if let (Some(found), None) = (same.next(), same.next()) {
-            renamed.push(((calendar, event), (found.calendar.clone(), found.id.clone())));
+            renamed.push((
+                (calendar, event),
+                (found.calendar.clone(), found.id.clone()),
+            ));
         }
     }
     renamed
@@ -457,7 +605,11 @@ struct Waiting {
 /// keeps no bytes here. Scheduled online, such a row names its draft by
 /// its IMAP place alone, which means nothing to JMAP. Any draft the
 /// server does not give stops the switch.
-async fn waiting_drafts(db: &Db, id: AccountId, imap: Option<&AccountSync>) -> Result<Vec<Waiting>, SwitchError> {
+async fn waiting_drafts(
+    db: &Db,
+    id: AccountId,
+    imap: Option<&AccountSync>,
+) -> Result<Vec<Waiting>, SwitchError> {
     let named: Vec<(i64, String)> = db
         .read(move |c| {
             let mut stmt = c.prepare("SELECT id, draft_id FROM outbox WHERE account_id = ?1 AND raw IS NULL AND draft_id IS NOT NULL")?;
@@ -468,14 +620,22 @@ async fn waiting_drafts(db: &Db, id: AccountId, imap: Option<&AccountSync>) -> R
     let mut waiting = Vec::with_capacity(named.len());
     for (row, draft_id) in named {
         let imap = imap.ok_or(SwitchError::Drafts(SyncError::UnknownAccount(id)))?;
-        let raw = imap.raw(&draft_id).await.map_err(SwitchError::Drafts)?.to_vec();
+        let raw = imap
+            .raw(&draft_id)
+            .await
+            .map_err(SwitchError::Drafts)?
+            .to_vec();
         waiting.push(Waiting { row, draft_id, raw });
     }
     Ok(waiting)
 }
 
 /// The JMAP id of the one copy in Drafts that carries `raw`'s Message-ID.
-async fn in_jmap_drafts<J: JmapApi>(api: &J, drafts: Option<&str>, raw: &[u8]) -> Result<Option<String>, BackendError> {
+async fn in_jmap_drafts<J: JmapApi>(
+    api: &J,
+    drafts: Option<&str>,
+    raw: &[u8],
+) -> Result<Option<String>, BackendError> {
     let (Some(drafts), Some(message_id)) = (drafts, message_id_header(raw)) else {
         return Ok(None);
     };
@@ -503,19 +663,29 @@ async fn carry_drafts<J: JmapApi>(
     moved: &mut Vec<Moved>,
 ) -> Result<(), SwitchError> {
     let matched: BTreeSet<&str> = moved.iter().map(|m| m.from.as_str()).collect();
-    let left: Vec<&StoredMessage> = stored.iter().filter(|m| drafts.contains(&m.id) && !matched.contains(m.id.as_str())).collect();
+    let left: Vec<&StoredMessage> = stored
+        .iter()
+        .filter(|m| drafts.contains(&m.id) && !matched.contains(m.id.as_str()))
+        .collect();
     if left.is_empty() {
         return Ok(());
     }
     let mut taken: BTreeSet<String> = moved.iter().map(|m| m.to.clone()).collect();
-    let wanted: Vec<&str> = left.iter().filter_map(|m| m.message_id.as_deref()).filter(|i| !bare_message_id(i).is_empty()).collect();
+    let wanted: Vec<&str> = left
+        .iter()
+        .filter_map(|m| m.message_id.as_deref())
+        .filter(|i| !bare_message_id(i).is_empty())
+        .collect();
     let mut held: HashMap<String, Vec<(String, String, i64)>> = HashMap::new();
     for chunk in wanted.chunks(IDS_PER_QUERY) {
         for (message_id, found) in hits(api, chunk).await? {
             held.entry(message_id).or_default().extend(found);
         }
     }
-    let drafts_mailbox = listed.iter().find(|m| m.role.as_deref() == Some("drafts")).map(|m| m.id.clone());
+    let drafts_mailbox = listed
+        .iter()
+        .find(|m| m.role.as_deref() == Some("drafts"))
+        .map(|m| m.id.clone());
     for draft in left {
         let copy = draft
             .message_id
@@ -526,7 +696,11 @@ async fn carry_drafts<J: JmapApi>(
             .find(|(id, _, _)| !taken.contains(id));
         if let Some((to, thread, _)) = copy {
             taken.insert(to.clone());
-            moved.push(Moved { from: draft.id.clone(), to: to.clone(), thread: thread.clone() });
+            moved.push(Moved {
+                from: draft.id.clone(),
+                to: to.clone(),
+                thread: thread.clone(),
+            });
             continue;
         }
         let (from, account_id) = (draft.id.clone(), account.id);
@@ -537,25 +711,48 @@ async fn carry_drafts<J: JmapApi>(
         let Some(raw) = db.read(move |c| draft_bytes(c, account_id, &from)).await? else {
             continue;
         };
-        let raw = match draft.message_id.as_deref().is_some_and(|i| !bare_message_id(i).is_empty()) {
+        let raw = match draft
+            .message_id
+            .as_deref()
+            .is_some_and(|i| !bare_message_id(i).is_empty())
+        {
             true => raw,
             false => {
                 let (from, message_id) = (draft.id.clone(), new_message_id(&account.email));
-                db.write(move |c| stamp_draft(c, account_id, &from, message_id)).await?.unwrap_or(raw)
+                db.write(move |c| stamp_draft(c, account_id, &from, message_id))
+                    .await?
+                    .unwrap_or(raw)
             }
         };
-        let mailbox = drafts_mailbox.clone().ok_or_else(|| BackendError::Refused(gettext("The server has no Drafts mailbox.")))?;
+        let mailbox = drafts_mailbox
+            .clone()
+            .ok_or_else(|| BackendError::Refused(gettext("The server has no Drafts mailbox.")))?;
         let blob = api.upload(raw).await.map_err(backend)?;
-        let made = api.import(&blob, &[mailbox], &["$draft", "$seen"], None).await.map_err(backend)?.email;
+        let made = api
+            .import(&blob, &[mailbox], &["$draft", "$seen"], None)
+            .await
+            .map_err(backend)?
+            .email;
         let thread = match made.thread_id.is_empty() {
             false => made.thread_id,
             true => {
-                let got = api.emails(std::slice::from_ref(&made.id), &["id", "threadId"]).await.map_err(backend)?;
-                got.list.into_iter().next().map(|e| e.thread_id).ok_or(BackendError::NotFound)?
+                let got = api
+                    .emails(std::slice::from_ref(&made.id), &["id", "threadId"])
+                    .await
+                    .map_err(backend)?;
+                got.list
+                    .into_iter()
+                    .next()
+                    .map(|e| e.thread_id)
+                    .ok_or(BackendError::NotFound)?
             }
         };
         taken.insert(made.id.clone());
-        moved.push(Moved { from: draft.id.clone(), to: made.id, thread });
+        moved.push(Moved {
+            from: draft.id.clone(),
+            to: made.id,
+            thread,
+        });
     }
     Ok(())
 }
@@ -614,14 +811,19 @@ impl From<BackendError> for SwitchError {
     }
 }
 
-async fn keyring<T: Send + 'static>(work: impl FnOnce() -> Result<T, PasswordError> + Send + 'static) -> Result<T, PasswordError> {
-    tokio::task::spawn_blocking(work).await.map_err(|e| PasswordError::Keyring(e.to_string()))?
+async fn keyring<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, PasswordError> + Send + 'static,
+) -> Result<T, PasswordError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| PasswordError::Keyring(e.to_string()))?
 }
 
 /// The lock one account's switch holds. The map keeps an entry only while
 /// a switch holds or waits for it.
 fn switch_lock(id: AccountId) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: LazyLock<Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>> = LazyLock::new(Mutex::default);
+    static LOCKS: LazyLock<Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>> =
+        LazyLock::new(Mutex::default);
     let mut locks = LOCKS.lock().unwrap_or_else(PoisonError::into_inner);
     locks.retain(|_, lock| Arc::strong_count(lock) > 1);
     Arc::clone(locks.entry(id).or_default())
@@ -636,7 +838,10 @@ async fn forget_imap_passwords(db: &Db, secrets: &Secrets, id: AccountId) {
     match db.checkpoint().await {
         Ok(true) => {}
         Ok(false) => {
-            tracing::warn!(account = id, "the switch is not in the database file yet, so the IMAP password stays");
+            tracing::warn!(
+                account = id,
+                "the switch is not in the database file yet, so the IMAP password stays"
+            );
             return;
         }
         Err(err) => {
@@ -645,7 +850,9 @@ async fn forget_imap_passwords(db: &Db, secrets: &Secrets, id: AccountId) {
         }
     }
     let passwords = Arc::clone(&secrets.passwords);
-    if let Err(err) = keyring(move || first_error([passwords.delete_outgoing(id), passwords.delete(id)])).await {
+    if let Err(err) =
+        keyring(move || first_error([passwords.delete_outgoing(id), passwords.delete(id)])).await
+    {
         tracing::warn!(account = id, %err, "the switch is done, and the keyring kept the IMAP password");
     }
 }
@@ -676,7 +883,10 @@ pub enum SwitchSignIn {
     /// A password or a token the person typed.
     Typed(SwitchTo),
     /// A sign-in on the server's own page in the browser.
-    Browser { session_url: String, grant: BrowserGrant },
+    Browser {
+        session_url: String,
+        grant: BrowserGrant,
+    },
 }
 
 /// What one way of signing in becomes: the sign-in the checks send, and
@@ -700,9 +910,16 @@ pub fn signed_with(how: SwitchSignIn, address: &str) -> Signed {
         SwitchSignIn::Typed(to) => Signed {
             auth: match to.token {
                 true => Auth::Bearer(to.secret.clone()),
-                false => Auth::Basic { user: to.user.clone(), password: to.secret.clone() },
+                false => Auth::Basic {
+                    user: to.user.clone(),
+                    password: to.secret.clone(),
+                },
             },
-            kind: if to.token { JmapAuth::Bearer } else { JmapAuth::Basic },
+            kind: if to.token {
+                JmapAuth::Bearer
+            } else {
+                JmapAuth::Basic
+            },
             user_name: (!to.token && !to.user.eq_ignore_ascii_case(address)).then_some(to.user),
             oauth: None,
             session_url: to.session_url,
@@ -753,35 +970,65 @@ pub async fn to_jmap(
     switched
 }
 
-async fn signed_in(db: &Db, secrets: &Secrets, account: &Account, imap: Option<&AccountSync>, signed: Signed) -> Result<Switched, SwitchError> {
+async fn signed_in(
+    db: &Db,
+    secrets: &Secrets,
+    account: &Account,
+    imap: Option<&AccountSync>,
+    signed: Signed,
+) -> Result<Switched, SwitchError> {
     let client = JmapClient::new(&signed.session_url, signed.auth).map_err(SwitchError::SignIn)?;
-    let checked = mailrs_jmap::check(&client).await.map_err(SwitchError::SignIn)?;
+    let checked = mailrs_jmap::check(&client)
+        .await
+        .map_err(SwitchError::SignIn)?;
     let session = &checked.session;
     let saved = JmapSaved {
         session_url: signed.session_url,
         auth: signed.kind,
         user_name: signed.user_name,
         labels: session.mailboxes_per_email().is_none_or(|most| most > 1),
-        capabilities: session.capabilities.keys().filter(|c| session.offers(c)).cloned().collect(),
+        capabilities: session
+            .capabilities
+            .keys()
+            .filter(|c| session.offers(c))
+            .cloned()
+            .collect(),
         oauth: signed.oauth,
         owner: Some(crate::sign_in::SignedAs::of(&checked).owner),
     };
-    to_jmap_over(db, secrets, account, imap, &AnyJmap::from(client), saved, signed.secret).await
+    to_jmap_over(
+        db,
+        secrets,
+        account,
+        imap,
+        &AnyJmap::from(client),
+        saved,
+        signed.secret,
+    )
+    .await
 }
 
 /// Whether the session signs in to the account at `address`: its user name
 /// is the address or its local part, or one of its identities sends from
 /// it.
-async fn same_account<J: JmapApi>(api: &J, session: &mailrs_jmap::Session, address: &str) -> Result<bool, SwitchError> {
+async fn same_account<J: JmapApi>(
+    api: &J,
+    session: &mailrs_jmap::Session,
+    address: &str,
+) -> Result<bool, SwitchError> {
     let username = session.username.trim();
     let local = address.split_once('@').map(|(local, _)| local);
     // A login name that is the address's local part, as Cyrus and
     // Stalwart name their users, is the same account too.
-    if username.eq_ignore_ascii_case(address) || local.is_some_and(|local| username.eq_ignore_ascii_case(local)) {
+    if username.eq_ignore_ascii_case(address)
+        || local.is_some_and(|local| username.eq_ignore_ascii_case(local))
+    {
         return Ok(true);
     }
     let identities = api.identities().await.map_err(backend)?;
-    Ok(identities.iter().any(|identity| identity.email.eq_ignore_ascii_case(address)))
+    Ok(identities
+        .iter()
+        .any(|identity| identity.email.eq_ignore_ascii_case(address)))
 }
 
 /// The switch over `api`, already signed in. The JMAP secret goes into the
@@ -809,7 +1056,9 @@ pub async fn to_jmap_over<J: JmapApi>(
     let _one = lock.lock().await;
     // The account shown may be stale: a second click, or a retry after a
     // switch that went through.
-    let provider = db.read(move |c| Ok(mailrs_store::accounts::account(c, id)?.map(|a| a.provider))).await?;
+    let provider = db
+        .read(move |c| Ok(mailrs_store::accounts::account(c, id)?.map(|a| a.provider)))
+        .await?;
     if provider != Some(Provider::Imap) {
         return Err(SwitchError::NotImap);
     }
@@ -819,7 +1068,9 @@ pub async fn to_jmap_over<J: JmapApi>(
     keyring(move || jmap.delete(id)).await?;
     let session = api.session().await.map_err(SwitchError::SignIn)?;
     if !session.offers(mailrs_jmap::MAIL) {
-        return Err(SwitchError::SignIn(JmapError::UnknownCapability(mailrs_jmap::MAIL.to_string())));
+        return Err(SwitchError::SignIn(JmapError::UnknownCapability(
+            mailrs_jmap::MAIL.to_string(),
+        )));
     }
     // A browser already signed in to a second account at the provider
     // hands back that account. Matched against its mail, most of this
@@ -828,15 +1079,25 @@ pub async fn to_jmap_over<J: JmapApi>(
         return Err(SwitchError::OtherAccount);
     }
     let listed = api.mailboxes().await.map_err(backend)?.list;
-    let (stored, boxes, drafts) =
-        db.read(move |c| Ok((stored_messages(c, id)?, stored_mailboxes(c, id)?, stored_drafts(c, id)?))).await?;
+    let (stored, boxes, drafts) = db
+        .read(move |c| {
+            Ok((
+                stored_messages(c, id)?,
+                stored_mailboxes(c, id)?,
+                stored_drafts(c, id)?,
+            ))
+        })
+        .await?;
     let waiting = waiting_drafts(db, id, imap).await?;
     let mut messages = match_messages(api, &stored).await?;
     carry_drafts(db, account, api, &listed, &stored, &drafts, &mut messages).await?;
     drop(stored);
     // A draft the swap gives an Email id keeps it; any other takes the
     // JMAP copy in Drafts, or none, and the message sends from its bytes.
-    let drafts_mailbox = listed.iter().find(|m| m.role.as_deref() == Some("drafts")).map(|m| m.id.as_str());
+    let drafts_mailbox = listed
+        .iter()
+        .find(|m| m.role.as_deref() == Some("drafts"))
+        .map(|m| m.id.as_str());
     let mut fill = Vec::with_capacity(waiting.len());
     for Waiting { row, draft_id, raw } in waiting {
         let draft = match messages.iter().any(|m| m.from == draft_id) {
@@ -846,7 +1107,9 @@ pub async fn to_jmap_over<J: JmapApi>(
         fill.push((row, raw, draft));
     }
     let mailboxes = match_mailboxes(&boxes, &listed);
-    let found = db.read(move |c| mailrs_store::services::load(c, id)).await?;
+    let found = db
+        .read(move |c| mailrs_store::services::load(c, id))
+        .await?;
     let contacts_from_jmap = saved.offers(mailrs_jmap::CONTACTS);
     let needs_dav_password = found.iter().filter(|f| f.confirmed).any(|f| match f.kind {
         ServiceKind::CalDav => !saved.offers(mailrs_jmap::CALENDARS),
@@ -859,7 +1122,12 @@ pub async fn to_jmap_over<J: JmapApi>(
     };
     let jmap = Arc::clone(&secrets.jmap);
     keyring(move || jmap.save(id, &secret)).await?;
-    let adoption = Adoption { messages, mailboxes, saved, contacts_from_jmap };
+    let adoption = Adoption {
+        messages,
+        mailboxes,
+        saved,
+        contacts_from_jmap,
+    };
     let adopted = db
         .write(move |c| {
             let Some(adopted) = adopt_jmap(c, id, &adoption)? else {
@@ -885,9 +1153,15 @@ pub async fn to_jmap_over<J: JmapApi>(
                 )?;
             }
             for (row, raw, draft) in &fill {
-                c.execute("UPDATE outbox SET raw = ?2 WHERE id = ?1 AND raw IS NULL", params![row, raw])?;
+                c.execute(
+                    "UPDATE outbox SET raw = ?2 WHERE id = ?1 AND raw IS NULL",
+                    params![row, raw],
+                )?;
                 if let Some(draft) = draft {
-                    c.execute("UPDATE outbox SET draft_id = ?2 WHERE id = ?1", params![row, draft])?;
+                    c.execute(
+                        "UPDATE outbox SET draft_id = ?2 WHERE id = ?1",
+                        params![row, draft],
+                    )?;
                 }
             }
             Ok(Some(adopted))
@@ -901,7 +1175,10 @@ pub async fn to_jmap_over<J: JmapApi>(
         Err(err) => {
             let jmap = Arc::clone(&secrets.jmap);
             if keyring(move || jmap.delete(id)).await.is_err() {
-                tracing::warn!(account = id, "the switch failed, and the keyring kept the JMAP secret");
+                tracing::warn!(
+                    account = id,
+                    "the switch failed, and the keyring kept the JMAP secret"
+                );
             }
             return Err(err.into());
         }
@@ -909,6 +1186,14 @@ pub async fn to_jmap_over<J: JmapApi>(
     if !needs_dav_password {
         forget_imap_passwords(db, secrets, id).await;
     }
-    let account = db.read(move |c| mailrs_store::accounts::account(c, id)).await?.ok_or(SwitchError::NotImap)?;
-    Ok(Switched { account, kept: adopted.kept, dropped: adopted.dropped, rules_off: adopted.rules_off })
+    let account = db
+        .read(move |c| mailrs_store::accounts::account(c, id))
+        .await?
+        .ok_or(SwitchError::NotImap)?;
+    Ok(Switched {
+        account,
+        kept: adopted.kept,
+        dropped: adopted.dropped,
+        rules_off: adopted.rules_off,
+    })
 }

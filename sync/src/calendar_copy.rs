@@ -28,13 +28,13 @@ use std::sync::{Arc, Mutex};
 use mailrs_domain::calendar::series::{self, Picked, RepeatScope, Step};
 use mailrs_domain::calendar::{self, Access, Calendar, Event, Notify, Occurrence};
 use mailrs_domain::translate::{fill, gettext};
-use mailrs_domain::{AccountId, EpochMillis};
+use mailrs_domain::{AccountId, AccountState, EpochMillis};
 use mailrs_store::Db;
 use mailrs_store::calendar as store;
 
 use crate::calendar_reach::missing_range;
 use crate::settings::Permitted;
-use crate::{Accounts, AnyCalendar, BackendError, CalendarService, SyncError};
+use crate::{AccountServices, Accounts, AnyCalendar, BackendError, CalendarService, SyncError};
 
 mod attach;
 pub mod event_change;
@@ -197,9 +197,19 @@ fn held_keys(account_id: AccountId, steps: &[Step]) -> Vec<HeldKey> {
         // A move leaves its old calendar as a removal would, so a read of
         // that calendar keeps the event and its changed occurrences out.
         if let Step::Move { from, .. } = step {
-            keys.push(HeldKey { account_id, calendar: from.clone(), id: id.clone(), removal: true });
+            keys.push(HeldKey {
+                account_id,
+                calendar: from.clone(),
+                id: id.clone(),
+                removal: true,
+            });
         }
-        keys.push(HeldKey { account_id, calendar, id, removal: matches!(step, Step::Remove { .. }) });
+        keys.push(HeldKey {
+            account_id,
+            calendar,
+            id,
+            removal: matches!(step, Step::Remove { .. }),
+        });
     }
     keys
 }
@@ -213,7 +223,9 @@ struct Release<'a> {
 
 impl Release<'_> {
     fn new(held: &Mutex<Vec<HeldKey>>, keys: Vec<HeldKey>) -> Release<'_> {
-        held.lock().expect("copy poisoned").extend(keys.iter().cloned());
+        held.lock()
+            .expect("copy poisoned")
+            .extend(keys.iter().cloned());
         Release { held, keys }
     }
 
@@ -233,6 +245,18 @@ impl Drop for Release<'_> {
             }
         }
     }
+}
+
+/// Whether these are the services of a calendar account whose server
+/// refused its password. A mail account whose calendar server did still
+/// reads and sends as before: its mail works, and Preferences says why
+/// the calendar does not.
+fn awaits_sign_in(services: &AccountServices) -> bool {
+    !services.serves_mail()
+        && services
+            .calendar
+            .as_ref()
+            .is_some_and(|calendar| calendar.login_refused().is_some())
 }
 
 impl<A: Accounts> CalendarCopy<A> {
@@ -268,9 +292,35 @@ impl<A: Accounts> CalendarCopy<A> {
     /// person signs the account in again, which is how a permission is
     /// granted.
     pub fn permission_changed(&self, account_id: AccountId) {
-        self.refused.lock().expect("copy poisoned").remove(&account_id);
-        self.last_list.lock().expect("copy poisoned").remove(&account_id);
-        self.last_read.lock().expect("copy poisoned").remove(&account_id);
+        self.refused
+            .lock()
+            .expect("copy poisoned")
+            .remove(&account_id);
+        self.last_list
+            .lock()
+            .expect("copy poisoned")
+            .remove(&account_id);
+        self.last_read
+            .lock()
+            .expect("copy poisoned")
+            .remove(&account_id);
+    }
+
+    /// Forgets all this run kept about a removed account: when it was
+    /// listed and read, from which kind of server, and what it was
+    /// refused. SQLite gives a removed account's id to the next account
+    /// added, which would otherwise wait out the old one's times with no
+    /// calendars to show.
+    pub fn forget(&self, account_id: AccountId) {
+        self.permission_changed(account_id);
+        self.listed_from
+            .lock()
+            .expect("copy poisoned")
+            .remove(&account_id);
+        self.tried
+            .lock()
+            .expect("copy poisoned")
+            .remove(&account_id);
     }
 
     /// Whether the account turned out to lack the calendar permission less
@@ -297,12 +347,25 @@ impl<A: Accounts> CalendarCopy<A> {
         let Ok(_run) = self.running.try_lock() else {
             return Ok(Refreshed::default());
         };
-        let every = if window_open { READ_EVERY_OPEN } else { READ_EVERY_TRAY };
+        let every = if window_open {
+            READ_EVERY_OPEN
+        } else {
+            READ_EVERY_TRAY
+        };
         let mut total = Refreshed::default();
         for &account_id in accounts {
             // An account still starting, signed out or just removed has
             // nothing to read with, and the app ticks every 15 seconds.
-            if self.accounts.services(account_id).is_none() {
+            let Some(services) = self.accounts.services(account_id) else {
+                continue;
+            };
+            // A calendar account whose server refused its password would
+            // be refused again at every tick. It waits for the person to
+            // sign in again, which starts it on new services. Whatever
+            // met the refusal, a read, the queue or a change the person
+            // made, the account says so here.
+            if awaits_sign_in(&services) {
+                self.report(account_id, AccountState::NeedsReauth).await;
                 continue;
             }
             // Queued changes go out before the account is read, so an
@@ -316,7 +379,12 @@ impl<A: Accounts> CalendarCopy<A> {
                     tracing::warn!(account = account_id, %err, "could not send the calendar queue");
                 }
             }
-            let last = self.last_read.lock().expect("copy poisoned").get(&account_id).copied();
+            let last = self
+                .last_read
+                .lock()
+                .expect("copy poisoned")
+                .get(&account_id)
+                .copied();
             if last.is_some_and(|last| now - last < every) || self.refused_lately(account_id, now) {
                 continue;
             }
@@ -342,13 +410,50 @@ impl<A: Accounts> CalendarCopy<A> {
     /// calendar answers `Done` with nothing read, quietly: IMAP today, and
     /// any other provider without one tomorrow (the provider-neutrality
     /// rule).
-    pub async fn refresh(&self, account_id: AccountId, now: EpochMillis) -> Result<Permitted<Refreshed>, SyncError> {
+    pub async fn refresh(
+        &self,
+        account_id: AccountId,
+        now: EpochMillis,
+    ) -> Result<Permitted<Refreshed>, SyncError> {
         let Some(calendar) = self.calendar(account_id)? else {
             return Ok(Permitted::Done(Refreshed::default()));
         };
         // Nobody waits on a refresh; it runs behind the person's own
         // calls.
-        crate::background(self.refresh_calendars(&calendar, account_id, now)).await
+        let read = crate::background(self.refresh_calendars(&calendar, account_id, now)).await;
+        // A mail account's loop says how the account is doing. A calendar
+        // account has no loop, and this read is what spoke to its server.
+        match self
+            .accounts
+            .services(account_id)
+            .filter(|services| !services.serves_mail())
+        {
+            Some(services) if awaits_sign_in(&services) => {
+                self.report(account_id, AccountState::NeedsReauth).await
+            }
+            Some(_) if read.is_ok() => self.report(account_id, AccountState::Ok).await,
+            _ => {}
+        }
+        read
+    }
+
+    /// Records how a calendar account is doing, once: nothing is written
+    /// while the store already says so, since the tick comes every
+    /// fifteen seconds.
+    async fn report(&self, account_id: AccountId, state: AccountState) {
+        let Some(sync) = self.accounts.account(account_id) else {
+            return;
+        };
+        let held = self
+            .db
+            .read(move |c| mailrs_store::accounts::account(c, account_id))
+            .await;
+        if matches!(held, Ok(Some(account)) if account.state == state) {
+            return;
+        }
+        if let Err(err) = sync.set_state(state).await {
+            tracing::warn!(account = account_id, %err, "could not record how the calendar account is doing");
+        }
     }
 
     /// Reads the account's calendars now when the copy has never read
@@ -363,7 +468,11 @@ impl<A: Accounts> CalendarCopy<A> {
     /// `Done` and reads the copy as it stands, often empty, without a
     /// call. A reader that arrives while another's first read is still
     /// going does the same rather than starting a second one.
-    pub async fn ready(&self, account_id: AccountId, now: EpochMillis) -> Result<Permitted<()>, SyncError> {
+    pub async fn ready(
+        &self,
+        account_id: AccountId,
+        now: EpochMillis,
+    ) -> Result<Permitted<()>, SyncError> {
         if self.db.read(move |c| store::synced(c, account_id)).await? {
             return Ok(Permitted::Done(()));
         }
@@ -372,14 +481,20 @@ impl<A: Accounts> CalendarCopy<A> {
         }
         {
             let mut tried = self.tried.lock().expect("copy poisoned");
-            if tried.get(&account_id).is_some_and(|at| (now - at).abs() < READY_RETRY) {
+            if tried
+                .get(&account_id)
+                .is_some_and(|at| (now - at).abs() < READY_RETRY)
+            {
                 return Ok(Permitted::Done(()));
             }
             tried.insert(account_id, now);
         }
         let read = self.refresh(account_id, now).await;
         if self.db.read(move |c| store::synced(c, account_id)).await? {
-            self.tried.lock().expect("copy poisoned").remove(&account_id);
+            self.tried
+                .lock()
+                .expect("copy poisoned")
+                .remove(&account_id);
         }
         Ok(match read? {
             Permitted::Done(_) => Permitted::Done(()),
@@ -422,7 +537,10 @@ impl<A: Accounts> CalendarCopy<A> {
         // Recording the refusal makes the next tick wait LIST_EVERY too,
         // the same cadence a refusal Google itself answered gets below.
         if withheld.calendar {
-            self.refused.lock().expect("copy poisoned").insert(account_id, now);
+            self.refused
+                .lock()
+                .expect("copy poisoned")
+                .insert(account_id, now);
             return Ok(Permitted::NeedsPermission);
         }
         let list_due = self
@@ -433,19 +551,28 @@ impl<A: Accounts> CalendarCopy<A> {
             .is_none_or(|last| now - last >= LIST_EVERY)
             || !self.listed_from_here(account_id, calendar);
         let before = match list_due {
-            true => Some(self.db.read(move |c| store::calendars(c, account_id)).await?),
+            true => Some(
+                self.db
+                    .read(move |c| store::calendars(c, account_id))
+                    .await?,
+            ),
             false => None,
         };
         if list_due {
             // Recorded before the call, so a refusal still waits
             // LIST_EVERY instead of asking again on the very next tick.
-            self.last_list.lock().expect("copy poisoned").insert(account_id, now);
+            self.last_list
+                .lock()
+                .expect("copy poisoned")
+                .insert(account_id, now);
             if withheld.calendar_list {
                 // The list scope alone is missing: the primary calendar
                 // needs no list call, so skip straight to it.
                 let address = self.address(account_id).await?;
                 let fallback = vec![primary_fallback(&address)];
-                self.db.write(move |c| store::save_calendars(c, account_id, &fallback)).await?;
+                self.db
+                    .write(move |c| store::save_calendars(c, account_id, &fallback))
+                    .await?;
             } else {
                 match calendar.calendars().await {
                     Ok(list) => {
@@ -454,7 +581,9 @@ impl<A: Accounts> CalendarCopy<A> {
                         self.db
                             .write(move |c| {
                                 store::note_list(c, account_id, &ids)?;
-                                mailrs_store::calendar_list::save_calendar_list(c, account_id, &list)?;
+                                mailrs_store::calendar_list::save_calendar_list(
+                                    c, account_id, &list,
+                                )?;
                                 // Hides made before the account could change
                                 // its list go to Google now, once.
                                 if everywhere {
@@ -463,7 +592,10 @@ impl<A: Accounts> CalendarCopy<A> {
                                 Ok(())
                             })
                             .await?;
-                        self.listed_from.lock().expect("copy poisoned").insert(account_id, discriminant(calendar));
+                        self.listed_from
+                            .lock()
+                            .expect("copy poisoned")
+                            .insert(account_id, discriminant(calendar));
                     }
                     Err(BackendError::NeedsPermission) => {
                         let address = self.address(account_id).await?;
@@ -477,14 +609,23 @@ impl<A: Accounts> CalendarCopy<A> {
                     // LIST_EVERY: a copy never read has no calendars to
                     // read without it.
                     Err(err) => {
-                        self.last_list.lock().expect("copy poisoned").remove(&account_id);
+                        self.last_list
+                            .lock()
+                            .expect("copy poisoned")
+                            .remove(&account_id);
                         return Err(err.into());
                     }
                 }
             }
         }
-        self.last_read.lock().expect("copy poisoned").insert(account_id, now);
-        let calendars: Vec<Calendar> = self.db.read(move |c| store::calendars(c, account_id)).await?;
+        self.last_read
+            .lock()
+            .expect("copy poisoned")
+            .insert(account_id, now);
+        let calendars: Vec<Calendar> = self
+            .db
+            .read(move |c| store::calendars(c, account_id))
+            .await?;
         let mut refreshed = Refreshed {
             calendars_changed: before.is_some_and(|before| before != calendars),
             ..Refreshed::default()
@@ -497,20 +638,33 @@ impl<A: Accounts> CalendarCopy<A> {
             }
             if !entry.shown {
                 let id = entry.id.clone();
-                let synced_at = self.db.read(move |c| store::synced_at(c, account_id, &id)).await?;
+                let synced_at = self
+                    .db
+                    .read(move |c| store::synced_at(c, account_id, &id))
+                    .await?;
                 let stale = synced_at.is_none_or(|synced_at| now - synced_at >= READ_EVERY_TRAY);
                 if !stale {
                     continue;
                 }
             }
-            match self.read_calendar(calendar, account_id, &entry.id, now).await {
+            match self
+                .read_calendar(calendar, account_id, &entry.id, now)
+                .await
+            {
                 Ok(Permitted::Done(count)) => refreshed.events += count,
                 // One calendar's trouble must not leave the calendars after
                 // it unread. A calendar removed elsewhere answers 404 until
                 // the list is read again, so that is read on the next tick.
                 Err(SyncError::Backend(BackendError::NotFound)) => {
-                    tracing::info!(account = account_id, calendar = entry.id, "a calendar is gone; reading the list again");
-                    self.last_list.lock().expect("copy poisoned").remove(&account_id);
+                    tracing::info!(
+                        account = account_id,
+                        calendar = entry.id,
+                        "a calendar is gone; reading the list again"
+                    );
+                    self.last_list
+                        .lock()
+                        .expect("copy poisoned")
+                        .remove(&account_id);
                 }
                 // The network or the rate limit would stop every other
                 // calendar the same way.
@@ -525,8 +679,13 @@ impl<A: Accounts> CalendarCopy<A> {
                     // scope from a missing calendar.events. This read
                     // can: the account has no calendar to read, and the
                     // fallback calendar would only ask again every minute.
-                    self.refused.lock().expect("copy poisoned").insert(account_id, now);
-                    self.db.write(move |c| store::save_calendars(c, account_id, &[])).await?;
+                    self.refused
+                        .lock()
+                        .expect("copy poisoned")
+                        .insert(account_id, now);
+                    self.db
+                        .write(move |c| store::save_calendars(c, account_id, &[]))
+                        .await?;
                     return Ok(Permitted::NeedsPermission);
                 }
             }
@@ -546,16 +705,22 @@ impl<A: Accounts> CalendarCopy<A> {
     ) -> Result<Permitted<usize>, SyncError> {
         let held = {
             let id = id.to_string();
-            self.db.read(move |c| store::token(c, account_id, &id)).await?
+            self.db
+                .read(move |c| store::token(c, account_id, &id))
+                .await?
         };
         // A whole read goes back as far as the copy already does, so a
         // token the server lost does not drop the older ranges the person
         // fetched: the sweep after it keeps only what the read repeated.
         let reach = {
             let id = id.to_string();
-            self.db.read(move |c| store::reach(c, account_id, &id)).await?
+            self.db
+                .read(move |c| store::reach(c, account_id, &id))
+                .await?
         };
-        let mut time_min = reach.map_or(now - FIRST_READ_BACK, |reach| reach.min(now - FIRST_READ_BACK));
+        let mut time_min = reach.map_or(now - FIRST_READ_BACK, |reach| {
+            reach.min(now - FIRST_READ_BACK)
+        });
         // The moment this read started, marked on every row it writes, so
         // a whole read can tell a row no later page repeated from one
         // still current (`store::sweep`).
@@ -597,7 +762,11 @@ impl<A: Accounts> CalendarCopy<A> {
                     // over next time, rather than failing every time.
                     Err(err) if resuming && !err.is_transient() => {
                         let calendar_id = id.to_string();
-                        self.db.write(move |c| store::set_token(c, account_id, &calendar_id, None, now)).await?;
+                        self.db
+                            .write(move |c| {
+                                store::set_token(c, account_id, &calendar_id, None, now)
+                            })
+                            .await?;
                         return Err(err.into());
                     }
                     Err(err) => return Err(err.into()),
@@ -605,20 +774,36 @@ impl<A: Accounts> CalendarCopy<A> {
                 resuming = false;
                 let last_page = got.next_page.is_none();
                 count += got.events.len() + got.removed.len();
-                let (events, removed, next_sync, whole_series) = (got.events, got.removed, got.next_sync, got.whole_series);
+                let (events, removed, next_sync, whole_series) =
+                    (got.events, got.removed, got.next_sync, got.whole_series);
                 let calendar_id = id.to_string();
                 // Taken before the write, since the lock must not be held
                 // across an await.
                 let held = self.held_in(account_id, id);
                 self.db
                     .write(move |c| {
-                        store_page(c, account_id, &calendar_id, held, events, removed, whole_series, mark)?;
+                        store_page(
+                            c,
+                            account_id,
+                            &calendar_id,
+                            held,
+                            events,
+                            removed,
+                            whole_series,
+                            mark,
+                        )?;
                         if last_page {
                             if whole {
                                 store::sweep(c, account_id, &calendar_id, mark)?;
                                 store::set_reach(c, account_id, &calendar_id, time_min)?;
                             }
-                            store::set_token(c, account_id, &calendar_id, next_sync.as_deref(), now)?;
+                            store::set_token(
+                                c,
+                                account_id,
+                                &calendar_id,
+                                next_sync.as_deref(),
+                                now,
+                            )?;
                         }
                         Ok(())
                     })
@@ -631,11 +816,31 @@ impl<A: Accounts> CalendarCopy<A> {
             // A whole read keeps where it stopped, so the next one goes on
             // from there rather than from the start again.
             if let (true, Some(page)) = (whole, page) {
-                let (calendar_id, held) = (id.to_string(), store::ResumedRead { mark, from: time_min, page }.text());
-                self.db.write(move |c| store::set_token(c, account_id, &calendar_id, Some(&held), now)).await?;
-                tracing::info!(account = account_id, calendar = id, "a calendar read goes on next time after {} pages", self.pages_per_read);
+                let (calendar_id, held) = (
+                    id.to_string(),
+                    store::ResumedRead {
+                        mark,
+                        from: time_min,
+                        page,
+                    }
+                    .text(),
+                );
+                self.db
+                    .write(move |c| store::set_token(c, account_id, &calendar_id, Some(&held), now))
+                    .await?;
+                tracing::info!(
+                    account = account_id,
+                    calendar = id,
+                    "a calendar read goes on next time after {} pages",
+                    self.pages_per_read
+                );
             } else {
-                tracing::warn!(account = account_id, calendar = id, "gave up reading a calendar after {} pages", self.pages_per_read);
+                tracing::warn!(
+                    account = account_id,
+                    calendar = id,
+                    "gave up reading a calendar after {} pages",
+                    self.pages_per_read
+                );
             }
             return Ok(Permitted::Done(count));
         }
@@ -644,13 +849,20 @@ impl<A: Accounts> CalendarCopy<A> {
     /// Whether any shown calendar of `accounts` lacks events back to
     /// `from`. The window asks this before `reach_back`, so it shows its
     /// loading line only for a fetch that will happen.
-    pub async fn older_missing(&self, accounts: &[AccountId], from: EpochMillis) -> Result<bool, SyncError> {
+    pub async fn older_missing(
+        &self,
+        accounts: &[AccountId],
+        from: EpochMillis,
+    ) -> Result<bool, SyncError> {
         let accounts = accounts.to_vec();
         Ok(self
             .db
             .read(move |c| {
                 for account_id in accounts {
-                    for entry in store::calendars(c, account_id)?.into_iter().filter(|e| e.shown) {
+                    for entry in store::calendars(c, account_id)?
+                        .into_iter()
+                        .filter(|e| e.shown)
+                    {
                         let reach = store::reach(c, account_id, &entry.id)?;
                         if missing_range(reach, from).is_some() {
                             return Ok(true);
@@ -671,10 +883,16 @@ impl<A: Accounts> CalendarCopy<A> {
     /// Returns how many events were stored or removed. An offline or
     /// rate-limited read stops the rest and answers the error, having
     /// recorded nothing for the calendar it stopped on.
-    pub async fn reach_back(&self, accounts: &[AccountId], from: EpochMillis) -> Result<usize, SyncError> {
+    pub async fn reach_back(
+        &self,
+        accounts: &[AccountId],
+        from: EpochMillis,
+    ) -> Result<usize, SyncError> {
         let mut total = 0;
         for &account_id in accounts {
-            let Some(calendar) = self.calendar(account_id)? else { continue };
+            let Some(calendar) = self.calendar(account_id)? else {
+                continue;
+            };
             let shown: Vec<Calendar> = self
                 .db
                 .read(move |c| store::calendars(c, account_id))
@@ -683,7 +901,9 @@ impl<A: Accounts> CalendarCopy<A> {
                 .filter(|e| e.shown)
                 .collect();
             for entry in shown {
-                match crate::background(self.reach_calendar(&calendar, account_id, &entry.id, from)).await {
+                match crate::background(self.reach_calendar(&calendar, account_id, &entry.id, from))
+                    .await
+                {
                     Ok(Permitted::Done(count)) => total += count,
                     Ok(Permitted::NeedsPermission) => {}
                     Err(SyncError::Backend(BackendError::NotFound)) => {}
@@ -708,7 +928,9 @@ impl<A: Accounts> CalendarCopy<A> {
         let _turn = self.reaching.lock().await;
         let reach = {
             let id = id.to_string();
-            self.db.read(move |c| store::reach(c, account_id, &id)).await?
+            self.db
+                .read(move |c| store::reach(c, account_id, &id))
+                .await?
         };
         let Some((start, end)) = missing_range(reach, from) else {
             return Ok(Permitted::Done(0));
@@ -726,12 +948,22 @@ impl<A: Accounts> CalendarCopy<A> {
             count += got.events.len() + got.removed.len();
             let calendar_id = id.to_string();
             let held = self.held_in(account_id, id);
-            let (events, removed, next, whole_series) = (got.events, got.removed, got.next_page, got.whole_series);
+            let (events, removed, next, whole_series) =
+                (got.events, got.removed, got.next_page, got.whole_series);
             // The sync token on the last page belongs to this range's own
             // filter, so it is dropped: the calendar keeps its own.
             self.db
                 .write(move |c| {
-                    store_page(c, account_id, &calendar_id, held, events, removed, whole_series, mark)?;
+                    store_page(
+                        c,
+                        account_id,
+                        &calendar_id,
+                        held,
+                        events,
+                        removed,
+                        whole_series,
+                        mark,
+                    )?;
                     if last_page {
                         store::set_reach(c, account_id, &calendar_id, start)?;
                     }
@@ -746,7 +978,11 @@ impl<A: Accounts> CalendarCopy<A> {
         // The pages ran out of patience before the range did: what was
         // stored stays, and the reach is not moved, so the next ask reads
         // the range again.
-        tracing::warn!(account = account_id, calendar = id, "gave up reading an older range after {PAGE_LIMIT} pages");
+        tracing::warn!(
+            account = account_id,
+            calendar = id,
+            "gave up reading an older range after {PAGE_LIMIT} pages"
+        );
         Ok(Permitted::Done(count))
     }
 
@@ -761,13 +997,18 @@ impl<A: Accounts> CalendarCopy<A> {
     /// The queue's own tests write through this seam; the app and the
     /// assistant go through [`Self::change`].
     #[cfg(test)]
-    pub(crate) async fn save(&self, account_id: AccountId, mut event: Event) -> Result<(), SyncError> {
+    pub(crate) async fn save(
+        &self,
+        account_id: AccountId,
+        mut event: Event,
+    ) -> Result<(), SyncError> {
         event.pending = true;
         give_uid(&mut event);
         let now = crate::now_millis();
         self.db
             .write(move |c| {
-                let already_queued = store::pending_ids(c, account_id, &event.calendar)?.contains(&event.id);
+                let already_queued =
+                    store::pending_ids(c, account_id, &event.calendar)?.contains(&event.id);
                 // An occurrence has no etag before its first change, and
                 // its id, which holds `_`, is not one a create may use.
                 let kind = if event.etag.is_empty() && event.series.is_none() && !already_queued {
@@ -789,7 +1030,12 @@ impl<A: Accounts> CalendarCopy<A> {
     /// The queue's own tests write through this seam; the app and the
     /// assistant go through [`Self::change`].
     #[cfg(test)]
-    pub(crate) async fn remove(&self, account_id: AccountId, calendar: &str, id: &str) -> Result<(), SyncError> {
+    pub(crate) async fn remove(
+        &self,
+        account_id: AccountId,
+        calendar: &str,
+        id: &str,
+    ) -> Result<(), SyncError> {
         let (calendar, id) = (calendar.to_string(), id.to_string());
         self.db
             .write(move |c| {
@@ -800,7 +1046,16 @@ impl<A: Accounts> CalendarCopy<A> {
                 });
                 store::remove_events(c, account_id, &calendar, std::slice::from_ref(&id))?;
                 let notify = calendar::removal_notify(&held, Notify::Guests);
-                store::enqueue_after(c, account_id, store::ChangeKind::Remove, &held, None, None, notify).map(drop)
+                store::enqueue_after(
+                    c,
+                    account_id,
+                    store::ChangeKind::Remove,
+                    &held,
+                    None,
+                    None,
+                    notify,
+                )
+                .map(drop)
             })
             .await?;
         Ok(())
@@ -831,7 +1086,11 @@ impl<A: Accounts> CalendarCopy<A> {
         self.retry_waiting_for_access(account_id).await?;
         self.note_switch(&calendar, account_id).await?;
         let mut after = 0;
-        while let Some(change) = self.db.read(move |c| store::next_change(c, account_id, after)).await? {
+        while let Some(change) = self
+            .db
+            .read(move |c| store::next_change(c, account_id, after))
+            .await?
+        {
             let seq = change.seq;
             after = seq;
             if let Some(old) = store::left_behind(&change.calendar) {
@@ -863,7 +1122,8 @@ impl<A: Accounts> CalendarCopy<A> {
             }
             if change.kind == store::ChangeKind::Answer {
                 let turned_before = turned_down.len();
-                self.send_answer(&calendar, &change, &mut turned_down).await?;
+                self.send_answer(&calendar, &change, &mut turned_down)
+                    .await?;
                 if turned_down.len() > turned_before {
                     after = 0;
                 }
@@ -876,7 +1136,12 @@ impl<A: Accounts> CalendarCopy<A> {
             let mut left_out = Vec::new();
             let answer = match change.kind {
                 store::ChangeKind::Remove => calendar
-                    .remove_event(&change.calendar, &change.event, change.etag.as_deref(), change.notify)
+                    .remove_event(
+                        &change.calendar,
+                        &change.event,
+                        change.etag.as_deref(),
+                        change.notify,
+                    )
                     .await
                     .map(|()| None),
                 // A move and an answer went out above.
@@ -896,7 +1161,10 @@ impl<A: Accounts> CalendarCopy<A> {
                         Ok((body, missing)) => {
                             attempted = Some(body.clone());
                             left_out = missing;
-                            match calendar.put_event(&body, change.etag.as_deref(), create, change.notify).await {
+                            match calendar
+                                .put_event(&body, change.etag.as_deref(), create, change.notify)
+                                .await
+                            {
                                 // The id is one this computer made, so a 409
                                 // means an earlier send of this create reached
                                 // Google and its answer was lost. An edit made
@@ -917,7 +1185,9 @@ impl<A: Accounts> CalendarCopy<A> {
                 (_, Ok(Some(mut sent))) => {
                     sent.pending = false;
                     let kept_theirs = std::mem::take(&mut sent.kept_theirs);
-                    let mut attempted = attempted.clone().expect("a create or save always has a body");
+                    let mut attempted = attempted
+                        .clone()
+                        .expect("a create or save always has a body");
                     let new_etag = sent.etag.clone();
                     // A provider may name a new event itself, as Graph does.
                     let renamed = (create && sent.id != attempted.id).then(|| attempted.id.clone());
@@ -933,7 +1203,13 @@ impl<A: Accounts> CalendarCopy<A> {
                             // and any later change name the event the
                             // provider knows.
                             if let Some(local) = &renamed {
-                                store::rename_event(c, account_id, &attempted.calendar, local, &attempted.id)?;
+                                store::rename_event(
+                                    c,
+                                    account_id,
+                                    &attempted.calendar,
+                                    local,
+                                    &attempted.id,
+                                )?;
                             }
                             // An edit or a delete made while this change
                             // was in flight wins over the answer.
@@ -943,7 +1219,12 @@ impl<A: Accounts> CalendarCopy<A> {
                                 if owns(&held, account_id, &sent.calendar, &sent.id) {
                                     keep_landed(&landed, account_id, sent);
                                 } else {
-                                    store::save_events(c, account_id, &[sent], crate::now_millis())?;
+                                    store::save_events(
+                                        c,
+                                        account_id,
+                                        &[sent],
+                                        crate::now_millis(),
+                                    )?;
                                 }
                             }
                             store::first_waiting_on(c, seq)
@@ -990,12 +1271,18 @@ impl<A: Accounts> CalendarCopy<A> {
                     }
                 }
                 (store::ChangeKind::Save, Err(BackendError::NotFound)) => {
-                    turned_down.push(self.drop_gone(&change, gettext("deleted elsewhere")).await?);
+                    turned_down.push(
+                        self.drop_gone(&change, gettext("deleted elsewhere"))
+                            .await?,
+                    );
                 }
                 (store::ChangeKind::Create, Err(BackendError::NotFound)) => {
                     // A new event's id cannot be missing, so it is the
                     // calendar that went: its rows in the queue outlive it.
-                    turned_down.push(self.drop_gone(&change, gettext("the calendar is gone")).await?);
+                    turned_down.push(
+                        self.drop_gone(&change, gettext("the calendar is gone"))
+                            .await?,
+                    );
                 }
                 (_, Err(BackendError::Changed)) => {
                     turned_down.push(self.take_theirs(&calendar, &change, None).await?);
@@ -1007,7 +1294,10 @@ impl<A: Accounts> CalendarCopy<A> {
                 // Any other answer will come again for this change, so it
                 // leaves the queue rather than hold every change behind it.
                 (_, Err(err)) => {
-                    turned_down.push(self.take_theirs(&calendar, &change, Some(err.to_string())).await?);
+                    turned_down.push(
+                        self.take_theirs(&calendar, &change, Some(err.to_string()))
+                            .await?,
+                    );
                 }
             }
             // A change turned down can put back an earlier edit that a
@@ -1026,7 +1316,11 @@ impl<A: Accounts> CalendarCopy<A> {
     /// Whether the account's list was last read from the kind of server
     /// that serves its calendar now.
     fn listed_from_here(&self, account_id: AccountId, calendar: &AnyCalendar) -> bool {
-        self.listed_from.lock().expect("copy poisoned").get(&account_id) == Some(&discriminant(calendar))
+        self.listed_from
+            .lock()
+            .expect("copy poisoned")
+            .get(&account_id)
+            == Some(&discriminant(calendar))
     }
 
     /// Reads the account's calendar list before its queue goes out, once
@@ -1036,11 +1330,24 @@ impl<A: Accounts> CalendarCopy<A> {
     /// server's events ([`store::note_list`]), rather than going to it
     /// under the old server's ids, where a delete would read "not found"
     /// as done and an edit or an answer would be lost.
-    async fn note_switch(&self, calendar: &AnyCalendar, account_id: AccountId) -> Result<(), SyncError> {
-        if self.listed_from_here(account_id, calendar) || !self.db.read(move |c| store::has_queued(c, account_id)).await? {
+    async fn note_switch(
+        &self,
+        calendar: &AnyCalendar,
+        account_id: AccountId,
+    ) -> Result<(), SyncError> {
+        if self.listed_from_here(account_id, calendar)
+            || !self
+                .db
+                .read(move |c| store::has_queued(c, account_id))
+                .await?
+        {
             return Ok(());
         }
-        let withheld = self.accounts.services(account_id).ok_or(SyncError::UnknownAccount(account_id))?.withheld();
+        let withheld = self
+            .accounts
+            .services(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?
+            .withheld();
         if withheld.calendar_list {
             return Ok(());
         }
@@ -1049,10 +1356,18 @@ impl<A: Accounts> CalendarCopy<A> {
             Err(BackendError::NeedsPermission) => return Ok(()),
             Err(err) => return Err(err.into()),
         };
-        self.db.write(move |c| store::note_list(c, account_id, &ids)).await?;
-        self.listed_from.lock().expect("copy poisoned").insert(account_id, discriminant(calendar));
+        self.db
+            .write(move |c| store::note_list(c, account_id, &ids))
+            .await?;
+        self.listed_from
+            .lock()
+            .expect("copy poisoned")
+            .insert(account_id, discriminant(calendar));
         // The copy's list is the old server's; read the new one next.
-        self.last_list.lock().expect("copy poisoned").remove(&account_id);
+        self.last_list
+            .lock()
+            .expect("copy poisoned")
+            .remove(&account_id);
         Ok(())
     }
 
@@ -1075,8 +1390,14 @@ impl<A: Accounts> CalendarCopy<A> {
             self.db.write(move |c| store::dequeue(c, seq)).await?;
             return Ok(None);
         };
-        let moving = Event { calendar: change.calendar.clone(), ..body.clone() };
-        match calendar.move_event(&moving, &body.calendar, change.notify).await {
+        let moving = Event {
+            calendar: change.calendar.clone(),
+            ..body.clone()
+        };
+        match calendar
+            .move_event(&moving, &body.calendar, change.notify)
+            .await
+        {
             Ok(mut sent) => {
                 sent.pending = false;
                 let (id, etag) = (change.event.clone(), sent.etag.clone());
@@ -1105,7 +1426,10 @@ impl<A: Accounts> CalendarCopy<A> {
                 Ok(None)
             }
             Err(err) => {
-                turned_down.push(self.take_theirs(calendar, change, Some(err.to_string())).await?);
+                turned_down.push(
+                    self.take_theirs(calendar, change, Some(err.to_string()))
+                        .await?,
+                );
                 Ok(None)
             }
         }
@@ -1128,28 +1452,45 @@ impl<A: Accounts> CalendarCopy<A> {
             return Ok(());
         };
         let sent = calendar
-            .answer_event(&change.calendar, &change.event, &reply.me, reply.answer, reply.note.as_deref())
+            .answer_event(
+                &change.calendar,
+                &change.event,
+                &reply.me,
+                reply.answer,
+                reply.note.as_deref(),
+            )
             .await;
         match sent {
             Ok(written) => {
                 let (cal, id) = (change.calendar.clone(), change.event.clone());
                 self.db
-                    .write(move |c| store::finish_answer(c, account_id, seq, &cal, &id, &written.etag))
+                    .write(move |c| {
+                        store::finish_answer(c, account_id, seq, &cal, &id, &written.etag)
+                    })
                     .await?;
             }
-            Err(BackendError::NotFound) => turned_down.push(self.drop_gone(change, gettext("deleted elsewhere")).await?),
+            Err(BackendError::NotFound) => {
+                turned_down.push(self.drop_gone(change, gettext("deleted elsewhere")).await?)
+            }
             Err(err) if holds_the_queue(&err) => return Err(err.into()),
             Err(BackendError::Refused(reason)) => {
                 turned_down.push(self.take_theirs(calendar, change, Some(reason)).await?)
             }
-            Err(err) => turned_down.push(self.take_theirs(calendar, change, Some(err.to_string())).await?),
+            Err(err) => turned_down.push(
+                self.take_theirs(calendar, change, Some(err.to_string()))
+                    .await?,
+            ),
         }
         Ok(())
     }
 
     /// Drops a change whose event, or whose calendar, the provider no
     /// longer has, and takes the event off the copy.
-    async fn drop_gone(&self, change: &store::QueuedChange, reason: String) -> Result<TurnedDown, SyncError> {
+    async fn drop_gone(
+        &self,
+        change: &store::QueuedChange,
+        reason: String,
+    ) -> Result<TurnedDown, SyncError> {
         let account_id = change.account_id;
         let (seq, cal, id) = (change.seq, change.calendar.clone(), change.event.clone());
         self.db
@@ -1198,16 +1539,27 @@ impl<A: Accounts> CalendarCopy<A> {
                 // begun. Its rules go back, against the version the cut
                 // left, and the dates after the cut come back.
                 if let Some(old) = restores {
-                    let now = store::event(c, account_id, &old.calendar, &old.id)?.unwrap_or_else(|| old.clone());
-                    let whole = Event { rules: old.rules, pending: true, ..now };
-                    store::save_events(c, account_id, std::slice::from_ref(&whole), crate::now_millis())?;
+                    let now = store::event(c, account_id, &old.calendar, &old.id)?
+                        .unwrap_or_else(|| old.clone());
+                    let whole = Event {
+                        rules: old.rules,
+                        pending: true,
+                        ..now
+                    };
+                    store::save_events(
+                        c,
+                        account_id,
+                        std::slice::from_ref(&whole),
+                        crate::now_millis(),
+                    )?;
                     store::enqueue(c, account_id, store::ChangeKind::Save, &whole)?;
                 }
                 store::set_token(c, account_id, &cal, None, 0)
             })
             .await?;
         let now = crate::now_millis();
-        self.read_calendar(calendar, account_id, &change.calendar, now).await?;
+        self.read_calendar(calendar, account_id, &change.calendar, now)
+            .await?;
         Ok(TurnedDown {
             account_id,
             calendar: change.calendar.clone(),
@@ -1224,7 +1576,11 @@ impl<A: Accounts> CalendarCopy<A> {
     /// The queue's own tests write through this seam; the app and the
     /// assistant go through [`Self::change`].
     #[cfg(test)]
-    pub(crate) async fn hold(&self, account_id: AccountId, steps: Vec<Step>) -> Result<Permitted<Held>, SyncError> {
+    pub(crate) async fn hold(
+        &self,
+        account_id: AccountId,
+        steps: Vec<Step>,
+    ) -> Result<Permitted<Held>, SyncError> {
         self.hold_with(account_id, steps, Notify::Guests).await
     }
 
@@ -1269,7 +1625,13 @@ impl<A: Accounts> CalendarCopy<A> {
             .await?;
         release.keep();
         let serial = self.serial.fetch_add(1, Ordering::Relaxed);
-        let held = Held { account_id, steps, before, notify, serial };
+        let held = Held {
+            account_id,
+            steps,
+            before,
+            notify,
+            serial,
+        };
         *waiting = Some(held.clone());
         Ok(Permitted::Done(held))
     }
@@ -1293,8 +1655,16 @@ impl<A: Accounts> CalendarCopy<A> {
             return Ok(());
         };
         let keys = held.keys();
-        let _release = Release { held: &self.held, keys: keys.clone() };
-        let Held { account_id, steps, before, .. } = held;
+        let _release = Release {
+            held: &self.held,
+            keys: keys.clone(),
+        };
+        let Held {
+            account_id,
+            steps,
+            before,
+            ..
+        } = held;
         let now = crate::now_millis();
         let landed = Arc::clone(&self.landed);
         self.db
@@ -1329,7 +1699,10 @@ impl<A: Accounts> CalendarCopy<A> {
     /// before it, same as holding a new one does, and the view then closes
     /// its toast instead of leaving an Undo that would do nothing.
     pub fn still_waiting(&self, held: &Held) -> bool {
-        self.waiting.try_lock().map(|w| w.as_ref().is_some_and(|w| w.serial == held.serial)).unwrap_or(true)
+        self.waiting
+            .try_lock()
+            .map(|w| w.as_ref().is_some_and(|w| w.serial == held.serial))
+            .unwrap_or(true)
     }
 
     /// [`Self::apply_with`], telling the guests.
@@ -1337,7 +1710,11 @@ impl<A: Accounts> CalendarCopy<A> {
     /// The queue's own tests write through this seam; the app and the
     /// assistant go through [`Self::change`].
     #[cfg(test)]
-    pub(crate) async fn apply(&self, account_id: AccountId, steps: Vec<Step>) -> Result<Permitted<()>, SyncError> {
+    pub(crate) async fn apply(
+        &self,
+        account_id: AccountId,
+        steps: Vec<Step>,
+    ) -> Result<Permitted<()>, SyncError> {
         self.apply_with(account_id, steps, Notify::Guests).await
     }
 
@@ -1396,7 +1773,14 @@ impl<A: Accounts> CalendarCopy<A> {
                 continue;
             }
             let serial = self.serial.fetch_add(1, Ordering::Relaxed);
-            self.queue_held(Held { account_id, steps, before, notify, serial }).await?;
+            self.queue_held(Held {
+                account_id,
+                steps,
+                before,
+                notify,
+                serial,
+            })
+            .await?;
         }
         Ok(())
     }
@@ -1405,8 +1789,17 @@ impl<A: Accounts> CalendarCopy<A> {
     /// rows to reads.
     async fn queue_held(&self, held: Held) -> Result<(), SyncError> {
         let keys = held.keys();
-        let _release = Release { held: &self.held, keys: keys.clone() };
-        let Held { account_id, mut steps, mut before, notify, .. } = held;
+        let _release = Release {
+            held: &self.held,
+            keys: keys.clone(),
+        };
+        let Held {
+            account_id,
+            mut steps,
+            mut before,
+            notify,
+            ..
+        } = held;
         let landed = Arc::clone(&self.landed);
         self.db
             .write(move |c| {
@@ -1437,12 +1830,23 @@ impl<A: Accounts> CalendarCopy<A> {
     ) -> Result<Vec<Step>, SyncError> {
         let from = occurrence.event.calendar.clone();
         if edited.calendar == from {
-            return self.change_steps_here(account_id, occurrence, edited, scope).await;
+            return self
+                .change_steps_here(account_id, occurrence, edited, scope)
+                .await;
         }
         let to = edited.calendar.clone();
-        let id = occurrence.event.series.clone().unwrap_or_else(|| occurrence.event.id.clone());
-        let edited = Event { calendar: from.clone(), ..edited };
-        let steps = self.change_steps_here(account_id, occurrence, edited, scope).await?;
+        let id = occurrence
+            .event
+            .series
+            .clone()
+            .unwrap_or_else(|| occurrence.event.id.clone());
+        let edited = Event {
+            calendar: from.clone(),
+            ..edited
+        };
+        let steps = self
+            .change_steps_here(account_id, occurrence, edited, scope)
+            .await?;
         Ok(series::to_calendar(steps, &from, &to, &id))
     }
 
@@ -1461,7 +1865,14 @@ impl<A: Accounts> CalendarCopy<A> {
         let Some((whole, changed)) = self.series_of(account_id, &occurrence.event).await? else {
             return Ok(vec![Step::Save(edited)]);
         };
-        Ok(series::change(&whole, &changed, picked(occurrence), edited, scope, &new_event_id()))
+        Ok(series::change(
+            &whole,
+            &changed,
+            picked(occurrence),
+            edited,
+            scope,
+            &new_event_id(),
+        ))
     }
 
     /// The writes that delete `occurrence`, and the others `scope` covers.
@@ -1472,7 +1883,10 @@ impl<A: Accounts> CalendarCopy<A> {
         scope: Option<RepeatScope>,
     ) -> Result<Vec<Step>, SyncError> {
         let alone = || {
-            vec![Step::Remove { calendar: occurrence.event.calendar.clone(), id: occurrence.event.id.clone() }]
+            vec![Step::Remove {
+                calendar: occurrence.event.calendar.clone(),
+                id: occurrence.event.id.clone(),
+            }]
         };
         let Some(scope) = scope.filter(|_| series::in_series(&occurrence.event)) else {
             return Ok(alone());
@@ -1484,14 +1898,21 @@ impl<A: Accounts> CalendarCopy<A> {
     }
 
     /// The series `event` belongs to, and its changed occurrences.
-    async fn series_of(&self, account_id: AccountId, event: &Event) -> Result<Option<(Event, Vec<Event>)>, SyncError> {
+    async fn series_of(
+        &self,
+        account_id: AccountId,
+        event: &Event,
+    ) -> Result<Option<(Event, Vec<Event>)>, SyncError> {
         let calendar = event.calendar.clone();
         let id = event.series.clone().unwrap_or_else(|| event.id.clone());
         Ok(self
             .db
             .read(move |c| {
                 Ok(match store::event(c, account_id, &calendar, &id)? {
-                    Some(whole) => Some((whole, store::changed_occurrences(c, account_id, &calendar, &id)?)),
+                    Some(whole) => Some((
+                        whole,
+                        store::changed_occurrences(c, account_id, &calendar, &id)?,
+                    )),
                     None => None,
                 })
             })
@@ -1502,7 +1923,9 @@ impl<A: Accounts> CalendarCopy<A> {
     /// remove.
     fn held_in(&self, account_id: AccountId, calendar: &str) -> (Vec<String>, Vec<String>) {
         let held = self.held.lock().expect("copy poisoned");
-        let mine = held.iter().filter(|k| k.account_id == account_id && k.calendar == calendar);
+        let mine = held
+            .iter()
+            .filter(|k| k.account_id == account_id && k.calendar == calendar);
         let ids = mine.clone().map(|k| k.id.clone()).collect();
         let removals = mine.filter(|k| k.removal).map(|k| k.id.clone()).collect();
         (ids, removals)
@@ -1546,7 +1969,8 @@ struct Landed {
 /// Whether a held change owns event `id` on `calendar`.
 fn owns(held: &Mutex<Vec<HeldKey>>, account_id: AccountId, calendar: &str, id: &str) -> bool {
     let held = held.lock().expect("copy poisoned");
-    held.iter().any(|k| k.account_id == account_id && k.calendar == calendar && k.id == id)
+    held.iter()
+        .any(|k| k.account_id == account_id && k.calendar == calendar && k.id == id)
 }
 
 /// Keeps `answer` for the held change that owns its row, in place of an
@@ -1554,7 +1978,9 @@ fn owns(held: &Mutex<Vec<HeldKey>>, account_id: AccountId, calendar: &str, id: &
 fn keep_landed(landed: &Mutex<Vec<Landed>>, account_id: AccountId, answer: Event) {
     let mut landed = landed.lock().expect("copy poisoned");
     landed.retain(|l| {
-        !(l.account_id == account_id && l.answer.calendar == answer.calendar && l.answer.id == answer.id)
+        !(l.account_id == account_id
+            && l.answer.calendar == answer.calendar
+            && l.answer.id == answer.id)
     });
     landed.push(Landed { account_id, answer });
 }
@@ -1563,7 +1989,9 @@ fn keep_landed(landed: &Mutex<Vec<Landed>>, account_id: AccountId, answer: Event
 fn take_landed(landed: &Mutex<Vec<Landed>>, keys: &[HeldKey]) -> Vec<Event> {
     let mut landed = landed.lock().expect("copy poisoned");
     let named = |l: &Landed| {
-        keys.iter().any(|k| k.account_id == l.account_id && k.calendar == l.answer.calendar && k.id == l.answer.id)
+        keys.iter().any(|k| {
+            k.account_id == l.account_id && k.calendar == l.answer.calendar && k.id == l.answer.id
+        })
     };
     let (taken, kept): (Vec<Landed>, Vec<Landed>) = landed.drain(..).partition(named);
     *landed = kept;
@@ -1621,8 +2049,11 @@ fn write_steps(
             touched.push(key);
         }
     }
-    let removals: HashSet<(String, String)> =
-        steps.iter().filter(|s| matches!(s, Step::Remove { .. })).map(Step::key).collect();
+    let removals: HashSet<(String, String)> = steps
+        .iter()
+        .filter(|s| matches!(s, Step::Remove { .. }))
+        .map(Step::key)
+        .collect();
     let mut before = Vec::new();
     for key in &touched {
         let (calendar, id) = key;
@@ -1644,7 +2075,10 @@ fn write_steps(
     for step in steps {
         match step {
             Step::Save(event) | Step::Cancel(event) => {
-                let event = Event { pending: true, ..event.clone() };
+                let event = Event {
+                    pending: true,
+                    ..event.clone()
+                };
                 store::save_events(c, account_id, std::slice::from_ref(&event), now)?;
             }
             Step::Remove { calendar, id } => {
@@ -1653,8 +2087,14 @@ fn write_steps(
             Step::Move { from, to, id } => {
                 let leaving: Vec<Event> = before
                     .iter()
-                    .filter(|e| &e.calendar == from && (&e.id == id || e.series.as_ref() == Some(id)))
-                    .map(|e| Event { calendar: to.clone(), pending: &e.id == id, ..e.clone() })
+                    .filter(|e| {
+                        &e.calendar == from && (&e.id == id || e.series.as_ref() == Some(id))
+                    })
+                    .map(|e| Event {
+                        calendar: to.clone(),
+                        pending: &e.id == id,
+                        ..e.clone()
+                    })
                     .collect();
                 store::remove_events(c, account_id, from, std::slice::from_ref(id))?;
                 store::save_events(c, account_id, &leaving, now)?;
@@ -1683,21 +2123,31 @@ fn enqueue_steps(
     for step in steps {
         let seq = match step {
             Step::Save(event) => {
-                let queued = store::pending_ids(c, account_id, &event.calendar)?.contains(&event.id);
+                let queued =
+                    store::pending_ids(c, account_id, &event.calendar)?.contains(&event.id);
                 let kind = if event.etag.is_empty() && event.series.is_none() && !queued {
                     store::ChangeKind::Create
                 } else {
                     store::ChangeKind::Save
                 };
-                let event = Event { pending: true, ..event.clone() };
+                let event = Event {
+                    pending: true,
+                    ..event.clone()
+                };
                 let restores = cut_from.filter(|_| kind == store::ChangeKind::Create);
                 store::enqueue_after(c, account_id, kind, &event, lead, restores, notify)?
             }
             // The cancelled row stays in the copy; the provider
             // gets a delete of that occurrence.
-            Step::Cancel(event) => {
-                store::enqueue_after(c, account_id, store::ChangeKind::Remove, event, lead, None, notify)?
-            }
+            Step::Cancel(event) => store::enqueue_after(
+                c,
+                account_id,
+                store::ChangeKind::Remove,
+                event,
+                lead,
+                None,
+                notify,
+            )?,
             Step::Remove { calendar, id } => {
                 let prior = before
                     .iter()
@@ -1708,15 +2158,29 @@ fn enqueue_steps(
                         id: id.clone(),
                         ..Event::default()
                     });
-                store::enqueue_after(c, account_id, store::ChangeKind::Remove, &prior, lead, None, notify)?
+                store::enqueue_after(
+                    c,
+                    account_id,
+                    store::ChangeKind::Remove,
+                    &prior,
+                    lead,
+                    None,
+                    notify,
+                )?
             }
             Step::Move { from, to, id } => {
                 let prior = before
                     .iter()
                     .find(|e| &e.calendar == from && &e.id == id)
                     .cloned()
-                    .unwrap_or_else(|| Event { id: id.clone(), ..Event::default() });
-                let moving = Event { calendar: to.clone(), ..prior };
+                    .unwrap_or_else(|| Event {
+                        id: id.clone(),
+                        ..Event::default()
+                    });
+                let moving = Event {
+                    calendar: to.clone(),
+                    ..prior
+                };
                 store::enqueue_move(c, account_id, from, &moving, lead, notify)?
             }
         };
@@ -1728,7 +2192,10 @@ fn enqueue_steps(
 /// Stores one page of a calendar read, leaving alone every event a queued
 /// or held change of ours still owns, and every occurrence of a series on
 /// its way out, which a read must not bring back to stand alone.
-#[expect(clippy::too_many_arguments, reason = "each is part of one page and where it lands")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is part of one page and where it lands"
+)]
 pub(crate) fn store_page(
     c: &rusqlite::Connection,
     account_id: AccountId,
@@ -1743,7 +2210,9 @@ pub(crate) fn store_page(
     pending.extend(held);
     let mut removing = store::removing_ids(c, account_id, calendar_id)?;
     removing.extend(held_removals);
-    events.retain(|e| !pending.contains(&e.id) && !e.series.as_ref().is_some_and(|s| removing.contains(s)));
+    events.retain(|e| {
+        !pending.contains(&e.id) && !e.series.as_ref().is_some_and(|s| removing.contains(s))
+    });
     removed.retain(|e| !pending.contains(e));
     store::save_events(c, account_id, &events, mark)?;
     store::remove_events(c, account_id, calendar_id, &removed)?;
@@ -1751,7 +2220,11 @@ pub(crate) fn store_page(
     // still has, so any other the copy holds went elsewhere. A series with
     // a change of ours waiting keeps what it has until that change lands.
     for series in whole_series.iter().filter(|s| !pending.contains(*s)) {
-        let kept: Vec<String> = events.iter().filter(|e| e.series.as_ref() == Some(series)).map(|e| e.id.clone()).collect();
+        let kept: Vec<String> = events
+            .iter()
+            .filter(|e| e.series.as_ref() == Some(series))
+            .map(|e| e.id.clone())
+            .collect();
         store::keep_occurrences(c, account_id, calendar_id, series, &kept)?;
     }
     Ok(())
@@ -1760,7 +2233,10 @@ pub(crate) fn store_page(
 /// The occurrence a person picked: a changed occurrence knows its place
 /// in the series, and a plain one starts where the series put it.
 fn picked(occurrence: &Occurrence) -> Picked {
-    Picked { original_start: occurrence.event.original_start.unwrap_or(occurrence.start), start: occurrence.start }
+    Picked {
+        original_start: occurrence.event.original_start.unwrap_or(occurrence.start),
+        start: occurrence.start,
+    }
 }
 
 /// Drops the changes waiting on the row `seq`, which the provider turned
@@ -1769,7 +2245,11 @@ fn picked(occurrence: &Occurrence) -> Picked {
 /// answered brings back what the provider still holds. An earlier edit a
 /// dropped step had folded into stays queued and shows again. Answers
 /// the calendars touched.
-fn drop_waiting(c: &rusqlite::Connection, account_id: AccountId, seq: i64) -> mailrs_store::Result<HashSet<String>> {
+fn drop_waiting(
+    c: &rusqlite::Connection,
+    account_id: AccountId,
+    seq: i64,
+) -> mailrs_store::Result<HashSet<String>> {
     let mut calendars = HashSet::new();
     for dropped in store::drop_waiting_on(c, seq)? {
         match dropped {
@@ -1777,9 +2257,19 @@ fn drop_waiting(c: &rusqlite::Connection, account_id: AccountId, seq: i64) -> ma
                 store::remove_events(c, account_id, &calendar, std::slice::from_ref(&event))?;
                 calendars.insert(calendar);
             }
-            store::Dropped::Kept { body: Some(body), .. } => {
-                let body = Event { pending: true, ..*body };
-                store::save_events(c, account_id, std::slice::from_ref(&body), crate::now_millis())?;
+            store::Dropped::Kept {
+                body: Some(body), ..
+            } => {
+                let body = Event {
+                    pending: true,
+                    ..*body
+                };
+                store::save_events(
+                    c,
+                    account_id,
+                    std::slice::from_ref(&body),
+                    crate::now_millis(),
+                )?;
             }
             store::Dropped::Kept { body: None, .. } => {}
         }
@@ -1806,12 +2296,17 @@ fn cut_series<'a>(steps: &[Step], before: &'a [Event]) -> Option<&'a Event> {
 /// which accounts have them and keep the provider's own after.
 fn refusal_words(change: &store::QueuedChange, reason: String) -> String {
     let status_entry = change.kind == store::ChangeKind::Create
-        && change.body.as_ref().is_some_and(|body| body.kind.decline().is_some());
+        && change
+            .body
+            .as_ref()
+            .is_some_and(|body| body.kind.decline().is_some());
     if !status_entry {
         return reason;
     }
     fill(
-        &gettext("Google Calendar offers out of office and focus time only on some work and school accounts ({reason})"),
+        &gettext(
+            "Google Calendar offers out of office and focus time only on some work and school accounts ({reason})",
+        ),
         &[("reason", &reason)],
     )
 }

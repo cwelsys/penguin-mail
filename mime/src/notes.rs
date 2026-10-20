@@ -108,7 +108,9 @@ impl Lines {
                 self.out.push_str("- ");
             }
             ("a", false) => {
-                self.link = tag.attribute("href").map(|href| (href.trim().to_string(), self.out.len()));
+                self.link = tag
+                    .attribute("href")
+                    .map(|href| (href.trim().to_string(), self.out.len()));
             }
             ("a", true) => self.close_link(),
             (name, _) if block(name) => self.end_line(1),
@@ -188,7 +190,10 @@ fn line_html(line: &str) -> String {
 }
 
 fn find_address(line: &str) -> Option<usize> {
-    [line.find("https://"), line.find("http://")].into_iter().flatten().min()
+    [line.find("https://"), line.find("http://")]
+        .into_iter()
+        .flatten()
+        .min()
 }
 
 /// `text` with the characters HTML reads as markup written as references.
@@ -241,10 +246,15 @@ mod tests {
     #[test]
     fn a_link_that_shows_an_address_keeps_only_that() {
         assert_eq!(
-            text(r#"<a href="https://www.google.com/url?q=https://example.com">https://example.com</a>"#),
+            text(
+                r#"<a href="https://www.google.com/url?q=https://example.com">https://example.com</a>"#
+            ),
             "https://example.com"
         );
-        assert_eq!(text(r#"<a href="mailto:ann@example.com">ann@example.com</a>"#), "ann@example.com");
+        assert_eq!(
+            text(r#"<a href="mailto:ann@example.com">ann@example.com</a>"#),
+            "ann@example.com"
+        );
     }
 
     #[test]
@@ -256,7 +266,10 @@ mod tests {
     fn a_line_break_in_the_source_stays_a_line_break() {
         // Google's page shows a raw line break inside HTML as one, so a
         // description mixing both reads the same here.
-        assert_eq!(text("Join <b>here</b>\nMeeting 123"), "Join here\nMeeting 123");
+        assert_eq!(
+            text("Join <b>here</b>\nMeeting 123"),
+            "Join here\nMeeting 123"
+        );
     }
 
     #[test]
@@ -291,7 +304,8 @@ mod tests {
 
     #[test]
     fn google_html_read_and_written_once_reads_the_same_again() {
-        let google = r#"Line one<br><a href="https://example.com/doc">the doc</a><ul><li>A</li></ul>"#;
+        let google =
+            r#"Line one<br><a href="https://example.com/doc">the doc</a><ul><li>A</li></ul>"#;
         let read = text(google);
         assert_eq!(text(&html(&read)), read);
     }

@@ -15,8 +15,14 @@ use crate::{BackendError, History, MailAction, MailActions, OneClick, RulesServi
 fn archive_from(address: &str) -> Filter {
     Filter {
         id: None,
-        criteria: FilterCriteria { from: Some(address.into()), ..FilterCriteria::default() },
-        action: FilterAction { remove: vec![MailSet::Role(Role::Inbox)], ..FilterAction::default() },
+        criteria: FilterCriteria {
+            from: Some(address.into()),
+            ..FilterCriteria::default()
+        },
+        action: FilterAction {
+            remove: vec![MailSet::Role(Role::Inbox)],
+            ..FilterAction::default()
+        },
         ..Filter::default()
     }
 }
@@ -29,29 +35,54 @@ fn letter(n: u32, from: &str) -> Vec<u8> {
 /// The engine over one IMAP harness, with the account's rules service.
 async fn engine_for(h: &crate::tests::ImapHarness) -> (RulesEngine<Connected>, LocalRules) {
     let accounts = Arc::new(Connected([(h.account_id, Arc::clone(&h.sync))].into()));
-    let actions =
-        Arc::new(MailActions::new(Arc::clone(&accounts), h.db.clone(), OneClick::Fake(Arc::default())));
-    (RulesEngine::new(accounts, h.db.clone(), actions), LocalRules::new(h.db.clone(), h.account_id))
+    let actions = Arc::new(MailActions::new(
+        Arc::clone(&accounts),
+        h.db.clone(),
+        OneClick::Fake(Arc::default()),
+    ));
+    (
+        RulesEngine::new(accounts, h.db.clone(), actions),
+        LocalRules::new(h.db.clone(), h.account_id),
+    )
 }
 
 #[tokio::test]
 async fn a_rule_runs_on_mail_that_arrives_after_it_was_made() {
     let h = imap_harness().await;
     // Two hours back: past the hour the watermark looks behind it.
-    h.imap.deliver("INBOX", letter(1, "news@example.com"), crate::now_millis() - 7_200_000);
+    h.imap.deliver(
+        "INBOX",
+        letter(1, "news@example.com"),
+        crate::now_millis() - 7_200_000,
+    );
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
-    rules.create_filter(&archive_from("news@example.com")).await.unwrap();
+    rules
+        .create_filter(&archive_from("news@example.com"))
+        .await
+        .unwrap();
     assert!(
-        engine.run_due(h.account_id).await.unwrap().acted_on.is_empty(),
+        engine
+            .run_due(h.account_id)
+            .await
+            .unwrap()
+            .acted_on
+            .is_empty(),
         "mail from before the rule stays put"
     );
-    h.imap.deliver("INBOX", letter(2, "news@example.com"), crate::now_millis() + 1_000);
+    h.imap.deliver(
+        "INBOX",
+        letter(2, "news@example.com"),
+        crate::now_millis() + 1_000,
+    );
     h.sync.incremental().await.unwrap();
     let ran = engine.run_due(h.account_id).await.unwrap();
     assert_eq!(ran.acted_on.len(), 1);
     assert!(
-        h.imap.messages_in("INBOX").iter().all(|m| !m.contains("Note 2")),
+        h.imap
+            .messages_in("INBOX")
+            .iter()
+            .all(|m| !m.contains("Note 2")),
         "the server moved it out of the Inbox"
     );
 }
@@ -61,7 +92,10 @@ async fn a_burst_in_one_second_runs_each_message_once() {
     let h = imap_harness().await;
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
-    rules.create_filter(&archive_from("news@example.com")).await.unwrap();
+    rules
+        .create_filter(&archive_from("news@example.com"))
+        .await
+        .unwrap();
     let at = crate::now_millis() + 2_000;
     for n in 0..3 {
         h.imap.deliver("INBOX", letter(n, "news@example.com"), at);
@@ -78,10 +112,14 @@ async fn a_pass_cut_short_runs_the_rest_at_the_next_start() {
     let h = imap_harness().await;
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
-    rules.create_filter(&archive_from("news@example.com")).await.unwrap();
+    rules
+        .create_filter(&archive_from("news@example.com"))
+        .await
+        .unwrap();
     let at = crate::now_millis() + 2_000;
     for n in 0..(crate::rules::PASS as u32 + 5) {
-        h.imap.deliver("INBOX", letter(n, "news@example.com"), at + i64::from(n));
+        h.imap
+            .deliver("INBOX", letter(n, "news@example.com"), at + i64::from(n));
     }
     h.sync.incremental().await.unwrap();
     let first = engine.run_due(h.account_id).await.unwrap();
@@ -97,31 +135,71 @@ async fn undo_after_a_rule_ran_takes_back_the_person_s_own_change() {
     let h = imap_harness().await;
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
-    rules.create_filter(&archive_from("news@example.com")).await.unwrap();
-    h.imap.deliver("INBOX", letter(1, "ann@example.com"), crate::now_millis() + 1_000);
+    rules
+        .create_filter(&archive_from("news@example.com"))
+        .await
+        .unwrap();
+    h.imap.deliver(
+        "INBOX",
+        letter(1, "ann@example.com"),
+        crate::now_millis() + 1_000,
+    );
     h.sync.incremental().await.unwrap();
     let account_id = h.account_id;
-    let mine = h
-        .db
-        .read(move |c| {
-            let ids: Vec<String> = mailrs_store::messages::held_by(c, account_id, &MailSet::Role(Role::Inbox))?.into_iter().collect();
+    let mine =
+        h.db.read(move |c| {
+            let ids: Vec<String> =
+                mailrs_store::messages::held_by(c, account_id, &MailSet::Role(Role::Inbox))?
+                    .into_iter()
+                    .collect();
             mailrs_store::messages::by_ids(c, account_id, &ids)
         })
         .await
         .unwrap()
         .pop()
         .unwrap();
-    let target = Target { account_id, thread_id: mine.thread_id.clone(), message_id: Some(mine.id.clone()) };
-    let archive = MailAction::Triage(TriageAction::Relabel { add: Vec::new(), remove: vec![MailSet::Role(Role::Inbox)] });
-    assert!(engine.actions().run(&[target], archive, History::Record).await.first_error().is_none());
-    h.imap.deliver("INBOX", letter(2, "news@example.com"), crate::now_millis() + 2_000);
+    let target = Target {
+        account_id,
+        thread_id: mine.thread_id.clone(),
+        message_id: Some(mine.id.clone()),
+    };
+    let archive = MailAction::Triage(TriageAction::Relabel {
+        add: Vec::new(),
+        remove: vec![MailSet::Role(Role::Inbox)],
+    });
+    assert!(
+        engine
+            .actions()
+            .run(&[target], archive, History::Record)
+            .await
+            .first_error()
+            .is_none()
+    );
+    h.imap.deliver(
+        "INBOX",
+        letter(2, "news@example.com"),
+        crate::now_millis() + 2_000,
+    );
     h.sync.incremental().await.unwrap();
-    assert_eq!(engine.run_due(h.account_id).await.unwrap().acted_on.len(), 1);
-    let undone = engine.actions().undo().await.expect("the person's archive is on the undo stack");
+    assert_eq!(
+        engine.run_due(h.account_id).await.unwrap().acted_on.len(),
+        1
+    );
+    let undone = engine
+        .actions()
+        .undo()
+        .await
+        .expect("the person's archive is on the undo stack");
     assert!(undone.outcome.failed.is_empty());
     let inbox = h.imap.messages_in("INBOX");
-    assert!(inbox.iter().any(|m| m.contains("Note 1")), "the person's archive is undone");
-    assert!(!inbox.iter().any(|m| m.contains("Note 2")), "the rule's change stays");
+    assert!(
+        inbox.iter().any(|m| m.contains("Note 1")),
+        "the person's archive is undone"
+    );
+    assert!(
+        !inbox.iter().any(|m| m.contains("Note 2")),
+        "the rule's change stays"
+    );
 }
 
 #[tokio::test]
@@ -131,17 +209,32 @@ async fn rules_run_in_the_order_they_were_made() {
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
     let file = Filter {
-        action: FilterAction { add: vec![MailSet::Mailbox("Newsletters".into())], ..FilterAction::default() },
+        action: FilterAction {
+            add: vec![MailSet::Mailbox("Newsletters".into())],
+            ..FilterAction::default()
+        },
         ..archive_from("news@example.com")
     };
     rules.create_filter(&file).await.unwrap();
-    rules.create_filter(&archive_from("news@example.com")).await.unwrap();
-    h.imap.deliver("INBOX", letter(1, "news@example.com"), crate::now_millis() + 1_000);
+    rules
+        .create_filter(&archive_from("news@example.com"))
+        .await
+        .unwrap();
+    h.imap.deliver(
+        "INBOX",
+        letter(1, "news@example.com"),
+        crate::now_millis() + 1_000,
+    );
     h.sync.incremental().await.unwrap();
     engine.run_due(h.account_id).await.unwrap();
     // The first rule moved it to Newsletters; the second no longer finds
     // it in the Inbox, so it does not go on to the Archive.
-    assert!(h.imap.messages_in("Newsletters").iter().any(|m| m.contains("Note 1")));
+    assert!(
+        h.imap
+            .messages_in("Newsletters")
+            .iter()
+            .any(|m| m.contains("Note 1"))
+    );
 }
 
 #[tokio::test]
@@ -150,21 +243,37 @@ async fn a_forward_that_comes_back_is_not_forwarded_again() {
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
     let forward = Filter {
-        criteria: FilterCriteria { subject: Some("Note".into()), ..FilterCriteria::default() },
-        action: FilterAction { forward: Some("me@example.com".into()), ..FilterAction::default() },
+        criteria: FilterCriteria {
+            subject: Some("Note".into()),
+            ..FilterCriteria::default()
+        },
+        action: FilterAction {
+            forward: Some("me@example.com".into()),
+            ..FilterAction::default()
+        },
         ..Filter::default()
     };
     rules.create_filter(&forward).await.unwrap();
-    h.imap.deliver("INBOX", letter(1, "ann@example.com"), crate::now_millis() + 1_000);
+    h.imap.deliver(
+        "INBOX",
+        letter(1, "ann@example.com"),
+        crate::now_millis() + 1_000,
+    );
     h.sync.incremental().await.unwrap();
     engine.run_due(h.account_id).await.unwrap();
     assert_eq!(h.smtp.sent().len(), 1);
     let back = h.smtp.sent()[0].raw.clone();
-    h.imap.deliver("INBOX", back.clone(), crate::now_millis() + 2_000);
+    h.imap
+        .deliver("INBOX", back.clone(), crate::now_millis() + 2_000);
     // A list that rewrites the sender keeps the forward's own headers.
-    let relayed = String::from_utf8_lossy(&back).replacen("From: <me@example.com>", "From: <list@example.org>", 1);
+    let relayed = String::from_utf8_lossy(&back).replacen(
+        "From: <me@example.com>",
+        "From: <list@example.org>",
+        1,
+    );
     assert!(relayed.contains("list@example.org"), "{relayed}");
-    h.imap.deliver("INBOX", relayed.into_bytes(), crate::now_millis() + 3_000);
+    h.imap
+        .deliver("INBOX", relayed.into_bytes(), crate::now_millis() + 3_000);
     h.sync.incremental().await.unwrap();
     engine.run_due(h.account_id).await.unwrap();
     assert_eq!(h.smtp.sent().len(), 1, "a forward is never forwarded again");
@@ -190,25 +299,49 @@ async fn a_rule_that_reads_the_size_runs_on_big_mail_only() {
     long.extend(std::iter::repeat_n(b'x', 4_000));
     h.imap.deliver("INBOX", long, at + 1);
     h.sync.incremental().await.unwrap();
-    assert_eq!(engine.run_due(h.account_id).await.unwrap().acted_on.len(), 1);
-    assert!(h.imap.messages_in("INBOX").iter().any(|m| m.contains("Note 1")));
-    assert!(h.imap.messages_in("INBOX").iter().all(|m| !m.contains("Note 2")));
+    assert_eq!(
+        engine.run_due(h.account_id).await.unwrap().acted_on.len(),
+        1
+    );
+    assert!(
+        h.imap
+            .messages_in("INBOX")
+            .iter()
+            .any(|m| m.contains("Note 1"))
+    );
+    assert!(
+        h.imap
+            .messages_in("INBOX")
+            .iter()
+            .all(|m| !m.contains("Note 2"))
+    );
 }
 
 #[tokio::test]
 async fn an_edited_local_rule_keeps_its_place() {
     let h = imap_harness().await;
     let (_, rules) = engine_for(&h).await;
-    let first = rules.create_filter(&archive_from("a@example.com")).await.unwrap();
-    rules.create_filter(&archive_from("b@example.com")).await.unwrap();
-    let edited = rules.replace_filter(first.id.as_deref().unwrap(), &archive_from("z@example.com")).await.unwrap();
+    let first = rules
+        .create_filter(&archive_from("a@example.com"))
+        .await
+        .unwrap();
+    rules
+        .create_filter(&archive_from("b@example.com"))
+        .await
+        .unwrap();
+    let edited = rules
+        .replace_filter(first.id.as_deref().unwrap(), &archive_from("z@example.com"))
+        .await
+        .unwrap();
     assert_ne!(edited.id, first.id);
     let now = rules.filters().await.unwrap();
     assert_eq!(now.len(), 2);
     assert_eq!(now[0], edited, "the edited rule stays first");
     assert_eq!(now[1].criteria.from.as_deref(), Some("b@example.com"));
     assert!(matches!(
-        rules.replace_filter("local-missing", &archive_from("y@example.com")).await,
+        rules
+            .replace_filter("local-missing", &archive_from("y@example.com"))
+            .await,
         Err(BackendError::NotFound)
     ));
 }
@@ -217,11 +350,22 @@ async fn an_edited_local_rule_keeps_its_place() {
 async fn a_read_only_rule_is_never_changed_or_deleted() {
     let h = imap_harness().await;
     let (_, rules) = engine_for(&h).await;
-    let kept = Filter { read_only: true, ..archive_from("a@example.com") };
+    let kept = Filter {
+        read_only: true,
+        ..archive_from("a@example.com")
+    };
     let made = rules.create_filter(&kept).await.unwrap();
     let id = made.id.as_deref().unwrap();
-    assert!(matches!(rules.replace_filter(id, &archive_from("z@example.com")).await, Err(BackendError::Refused(_))));
-    assert!(matches!(rules.delete_filter(id).await, Err(BackendError::Refused(_))));
+    assert!(matches!(
+        rules
+            .replace_filter(id, &archive_from("z@example.com"))
+            .await,
+        Err(BackendError::Refused(_))
+    ));
+    assert!(matches!(
+        rules.delete_filter(id).await,
+        Err(BackendError::Refused(_))
+    ));
     assert_eq!(rules.filters().await.unwrap(), [made]);
 }
 
@@ -229,12 +373,21 @@ async fn a_read_only_rule_is_never_changed_or_deleted() {
 async fn a_new_rule_gets_a_local_id_and_a_deleted_one_is_gone() {
     let h = imap_harness().await;
     let (_, rules) = engine_for(&h).await;
-    let made = rules.create_filter(&archive_from("a@example.com")).await.unwrap();
+    let made = rules
+        .create_filter(&archive_from("a@example.com"))
+        .await
+        .unwrap();
     let id = made.id.clone().unwrap();
-    assert!(id.starts_with("local-") && id.len() == "local-".len() + 16, "{id}");
+    assert!(
+        id.starts_with("local-") && id.len() == "local-".len() + 16,
+        "{id}"
+    );
     rules.delete_filter(&id).await.unwrap();
     assert!(rules.filters().await.unwrap().is_empty());
-    assert!(matches!(rules.delete_filter(&id).await, Err(BackendError::NotFound)));
+    assert!(matches!(
+        rules.delete_filter(&id).await,
+        Err(BackendError::NotFound)
+    ));
 }
 
 #[tokio::test]
@@ -242,25 +395,59 @@ async fn a_rule_that_is_off_does_not_run() {
     let h = imap_harness().await;
     h.bootstrap().await;
     let (engine, rules) = engine_for(&h).await;
-    rules.create_filter(&Filter { off: true, ..archive_from("news@example.com") }).await.unwrap();
-    h.imap.deliver("INBOX", letter(1, "news@example.com"), crate::now_millis() + 1_000);
+    rules
+        .create_filter(&Filter {
+            off: true,
+            ..archive_from("news@example.com")
+        })
+        .await
+        .unwrap();
+    h.imap.deliver(
+        "INBOX",
+        letter(1, "news@example.com"),
+        crate::now_millis() + 1_000,
+    );
     h.sync.incremental().await.unwrap();
-    assert!(engine.run_due(h.account_id).await.unwrap().acted_on.is_empty());
-    assert!(h.imap.messages_in("INBOX").iter().any(|m| m.contains("Note 1")));
+    assert!(
+        engine
+            .run_due(h.account_id)
+            .await
+            .unwrap()
+            .acted_on
+            .is_empty()
+    );
+    assert!(
+        h.imap
+            .messages_in("INBOX")
+            .iter()
+            .any(|m| m.contains("Note 1"))
+    );
 }
 
 #[tokio::test]
 async fn saving_a_rule_that_is_off_turns_it_on() {
     let h = imap_harness().await;
     let (_, rules) = engine_for(&h).await;
-    let off = rules.create_filter(&Filter { off: true, ..archive_from("a@example.com") }).await.unwrap();
-    let edited = rules.replace_filter(off.id.as_deref().unwrap(), &off).await.unwrap();
+    let off = rules
+        .create_filter(&Filter {
+            off: true,
+            ..archive_from("a@example.com")
+        })
+        .await
+        .unwrap();
+    let edited = rules
+        .replace_filter(off.id.as_deref().unwrap(), &off)
+        .await
+        .unwrap();
     assert!(!edited.off);
 }
 
 fn file_into(address: &str, mailbox: &str) -> Filter {
     Filter {
-        action: FilterAction { add: vec![MailSet::Mailbox(mailbox.into())], ..FilterAction::default() },
+        action: FilterAction {
+            add: vec![MailSet::Mailbox(mailbox.into())],
+            ..FilterAction::default()
+        },
         ..archive_from(address)
     }
 }
@@ -270,8 +457,17 @@ async fn saving_a_rule_whose_folder_is_still_missing_keeps_it_off() {
     let h = imap_harness().await;
     h.bootstrap().await;
     let (_, rules) = engine_for(&h).await;
-    let off = rules.create_filter(&Filter { off: true, ..file_into("a@example.com", "Gone/Projects") }).await.unwrap();
-    let edited = rules.replace_filter(off.id.as_deref().unwrap(), &off).await.unwrap();
+    let off = rules
+        .create_filter(&Filter {
+            off: true,
+            ..file_into("a@example.com", "Gone/Projects")
+        })
+        .await
+        .unwrap();
+    let edited = rules
+        .replace_filter(off.id.as_deref().unwrap(), &off)
+        .await
+        .unwrap();
     assert!(edited.off, "the server still lacks the folder");
     assert!(rules.filters().await.unwrap()[0].off);
 }
@@ -282,10 +478,25 @@ async fn saving_a_rule_with_a_folder_the_server_has_turns_it_on() {
     h.bootstrap().await;
     let (_, rules) = engine_for(&h).await;
     let account_id = h.account_id;
-    let listed = h.db.read(move |c| mailrs_store::mailboxes::listed(c, account_id)).await.unwrap();
-    let there = &listed.first().expect("the bootstrap lists the server's folders").id;
-    let off = rules.create_filter(&Filter { off: true, ..file_into("a@example.com", "Gone/Projects") }).await.unwrap();
+    let listed =
+        h.db.read(move |c| mailrs_store::mailboxes::listed(c, account_id))
+            .await
+            .unwrap();
+    let there = &listed
+        .first()
+        .expect("the bootstrap lists the server's folders")
+        .id;
+    let off = rules
+        .create_filter(&Filter {
+            off: true,
+            ..file_into("a@example.com", "Gone/Projects")
+        })
+        .await
+        .unwrap();
     let fixed = file_into("a@example.com", there);
-    let edited = rules.replace_filter(off.id.as_deref().unwrap(), &fixed).await.unwrap();
+    let edited = rules
+        .replace_filter(off.id.as_deref().unwrap(), &fixed)
+        .await
+        .unwrap();
     assert!(!edited.off);
 }

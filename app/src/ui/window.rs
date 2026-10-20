@@ -12,13 +12,12 @@ use gtk::{gio, glib};
 use mailrs_domain::translate::{fill, fill_plural, gettext, with_reason};
 use mailrs_domain::{
     Account, AccountId, AccountState, Category, ChangeEvent, EpochMillis, Label, MessageBody,
-    Provider, RemoveSetting,
-    Role, Target, ThreadSummary,
+    Provider, RemoveSetting, Role, Target, ThreadSummary,
 };
 use mailrs_sync::sign_in::{Browser, Wanted};
 use mailrs_sync::{
-    History, MailAction, MovedFrom, Offers, Permitted, Reopened, Scope, TriageAction,
-    View, Withheld,
+    History, MailAction, MovedFrom, Offers, Permitted, Reopened, Scope, TriageAction, View,
+    Withheld,
 };
 
 use super::add_account::{Done, Opening};
@@ -59,6 +58,7 @@ mod flags;
 mod followup;
 mod hide_my_email;
 mod images;
+mod in_flight;
 mod invitation;
 mod listing;
 mod message_menu;
@@ -71,9 +71,9 @@ mod pictures;
 mod press;
 mod previews;
 mod reach;
-mod room;
 mod reminders;
 mod reveal;
+mod room;
 mod save_contacts;
 mod scheduled;
 mod searching;
@@ -118,6 +118,9 @@ pub struct MainWindow {
     app: Weak<App>,
     core: Rc<Core>,
     toasts: adw::ToastOverlay,
+    /// Mail actions still on their way to the server: the rows they took
+    /// out of the list and the toast that speaks for them.
+    in_flight: in_flight::InFlight,
     /// Says a release is available, installing, waiting to restart, or failed.
     update_banner: adw::Banner,
     /// Says a snap cannot reach the keyring and gives the command that
@@ -142,6 +145,9 @@ pub struct MainWindow {
     /// The About window while it is open, so an update's progress reaches
     /// its button.
     about: RefCell<Option<Rc<crate::ui::about::About>>>,
+    /// Preferences while it is open, so another press brings it back
+    /// rather than stacking a second one.
+    preferences: RefCell<Option<Rc<super::preferences::dialog::Dialog>>>,
     stack: gtk::Stack,
     split: adw::OverlaySplitView,
     /// The mail's list and conversation, or the calendar, beside the
@@ -153,6 +159,7 @@ pub struct MainWindow {
     /// Whether the accounts have been read once, when the window goes
     /// back to the space it showed last.
     space_restored: Cell<bool>,
+    startup_account_applied: Cell<bool>,
     sidebar: Rc<Sidebar>,
     list: Rc<ThreadList>,
     conversation: Rc<ConversationView>,
@@ -165,6 +172,10 @@ pub struct MainWindow {
     authorizing: Cell<bool>,
     assistant: Rc<super::assistant::AssistantPane>,
     assistant_split: adw::OverlaySplitView,
+    assistant_window: RefCell<Option<adw::Window>>,
+    /// The group must outlive construction to keep the adjoining toolbars aligned.
+    toolbar_heights: gtk::SizeGroup,
+    assistant_top_bar: Option<gtk::Widget>,
     categories: categories::CategoryBar,
     /// Focused and Other, over one Microsoft account's inbox.
     focus: categories::CategoryBar,
@@ -221,12 +232,18 @@ pub(crate) fn track_dark_class(window: &adw::Window) {
     // The macOS menu follows the application's active window, including
     // composers and separate conversations, rather than a floating window.
     #[cfg(target_os = "macos")]
-    window.set_application(gio::Application::default().and_downcast::<gtk::Application>().as_ref());
+    window.set_application(
+        gio::Application::default()
+            .and_downcast::<gtk::Application>()
+            .as_ref(),
+    );
     window.add_css_class(SURFACES_CLASS);
     let style = adw::StyleManager::default();
     let target = window.downgrade();
     let mark = move |style: &adw::StyleManager| {
-        let Some(window) = target.upgrade() else { return };
+        let Some(window) = target.upgrade() else {
+            return;
+        };
         match style.is_dark() {
             true => window.add_css_class(DARK_CLASS),
             false => window.remove_css_class(DARK_CLASS),
@@ -235,7 +252,9 @@ pub(crate) fn track_dark_class(window: &adw::Window) {
     mark(&style);
     let target = window.downgrade();
     let mark_accent = move |style: &adw::StyleManager| {
-        let Some(window) = target.upgrade() else { return };
+        let Some(window) = target.upgrade() else {
+            return;
+        };
         match style.accent_color() == adw::AccentColor::Orange {
             true => window.add_css_class(ACCENT_ORANGE_CLASS),
             false => window.remove_css_class(ACCENT_ORANGE_CLASS),
@@ -651,7 +670,7 @@ impl MainWindow {
 
             let w = weak.clone();
             let microsoft = super::add_account::signs_in_to_microsoft(&app.core);
-            let by_hand = weak.clone();
+            let (by_hand, calendar_alone) = (weak.clone(), weak.clone());
             let first_page = welcome::first_account_page(
                 microsoft,
                 move |tile| {
@@ -665,6 +684,11 @@ impl MainWindow {
                 move || {
                     if let Some(win) = by_hand.upgrade() {
                         win.present_add_account(Opening::ByHand);
+                    }
+                },
+                move || {
+                    if let Some(win) = calendar_alone.upgrade() {
+                        win.present_add_account(Opening::Calendar);
                     }
                 },
             );
@@ -686,7 +710,22 @@ impl MainWindow {
                         }
                     }
                 },
+                {
+                    let app = Rc::downgrade(app);
+                    move |change| {
+                        if let Some(app) = app.upgrade() {
+                            app.change_settings(change);
+                        }
+                    }
+                },
             );
+            let toolbar_heights = gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical);
+            let assistant_top_bar = super::top_bar(&assistant.header);
+            if let Some(bar) = &assistant_top_bar {
+                toolbar_heights.add_widget(bar);
+            }
+            conversation.group_toolbar_height(&toolbar_heights);
+            calendar.group_toolbar_height(&toolbar_heights);
             let assistant_split = adw::OverlaySplitView::builder()
                 .sidebar(&assistant.page)
                 .content(&split)
@@ -714,13 +753,17 @@ impl MainWindow {
                 .hhomogeneous(false)
                 .build();
             let room = {
-                let least = |widget: &gtk::Widget| widget.measure(gtk::Orientation::Horizontal, -1).0;
+                let least =
+                    |widget: &gtk::Widget| widget.measure(gtk::Orientation::Horizontal, -1).0;
                 let mailboxes = sidebar.page.clone().upcast::<gtk::Widget>().downgrade();
                 let list_page = list.page.clone().upcast::<gtk::Widget>().downgrade();
                 let panel = assistant.page.clone().upcast::<gtk::Widget>().downgrade();
                 let sidebar_least = split.min_sidebar_width() as i32;
-                let (columns, reading, days) =
-                    (nav.downgrade(), Rc::downgrade(&conversation), Rc::downgrade(&calendar));
+                let (columns, reading, days) = (
+                    nav.downgrade(),
+                    Rc::downgrade(&conversation),
+                    Rc::downgrade(&calendar),
+                );
                 // The window's buttons show in one header at a time, so
                 // the widest seen stands for them wherever they are.
                 let buttons = Cell::new(0);
@@ -741,11 +784,17 @@ impl MainWindow {
                         days.upgrade().map_or((0, 0), |view| view.least_width());
                     buttons.set(buttons.get().max(bar_buttons).max(calendar_buttons));
                     room::Needs {
-                        mailboxes: mailboxes.upgrade().map_or(0, |w| least(&w)).max(sidebar_least),
+                        mailboxes: mailboxes
+                            .upgrade()
+                            .map_or(0, |w| least(&w))
+                            .max(sidebar_least),
                         space: mail.max(calendar),
                         columns: mail,
                         controls: buttons.get(),
-                        panel: panel.upgrade().map_or(0, |w| least(&w)).max(room::PANEL_LEAST),
+                        panel: panel
+                            .upgrade()
+                            .map_or(0, |w| least(&w))
+                            .max(room::PANEL_LEAST),
                     }
                 })
             };
@@ -753,7 +802,10 @@ impl MainWindow {
             stack.add_named(&first_page, Some("first-account"));
             // An update's banner spans the whole window, above the panes,
             // since it is about the app and not the mail on screen.
-            let update_banner = adw::Banner::builder().use_markup(false).revealed(false).build();
+            let update_banner = adw::Banner::builder()
+                .use_markup(false)
+                .revealed(false)
+                .build();
             // The keyring notice is about the app too, and the command it
             // gives needs the width a pane would cut short.
             let keyring_banner = adw::Banner::builder().revealed(false).build();
@@ -824,6 +876,7 @@ impl MainWindow {
                 app: Rc::downgrade(app),
                 core: Rc::clone(&app.core),
                 toasts,
+                in_flight: in_flight::InFlight::default(),
                 update_banner,
                 keyring_banner,
                 grant_banners,
@@ -831,24 +884,29 @@ impl MainWindow {
                 storage_banner_widgets: RefCell::new(HashMap::new()),
                 update_menu: gio::Menu::new(),
                 about: RefCell::new(None),
+                preferences: RefCell::new(None),
                 stack,
                 split,
                 spaces,
                 nav,
                 calendar,
                 space_restored: Cell::new(false),
+                startup_account_applied: Cell::new(false),
                 sidebar,
                 list,
                 conversation,
                 listing: Rc::new(ListingRun::new(
                     app.settings_with(|s| s.default_category),
                     Rc::new(searching::ListPane(weak.clone())),
-                    Rc::new(searching::CoreLists(Rc::clone(&app.core))),
+                    Rc::new(searching::CoreLists::new(Rc::clone(&app.core))),
                 )),
                 accounts_read: RefCell::new(None),
                 authorizing: Cell::new(false),
                 assistant,
                 assistant_split,
+                assistant_window: RefCell::new(None),
+                toolbar_heights,
+                assistant_top_bar,
                 categories: categories::CategoryBar::new(
                     app.settings_with(|s| s.default_category),
                     &Category::ALL,
@@ -879,21 +937,27 @@ impl MainWindow {
             });
         }
         let weak = Rc::downgrade(&window);
-        window.conversation.tag_button.set_create_popup_func(move |button| {
-            if let Some(win) = weak.upgrade() {
-                button.set_popover(Some(&win.tag_popover()));
-            }
-        });
+        window
+            .conversation
+            .tag_button
+            .set_create_popup_func(move |button| {
+                if let Some(win) = weak.upgrade() {
+                    button.set_popover(Some(&win.tag_popover()));
+                }
+            });
         // Both header buttons run the same toggle_assistant path as
         // Ctrl+J and the menu (R12); the panel's own show-sidebar keeps
         // them in the pressed state it puts on screen, whatever opened
         // or closed it.
         let weak = Rc::downgrade(&window);
-        window.conversation.assistant_toggle.connect_clicked(move |_| {
-            if let Some(win) = weak.upgrade() {
-                win.toggle_assistant();
-            }
-        });
+        window
+            .conversation
+            .assistant_toggle
+            .connect_clicked(move |_| {
+                if let Some(win) = weak.upgrade() {
+                    win.toggle_assistant();
+                }
+            });
         let weak = Rc::downgrade(&window);
         window.calendar.assistant_toggle.connect_clicked(move |_| {
             if let Some(win) = weak.upgrade() {
@@ -901,14 +965,42 @@ impl MainWindow {
             }
         });
         let weak = Rc::downgrade(&window);
-        window.assistant_split.connect_show_sidebar_notify(move |split| {
+        window
+            .assistant_split
+            .connect_show_sidebar_notify(move |split| {
+                if let Some(win) = weak.upgrade() {
+                    win.sync_assistant_toggle();
+                }
+                if let Some(room) = split.parent().and_downcast::<room::Room>() {
+                    room.rearrange();
+                }
+            });
+        let weak = Rc::downgrade(&window);
+        window.assistant.detach.connect_clicked(move |_| {
             if let Some(win) = weak.upgrade() {
-                win.sync_assistant_toggle();
-            }
-            if let Some(room) = split.parent().and_downcast::<room::Room>() {
-                room.rearrange();
+                if win.assistant_window.borrow().is_some() {
+                    win.dock_assistant(true);
+                } else {
+                    win.detach_assistant();
+                }
             }
         });
+        let weak = Rc::downgrade(&window);
+        window.assistant.close.connect_clicked(move |_| {
+            if let Some(win) = weak.upgrade() {
+                win.assistant_split.set_show_sidebar(false);
+            }
+        });
+        let weak = Rc::downgrade(&window);
+        window
+            .assistant_split
+            .connect_collapsed_notify(move |split| {
+                if let Some(win) = weak.upgrade() {
+                    win.assistant.close.set_visible(
+                        split.is_collapsed() && win.assistant_window.borrow().is_none(),
+                    );
+                }
+            });
         // Rows ask for photos as they bind and redraw themselves; an open
         // conversation is drawn again once its senders' photos arrive.
         let photos = app.photos();
@@ -940,7 +1032,9 @@ impl MainWindow {
         glib::spawn_future_local(async move {
             while let Ok(request) = tool_calls.recv().await {
                 let Some(win) = weak.upgrade() else { break };
-                let outcome = win.run_tool(&request.name, request.input).await;
+                let outcome = win
+                    .run_tool(&request.name, request.input, request.picked_files)
+                    .await;
                 let _ = request.reply.send(outcome).await;
             }
         });
@@ -1020,6 +1114,18 @@ impl MainWindow {
         self.window.is_active() && self.window.is_visible()
     }
 
+    /// The conversation the person is looking at: the one on screen while
+    /// the window has focus. `None` while the window is unfocused or
+    /// hidden, shows no conversation, or keeps one open behind the
+    /// Calendar space or a narrow window's list, where its page is not
+    /// mapped.
+    pub fn viewed(&self) -> Option<Target> {
+        if !self.is_active() || !self.conversation.page.is_mapped() {
+            return None;
+        }
+        self.conversation.read(OpenThread::target)
+    }
+
     /// Shows where an update stands, or hides the banner when nothing does.
     /// Each state's button runs an app action, so the banner needs no
     /// callbacks of its own.
@@ -1076,9 +1182,6 @@ impl MainWindow {
                 self.refresh_accounts(Reload::No);
                 if *state == AccountState::Ok {
                     self.account_ready_for_threads(*account_id);
-                    if let Some(app) = self.app.upgrade() {
-                        app.read_storage_of(*account_id);
-                    }
                 }
             }
             ChangeEvent::LabelsChanged { .. } => self.refresh_accounts(Reload::Yes),
@@ -1151,7 +1254,29 @@ impl MainWindow {
         };
         self.stack.set_visible_child_name(page);
         let live: HashSet<AccountId> = data.iter().map(|(a, _)| a.id).collect();
+        // Any account can need to sign in again, a calendar account too.
+        let reauth = data
+            .iter()
+            .map(|(a, _)| a)
+            .find(|a| a.state == AccountState::NeedsReauth)
+            .cloned();
+        // A calendar account has no mailboxes, so the mail sidebar and
+        // everything worded by what the accounts offer for mail is built
+        // from the accounts that have mail. The calendar lists every
+        // account, so the others are kept aside for it.
+        let (data, calendar_accounts): (Vec<_>, Vec<_>) = data
+            .into_iter()
+            .partition(|(a, _)| a.provider.serves_mail());
         self.listing.accounts_live(&live);
+        let mailboxes = data
+            .iter()
+            .flat_map(|(account, labels)| {
+                labels
+                    .iter()
+                    .map(move |label| (account.id, label.id.clone()))
+            })
+            .collect();
+        self.listing.mailboxes_live(&mailboxes);
         // A label deleted elsewhere, by the assistant or in the browser,
         // leaves the window on a mailbox that is no longer there, so the
         // inbox takes over as it does for a signed-out account.
@@ -1186,6 +1311,16 @@ impl MainWindow {
         // heading row still needs its Rules, Hide My Email and Automatic
         // Reply gated again when the account starts mid-search.
         self.sidebar.regate(|id| self.offers(id));
+        if !data.is_empty()
+            && !self.startup_account_applied.replace(true)
+            && matches!(self.shown(), Mailbox::Unified(crate::ui::Standard::Inbox))
+            && let Some(email) = settings.preferred_account(crate::settings::AccountUse::Startup)
+            && let Some((account, _)) = data
+                .iter()
+                .find(|(account, _)| account.email.eq_ignore_ascii_case(email))
+        {
+            self.show_inbox_of(account.id);
+        }
         // Each hidden address comes with its own rules, so Hide My Email
         // works only while some account can hold them, and each account
         // action only while some account has what it opens.
@@ -1204,21 +1339,18 @@ impl MainWindow {
         self.follow_gates();
         self.list
             .set_show_accounts(mailbox.account().is_none() && data.len() > 1);
-        let reauth: Vec<&Account> = data
-            .iter()
-            .filter(|(a, _)| a.state == AccountState::NeedsReauth)
-            .map(|(a, _)| a)
-            .collect();
-        match reauth.first() {
+        match &reauth {
             Some(account) => {
                 let through_browser = self
                     .app
                     .upgrade()
                     .is_some_and(|app| app.signs_in_through_browser(account.id));
-                self.list.banner.set_title(&crate::add_account::sign_in_again_banner(
-                    &account.email,
-                    through_browser,
-                ));
+                self.list
+                    .banner
+                    .set_title(&crate::add_account::sign_in_again_banner(
+                        &account.email,
+                        through_browser,
+                    ));
                 self.list.banner.set_button_label(Some(&gettext("Sign In")));
                 self.list.banner.set_revealed(true);
             }
@@ -1238,9 +1370,12 @@ impl MainWindow {
         // app.reload_accounts already read every account's consent in the
         // same pass as the accounts themselves, so this costs no round
         // trip of its own and settles with everything else above.
-        let accounts: Vec<Account> = data.iter().map(|(a, _)| a.clone()).collect();
+        let mut accounts: Vec<Account> = data.iter().map(|(a, _)| a.clone()).collect();
         self.rebuild_grant_banners(&accounts, &app.consent());
         self.rebuild_storage_banners();
+        // The mail accounts in the sidebar's order, then the calendar
+        // accounts, which the mail sidebar has no place for.
+        accounts.extend(calendar_accounts.into_iter().map(|(account, _)| account));
         self.accounts_for_calendar(&accounts);
     }
 
@@ -1374,7 +1509,7 @@ impl MainWindow {
 
     /// The accounts a listing may read, in sidebar order.
     fn scope(&self) -> Scope {
-        Scope::over(self.accounts())
+        Scope::of_mail_accounts(&self.accounts())
     }
 
     /// The settings that change what the mailbox on screen lists.
@@ -1442,7 +1577,7 @@ impl MainWindow {
         if redraw.follow {
             let mailbox = self.shown();
             self.list
-                .set_show_accounts(mailbox.account().is_none() && self.accounts().len() > 1);
+                .set_show_accounts(mailbox.account().is_none() && self.mail_accounts().len() > 1);
             let accounts = self.accounts_of(&mailbox);
             self.word_buttons(&self.conversation, &mailbox, accounts);
             self.follow_outbox();
@@ -1749,7 +1884,7 @@ impl MainWindow {
     fn accounts_of(&self, mailbox: &Mailbox) -> Vec<AccountId> {
         match mailbox.account() {
             Some(id) => vec![id],
-            None => self.accounts().iter().map(|a| a.id).collect(),
+            None => self.mail_accounts().iter().map(|a| a.id).collect(),
         }
     }
 
@@ -1822,8 +1957,16 @@ impl MainWindow {
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let email = &account.email;
-            if permission::ask(&this.window, account_id, email, account.provider, permission, occasion)
-                .await {
+            if permission::ask(
+                &this.window,
+                account_id,
+                email,
+                account.provider,
+                permission,
+                occasion,
+            )
+            .await
+            {
                 this.grant(account.email);
             }
         });
@@ -1922,32 +2065,35 @@ impl MainWindow {
         if targets.is_empty() {
             return;
         }
+        // The rows leave and the toast shows now; the server may take a
+        // while, behind a sync pass or a slow connection.
+        let asked = targets.len();
+        let leaving = aftermath::leaves(&action, &self.shown()).then(|| {
+            self.list
+                .retain(|row| !targets.iter().any(|target| aftermath::covers(target, row)));
+            self.follow_selection();
+            self.in_flight.leave(&targets)
+        });
+        let run = match history {
+            History::Record => Some(self.announce(&action, asked, message)),
+            History::Skip => None,
+        };
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let outcome = this.core.act(targets, action.clone(), history, from).await;
+            if let Some(leaving) = leaving {
+                this.in_flight.arrived(leaving);
+            }
             this.after_mail(Cause::Did(&action, history), &outcome, None);
+            if let Some(run) = &run {
+                this.ran(run, &outcome);
+            }
+            // What the action did not change lists again where it was.
+            if leaving.is_some() && outcome.done.len() < asked {
+                this.listing.everything();
+            }
             if let Some(error) = outcome.first_error() {
-                return this.toast(error);
-            }
-            if history == History::Skip {
-                return;
-            }
-            let count = outcome.done.len();
-            if let Some(done) = message
-                .or_else(|| done_message(&action, count, this.settings_with(|s| s.threading)))
-            {
-                let toast = adw::Toast::builder()
-                    .title(toast_title(&done))
-                    .button_label(gettext("Undo"))
-                    .timeout(5)
-                    .build();
-                let weak = Rc::downgrade(&this);
-                toast.connect_button_clicked(move |_| {
-                    if let Some(win) = weak.upgrade() {
-                        win.undo();
-                    }
-                });
-                this.toasts.add_toast(toast);
+                this.say_now(error);
             }
         });
     }
@@ -1956,19 +2102,18 @@ impl MainWindow {
     /// the window or the assistant took it. The one before it is left for
     /// the next press.
     fn undo(self: &Rc<Self>) {
+        // An action still on its way is not on the stack yet, and pressing
+        // Undo right after it means that one.
+        if self.undo_newest() {
+            return;
+        }
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let Some(undone) = this.core.undo().await else {
-                return this.toast(&gettext("Nothing to undo"));
-            };
-            this.after_mail(Cause::Undid, &undone.outcome, None);
-            match undone.outcome.first_error() {
-                Some(error) => this.toast(error),
-                None => this.toast(&fill(
-                    &gettext("{action} undone"),
-                    &[("action", &undone.words)],
-                )),
+            let undone = this.core.undo().await;
+            if let Some(undone) = &undone {
+                this.after_mail(Cause::Undid, &undone.outcome, None);
             }
+            this.say_undone(undone);
         });
     }
 
@@ -2237,7 +2382,12 @@ impl MainWindow {
             pop.popdown();
             win.press_label(
                 targets.clone(),
-                filing_choice(Filing::Labels, &tag.id, &tag.name, applied.contains(&tag.id)),
+                filing_choice(
+                    Filing::Labels,
+                    &tag.id,
+                    &tag.name,
+                    applied.contains(&tag.id),
+                ),
                 follow.as_ref(),
             );
         });
@@ -2315,6 +2465,29 @@ impl MainWindow {
             html.as_deref(),
             &thread,
         );
+        let task = if kind == ReplyKind::Forward {
+            crate::settings::AccountUse::Forwards
+        } else {
+            crate::settings::AccountUse::Replies
+        };
+        if let Some(outgoing) = app.account_for(task, Some(account_id))
+            && outgoing != account_id
+        {
+            draft.use_account(outgoing, app.blank_draft(outgoing).from);
+            if kind != ReplyKind::Forward {
+                let mine = app.my_addresses(outgoing, &target);
+                draft.to.retain(|to| {
+                    !mine
+                        .iter()
+                        .any(|own| own.email.eq_ignore_ascii_case(&to.email))
+                });
+                draft.cc.retain(|cc| {
+                    !mine
+                        .iter()
+                        .any(|own| own.email.eq_ignore_ascii_case(&cc.email))
+                });
+            }
+        }
         // A message that arrived encrypted is answered encrypted.
         draft.encrypt |= secret;
         if attachments.is_empty() {
@@ -2408,7 +2581,11 @@ impl MainWindow {
             let send_at = waiting.as_ref().map(|row| row.send_at);
             if let Some(row) = waiting.filter(|row| row.held.is_some()) {
                 let (outbox, id) = (this.core.outbox(), row.id);
-                match this.core.call(async move { outbox.reopen_held(id).await }).await {
+                match this
+                    .core
+                    .call(async move { outbox.reopen_held(id).await })
+                    .await
+                {
                     Ok(Reopened::Free) => {}
                     Ok(Reopened::Draft(now)) => {
                         reopened = Some(now.id);
@@ -2455,7 +2632,11 @@ impl MainWindow {
                 Some(raw) => raw,
                 None => {
                     let s = sync.clone();
-                    match this.core.call(async move { s.raw_message(&source).await }).await {
+                    match this
+                        .core
+                        .call(async move { s.raw_message(&source).await })
+                        .await
+                    {
                         Ok(raw) => raw.as_ref().clone(),
                         Err(err) => {
                             return this.toast(&with_reason(
@@ -2611,16 +2792,26 @@ impl MainWindow {
                         account_id,
                         which: crate::ui::Standard::Inbox,
                     };
+                    // The calendar shows when only calendar accounts were
+                    // here before this one.
+                    win.show_space(crate::settings::Space::Mail);
                     win.sidebar.select(&inbox);
                     win.show_mailbox(inbox);
                 }
                 Done::Grant(email) => win.grant(email),
+                Done::CalendarAdded => win.calendar_added(),
                 Done::SignedInAgain(account) => {
                     win.toast(&fill(
                         &gettext("{account} is signed in again."),
                         &[("account", &account.email)],
                     ));
-                    win.refresh_accounts(Reload::Yes);
+                    // A calendar account has no mail for the list to read
+                    // again.
+                    win.refresh_accounts(if account.provider.serves_mail() {
+                        Reload::Yes
+                    } else {
+                        Reload::No
+                    });
                     // A JMAP account may have signed in another way, through
                     // the browser or with an app password for its calendar,
                     // which changes the servers it can reach beside mail.
@@ -2632,9 +2823,27 @@ impl MainWindow {
         });
     }
 
+    /// A calendar account signed in. The accounts are read again, and
+    /// once they are the calendar shows and reads the new account's
+    /// calendars, rather than leaving them to the next tick.
+    fn calendar_added(self: &Rc<Self>) {
+        self.refresh_accounts(Reload::No);
+        let read = self.accounts_read.borrow().clone();
+        let win = Rc::clone(self);
+        glib::spawn_future_local(async move {
+            if let Some(read) = read {
+                read.await;
+            }
+            win.show_space(crate::settings::Space::Calendar);
+            if let Some(app) = win.app.upgrade() {
+                app.refresh_calendars();
+            }
+        });
+    }
+
     /// Signs `account` in again the way it signed in first: its
-    /// provider's page in the browser, or step 2 of Another Provider with
-    /// its servers.
+    /// provider's page in the browser, step 2 of Another Provider with
+    /// its servers, or the calendar page for a calendar account.
     fn sign_in_again(self: &Rc<Self>, account: Account) {
         match Browser::of(account.provider) {
             Some(browser) => self.sign_in_in_browser(browser, Some(account.email)),
@@ -2731,7 +2940,10 @@ impl MainWindow {
         let wanted = address.map_or(Wanted::Anyone, Wanted::Only);
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let signed = this.core.sign_in_in_browser(browser, urls, wanted, cancel).await;
+            let signed = this
+                .core
+                .sign_in_in_browser(browser, urls, wanted, cancel)
+                .await;
             drop(keep);
             match signed {
                 Ok((account, _)) => {
@@ -2774,6 +2986,15 @@ impl MainWindow {
         self.app
             .upgrade()
             .map(|app| app.accounts())
+            .unwrap_or_default()
+    }
+
+    /// The accounts with mail: what a mailbox lists and what the mail
+    /// buttons are worded for. A calendar account is not among them.
+    fn mail_accounts(&self) -> Vec<Account> {
+        self.app
+            .upgrade()
+            .map(|app| app.mail_accounts())
             .unwrap_or_default()
     }
 
@@ -2834,7 +3055,11 @@ impl MainWindow {
             let (outbox, account_id) = (this.core.outbox(), account.id);
             // Not knowing is not zero: removing the account then would
             // leave the server to send what it holds.
-            let held = match this.core.call(async move { outbox.held_count(account_id).await }).await {
+            let held = match this
+                .core
+                .call(async move { outbox.held_count(account_id).await })
+                .await
+            {
                 Ok(held) => held,
                 Err(err) => {
                     return this.toast(&with_reason(
@@ -2848,7 +3073,10 @@ impl MainWindow {
             if let Some(line) = crate::offered::held_back_line(held) {
                 body = format!("{body}\n\n{line}");
             }
-            let title = fill(&gettext("Remove {account}?"), &[("account", &account.email)]);
+            let title = fill(
+                &gettext("Remove {account}?"),
+                &[("account", &account.email)],
+            );
             let question = confirm(&title, &body, &gettext("Remove"), Tone::Destructive);
             if !question.ask(&this.window).await {
                 return;
@@ -3005,8 +3233,12 @@ impl MainWindow {
             ("label-new-inside", |win, account, label| {
                 win.new_label_inside(account, label)
             }),
-            ("label-up", |win, account, label| win.move_label(account, label, -1)),
-            ("label-down", |win, account, label| win.move_label(account, label, 1)),
+            ("label-up", |win, account, label| {
+                win.move_label(account, label, -1)
+            }),
+            ("label-down", |win, account, label| {
+                win.move_label(account, label, 1)
+            }),
         ] {
             let action = gio::SimpleAction::new(
                 name,
@@ -3044,6 +3276,7 @@ impl MainWindow {
             if let (Some(win), Some(app)) =
                 (weak.upgrade(), weak.upgrade().and_then(|w| w.app.upgrade()))
             {
+                win.dock_assistant(false);
                 win.conversation.stop_rendering();
                 win.previews.forget_decrypted();
                 // A held calendar change whose Undo toast is still up
@@ -3072,9 +3305,12 @@ impl MainWindow {
         menu.append_section(None, &calendar);
         let first = gio::Menu::new();
         // The header in both spaces carries a button for this now (R12);
-        // the menu item stays too, so Ctrl+J shows here as well.
+        // the menu item stays too, so its key shows here as well.
         let assistant = gio::MenuItem::new(Some(&gettext("Assistant")), Some("win.assistant"));
-        assistant.set_attribute_value("accel", Some(&"<Control>j".to_variant()));
+        assistant.set_attribute_value(
+            "accel",
+            Some(&crate::ui::primary_accelerator("<Primary>j").to_variant()),
+        );
         first.append_item(&assistant);
         first.append(Some(&gettext("Check for Mail")), Some("win.check"));
         first.append(Some(&gettext("Add Account…")), Some("win.add-account"));
@@ -3138,9 +3374,84 @@ impl MainWindow {
         }
     }
 
+    /// Moves the same pane, keeping its chat and any approval in place.
+    fn detach_assistant(self: &Rc<Self>) {
+        self.assistant_split.set_show_sidebar(false);
+        self.assistant_split.set_sidebar(None::<&gtk::Widget>);
+        if let Some(bar) = &self.assistant_top_bar {
+            self.toolbar_heights.remove_widget(bar);
+        }
+        self.assistant.page.remove_css_class("assistant-docked");
+        self.assistant
+            .page
+            .set_top_bar_style(adw::ToolbarStyle::Flat);
+        let window = adw::Window::builder()
+            .title(gettext("Assistant"))
+            .default_width(440)
+            .default_height(700)
+            .content(&self.assistant.page)
+            .build();
+        window.set_application(self.window.application().as_ref());
+        track_dark_class(&window);
+        self.assistant.header.set_show_end_title_buttons(true);
+        self.assistant.close.set_visible(false);
+        self.assistant.detach.set_icon_name("view-restore-symbolic");
+        self.assistant
+            .detach
+            .set_tooltip_text(Some(&gettext("Dock")));
+        super::name(&self.assistant.detach, &gettext("Dock"));
+        let weak = Rc::downgrade(self);
+        window.connect_close_request(move |_| {
+            if let Some(win) = weak.upgrade() {
+                win.dock_assistant(false);
+            }
+            glib::Propagation::Stop
+        });
+        *self.assistant_window.borrow_mut() = Some(window.clone());
+        self.sync_assistant_toggle();
+        window.present();
+        self.assistant.focus();
+    }
+
+    fn dock_assistant(&self, show: bool) {
+        let Some(window) = self.assistant_window.borrow_mut().take() else {
+            return;
+        };
+        window.set_content(None::<&gtk::Widget>);
+        self.assistant.header.set_show_end_title_buttons(true);
+        self.assistant_split.set_sidebar(Some(&self.assistant.page));
+        if let Some(bar) = &self.assistant_top_bar {
+            self.toolbar_heights.add_widget(bar);
+        }
+        self.assistant.page.add_css_class("assistant-docked");
+        self.assistant
+            .page
+            .set_top_bar_style(adw::ToolbarStyle::Flat);
+        self.assistant
+            .close
+            .set_visible(self.assistant_split.is_collapsed());
+        self.assistant.detach.set_icon_name("window-new-symbolic");
+        self.assistant
+            .detach
+            .set_tooltip_text(Some(&gettext("Detach")));
+        super::name(&self.assistant.detach, &gettext("Detach"));
+        self.assistant_split.set_show_sidebar(show);
+        window.destroy();
+        self.sync_assistant_toggle();
+        if show {
+            self.assistant.focus();
+        }
+    }
+
     /// Shows the assistant beside the mail and puts the cursor in it, or
     /// hides it again.
     fn toggle_assistant(&self) {
+        let detached = self.assistant_window.borrow().clone();
+        if let Some(window) = detached {
+            window.present();
+            self.assistant.focus();
+            return;
+        }
         let show = !self.assistant_split.shows_sidebar();
         self.assistant_split.set_show_sidebar(show);
         if show {
@@ -3155,7 +3466,12 @@ impl MainWindow {
         if view.detached() {
             return;
         }
-        self.assistant_split.set_show_sidebar(true);
+        let detached = self.assistant_window.borrow().clone();
+        if let Some(window) = detached {
+            window.present();
+        } else {
+            self.assistant_split.set_show_sidebar(true);
+        }
         self.assistant.ask(gettext("Summarize this conversation"));
     }
 
@@ -3169,9 +3485,13 @@ impl MainWindow {
     /// Shows or hides the assistant toggle in the reading pane's and the
     /// calendar's headers, and keeps it pressed with the panel (R12).
     fn sync_assistant_toggle(&self) {
-        let panel_open = self.assistant_split.shows_sidebar();
-        let state =
-            self.settings_with(|s| crate::assistant::assistant_toggle(&s.ai, panel_open));
+        let panel_open =
+            self.assistant_split.shows_sidebar() || self.assistant_window.borrow().is_some();
+        let docked =
+            self.assistant_split.shows_sidebar() && self.assistant_window.borrow().is_none();
+        self.conversation.set_assistant_docked(docked);
+        self.calendar.set_assistant_docked(docked);
+        let state = self.settings_with(|s| crate::assistant::assistant_toggle(&s.ai, panel_open));
         for button in [
             &self.conversation.assistant_toggle,
             &self.calendar.assistant_toggle,
@@ -3201,7 +3521,12 @@ impl MainWindow {
             .upgrade()
             .is_some_and(|app| app.new_message(self.account_in_view(), ""));
         if !wrote {
-            self.toast(&gettext("Add an account first"));
+            // Calendar accounts alone have no mail to write from.
+            let lacking = match self.accounts().is_empty() {
+                true => gettext("Add an account first"),
+                false => gettext("Add a mail account first"),
+            };
+            self.toast(&lacking);
         }
     }
 
@@ -3390,12 +3715,30 @@ impl MainWindow {
 
     /// Opens Preferences, on the signature of `signature_of` when given.
     fn show_preferences_for(self: &Rc<Self>, signature_of: Option<String>) {
+        self.show_preferences_focus(
+            signature_of
+                .as_deref()
+                .map(super::preferences::Focus::Signature),
+        );
+    }
+
+    fn show_preferences_focus(self: &Rc<Self>, focus: Option<super::preferences::Focus<'_>>) {
         let Some(app) = self.app.upgrade() else {
             return;
         };
+        // One Preferences at a time. Asked for an account's signature
+        // while it is open, it turns to the accounts rather than starting
+        // again, which would drop what the person was in the middle of.
+        if let Some(open) = self.open_preferences() {
+            if focus.is_some() {
+                open.set_visible_page_name("accounts");
+            }
+            return;
+        }
+        // Preferences puts each account on the pages that apply to it.
         let accounts = app.accounts();
         let weak = Rc::downgrade(self);
-        super::preferences::present(
+        let dialog = super::preferences::present(
             &app,
             &accounts,
             |id| self.offers(id),
@@ -3406,19 +3749,49 @@ impl MainWindow {
                 }
             },
             &self.window,
-            signature_of.as_deref(),
+            focus,
         );
+        self.keep_preferences(dialog);
+    }
+
+    /// Preferences, when it is open.
+    fn open_preferences(&self) -> Option<Rc<super::preferences::dialog::Dialog>> {
+        self.preferences.borrow().clone()
+    }
+
+    /// Holds `dialog` as the open Preferences until it closes.
+    fn keep_preferences(self: &Rc<Self>, dialog: Rc<super::preferences::dialog::Dialog>) {
+        let weak = Rc::downgrade(self);
+        dialog.window.connect_closed(move |closed| {
+            let Some(win) = weak.upgrade() else { return };
+            let ours = win
+                .preferences
+                .borrow()
+                .as_ref()
+                .is_some_and(|open| &open.window == closed);
+            if ours {
+                win.preferences.replace(None);
+            }
+        });
+        self.preferences.replace(Some(dialog));
     }
 
     fn show_rules(self: &Rc<Self>, account: Account) {
         let labels = self.labels_of(account.id);
         let (grant, email) = (Rc::downgrade(self), account.email.clone());
         let filing = crate::offered::Filing::of([self.offers(account.id)]);
-        super::rules::present(&self.core, &account, labels, filing, &self.window, move || {
-            if let Some(win) = grant.upgrade() {
-                win.grant(email.clone());
-            }
-        });
+        super::rules::present(
+            &self.core,
+            &account,
+            labels,
+            filing,
+            &self.window,
+            move || {
+                if let Some(win) = grant.upgrade() {
+                    win.grant(email.clone());
+                }
+            },
+        );
     }
 
     /// Opens Preferences on one page, such as "assistant".
@@ -3426,9 +3799,13 @@ impl MainWindow {
         let Some(app) = self.app.upgrade() else {
             return;
         };
+        if let Some(open) = self.open_preferences() {
+            open.set_visible_page_name(page);
+            return;
+        }
         let accounts = app.accounts();
         let weak = Rc::downgrade(self);
-        super::preferences::present_page(
+        let dialog = super::preferences::present_page(
             &app,
             &accounts,
             |id| self.offers(id),
@@ -3441,6 +3818,7 @@ impl MainWindow {
             &self.window,
             page,
         );
+        self.keep_preferences(dialog);
     }
 
     fn show_vacation(self: &Rc<Self>, account: Account) {
@@ -3498,7 +3876,8 @@ impl MainWindow {
                 });
             }
             Effect::SmartMailboxes => {
-                self.listing.change(|screen| screen.smart_saved(&settings.smart_mailboxes));
+                self.listing
+                    .change(|screen| screen.smart_saved(&settings.smart_mailboxes));
             }
             Effect::Vips => {
                 for view in self.views() {
@@ -3512,7 +3891,8 @@ impl MainWindow {
                 self.refresh_counts();
             }
             Effect::Categories => {
-                self.listing.change(|screen| Some(screen.categories_changed()));
+                self.listing
+                    .change(|screen| Some(screen.categories_changed()));
             }
             Effect::Assistant => {
                 self.assistant.refresh();
@@ -3574,7 +3954,11 @@ impl MainWindow {
     /// Shows the Keyboard Shortcuts window. Its label line says Move to
     /// folder when every account files mail in folders.
     fn show_shortcuts(&self) {
-        let offers: Vec<Offers> = self.accounts().iter().map(|a| self.offers(a.id)).collect();
+        let offers: Vec<Offers> = self
+            .mail_accounts()
+            .iter()
+            .map(|a| self.offers(a.id))
+            .collect();
         shortcuts::dialog(Filing::of(offers)).present(Some(&self.window));
     }
 
@@ -3592,11 +3976,22 @@ impl MainWindow {
                 .core
                 .read(move |c| mailrs_store::services::load(c, id))
                 .await
-                .is_ok_and(|found| found.iter().any(|f| f.confirmed && f.kind == mailrs_store::services::ServiceKind::CalDav));
+                .is_ok_and(|found| {
+                    found.iter().any(|f| {
+                        f.confirmed && f.kind == mailrs_store::services::ServiceKind::CalDav
+                    })
+                });
             let done = Rc::clone(&win);
-            crate::ui::switch_jmap::present(&win.window, Rc::clone(&win.core), account, found, calendars, move |switched| {
-                done.switched_to_jmap(switched);
-            });
+            crate::ui::switch_jmap::present(
+                &win.window,
+                Rc::clone(&win.core),
+                account,
+                found,
+                calendars,
+                move |switched| {
+                    done.switched_to_jmap(switched);
+                },
+            );
         };
         glib::spawn_future_local(present);
     }
@@ -3622,7 +4017,11 @@ impl MainWindow {
         let win = Rc::clone(self);
         glib::spawn_future_local(async move {
             let id = account.id;
-            let failing = match win.core.read(move |c| mailrs_store::pop3::failing(c, id)).await {
+            let failing = match win
+                .core
+                .read(move |c| mailrs_store::pop3::failing(c, id))
+                .await
+            {
                 Ok(failing) => failing,
                 Err(err) => {
                     return tracing::warn!(account = id, %err, "could not read the messages that will not download");
@@ -3662,11 +4061,16 @@ impl MainWindow {
     }
 
     fn show_about(self: &Rc<Self>) {
+        // One About at a time: a second press finds it open already.
+        if self.about.borrow().is_some() {
+            return;
+        }
         let Some(app) = self.app.upgrade() else {
             return;
         };
         let kept_here = crate::offered::kept_here_lines(&self.accounts());
-        let about = crate::ui::about::About::new(app.can_update(), &self.core.store_path, &kept_here);
+        let about =
+            crate::ui::about::About::new(app.can_update(), &self.core.store_path, &kept_here);
         if let Some(state) = app.update_state() {
             about.show_update(&state);
         }
@@ -3722,7 +4126,8 @@ impl PressEffects for Pressing {
         {
             app.change_settings(Change::FlagColor(color));
         }
-        self.window.perform_from(targets, action, history, words, from);
+        self.window
+            .perform_from(targets, action, history, words, from);
     }
 
     fn erase(&self, targets: Vec<Target>) {
@@ -3758,7 +4163,10 @@ impl reveal::Waiting for Replying {
     }
 
     fn quotable(&self) -> bool {
-        self.0.conversation.read(OpenThread::quotable).unwrap_or(false)
+        self.0
+            .conversation
+            .read(OpenThread::quotable)
+            .unwrap_or(false)
     }
 
     fn sleep(&self, step: std::time::Duration) -> crate::wanted::Answer<'_, ()> {
@@ -3868,9 +4276,9 @@ fn still_there(mailbox: &Mailbox, data: &[(Account, Vec<Label>)]) -> bool {
             account_id,
             label_id,
             ..
-        } => data.iter().any(|(a, labels)| {
-            a.id == *account_id && labels.iter().any(|l| &l.id == label_id)
-        }),
+        } => data
+            .iter()
+            .any(|(a, labels)| a.id == *account_id && labels.iter().any(|l| &l.id == label_id)),
         _ => mailbox
             .account()
             .is_none_or(|id| data.iter().any(|(a, _)| a.id == id)),
@@ -3926,7 +4334,13 @@ mod tests {
             name: "Work".into(),
         };
         assert_eq!(
-            follows(&work, Offers { labels: false, ..Offers::EVERYTHING }),
+            follows(
+                &work,
+                Offers {
+                    labels: false,
+                    ..Offers::EVERYTHING
+                }
+            ),
             Some((7, "Work".to_string()))
         );
     }
@@ -3943,7 +4357,10 @@ mod tests {
 
     #[test]
     fn a_mailbox_that_names_no_server_mailbox_is_never_followed() {
-        let offers = Offers { labels: false, ..Offers::EVERYTHING };
+        let offers = Offers {
+            labels: false,
+            ..Offers::EVERYTHING
+        };
         let standard = Mailbox::Standard {
             account_id: 1,
             which: super::super::Standard::Inbox,
@@ -3999,7 +4416,10 @@ mod tests {
             assert!(!still_there(mailbox, &only_two), "{mailbox:?}");
         }
         let unlisted = vec![(account(1), vec![]), (account(2), vec![])];
-        assert!(!still_there(&work, &unlisted), "a label the account dropped");
+        assert!(
+            !still_there(&work, &unlisted),
+            "a label the account dropped"
+        );
     }
 
     #[test]

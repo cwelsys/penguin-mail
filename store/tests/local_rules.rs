@@ -13,8 +13,14 @@ use mailrs_store::services::{self, FoundService, Miss, ServiceKind};
 fn rule(id: &str, from: &str) -> Filter {
     Filter {
         id: Some(id.into()),
-        criteria: FilterCriteria { from: Some(from.into()), ..FilterCriteria::default() },
-        action: FilterAction { remove: vec![MailSet::Role(Role::Inbox)], ..FilterAction::default() },
+        criteria: FilterCriteria {
+            from: Some(from.into()),
+            ..FilterCriteria::default()
+        },
+        action: FilterAction {
+            remove: vec![MailSet::Role(Role::Inbox)],
+            ..FilterAction::default()
+        },
         ..Filter::default()
     }
 }
@@ -30,9 +36,17 @@ fn a_found_service_is_kept_with_its_user_and_whether_it_is_confirmed() {
         source: "table".into(),
     };
     services::save(&conn, a, &found).unwrap();
-    let moved = FoundService { url: "https://dav.example.net/".into(), confirmed: false, ..found.clone() };
+    let moved = FoundService {
+        url: "https://dav.example.net/".into(),
+        confirmed: false,
+        ..found.clone()
+    };
     services::save(&conn, a, &moved).unwrap();
-    assert_eq!(services::load(&conn, a).unwrap(), [moved], "a second save replaces the first");
+    assert_eq!(
+        services::load(&conn, a).unwrap(),
+        [moved],
+        "a second save replaces the first"
+    );
     services::remove(&conn, a, ServiceKind::CalDav).unwrap();
     assert!(services::load(&conn, a).unwrap().is_empty());
 }
@@ -45,10 +59,16 @@ fn why_a_service_was_not_found_is_kept_until_it_is_found() {
     services::save_miss(&conn, a, ServiceKind::CardDav, Some(Miss::Unreachable)).unwrap();
     assert_eq!(
         services::all_misses(&conn).unwrap(),
-        [(a, ServiceKind::CalDav, Miss::Refused), (a, ServiceKind::CardDav, Miss::Unreachable)]
+        [
+            (a, ServiceKind::CalDav, Miss::Refused),
+            (a, ServiceKind::CardDav, Miss::Unreachable)
+        ]
     );
     services::save_miss(&conn, a, ServiceKind::CalDav, None).unwrap();
-    assert_eq!(services::all_misses(&conn).unwrap(), [(a, ServiceKind::CardDav, Miss::Unreachable)]);
+    assert_eq!(
+        services::all_misses(&conn).unwrap(),
+        [(a, ServiceKind::CardDav, Miss::Unreachable)]
+    );
 }
 
 #[test]
@@ -62,10 +82,17 @@ fn local_rules_list_in_the_order_they_were_made() {
     let (conn, a) = db();
     local_rules::add(&conn, a, &rule("local-b", "b@example.com")).unwrap();
     local_rules::add(&conn, a, &rule("local-a", "a@example.com")).unwrap();
-    let ids: Vec<Option<String>> = local_rules::list(&conn, a).unwrap().into_iter().map(|f| f.id).collect();
+    let ids: Vec<Option<String>> = local_rules::list(&conn, a)
+        .unwrap()
+        .into_iter()
+        .map(|f| f.id)
+        .collect();
     assert_eq!(ids, [Some("local-b".into()), Some("local-a".into())]);
     assert!(local_rules::remove(&conn, a, "local-b").unwrap());
-    assert!(!local_rules::remove(&conn, a, "local-b").unwrap(), "a rule already gone reports so");
+    assert!(
+        !local_rules::remove(&conn, a, "local-b").unwrap(),
+        "a rule already gone reports so"
+    );
     assert_eq!(local_rules::list(&conn, a).unwrap().len(), 1);
 }
 
@@ -73,7 +100,10 @@ fn local_rules_list_in_the_order_they_were_made() {
 fn inbox(conn: &rusqlite::Connection, a: i64, dates: &[(&str, i64)]) {
     let changes: Vec<Change> = dates
         .iter()
-        .map(|(id, at)| Change::Upsert { meta: Box::new(meta(a, id, id, *at, &["INBOX"])), generation: 1 })
+        .map(|(id, at)| Change::Upsert {
+            meta: Box::new(meta(a, id, id, *at, &["INBOX"])),
+            generation: 1,
+        })
         .collect();
     messages::apply(conn, a, &changes).unwrap();
 }
@@ -82,10 +112,25 @@ fn inbox(conn: &rusqlite::Connection, a: i64, dates: &[(&str, i64)]) {
 fn candidates_start_at_the_watermark_oldest_first() {
     let (conn, a) = db();
     let hour = OVERLAP;
-    inbox(&conn, a, &[("old", 1_000), ("new-2", 10 * hour + 2), ("new-1", 10 * hour + 1)]);
-    assert!(local_rules::candidates(&conn, a, 100).unwrap().is_empty(), "no watermark, no rules have run");
+    inbox(
+        &conn,
+        a,
+        &[
+            ("old", 1_000),
+            ("new-2", 10 * hour + 2),
+            ("new-1", 10 * hour + 1),
+        ],
+    );
+    assert!(
+        local_rules::candidates(&conn, a, 100).unwrap().is_empty(),
+        "no watermark, no rules have run"
+    );
     local_rules::start_running(&conn, a, 10 * hour).unwrap();
-    let ids: Vec<String> = local_rules::candidates(&conn, a, 100).unwrap().into_iter().map(|m| m.id).collect();
+    let ids: Vec<String> = local_rules::candidates(&conn, a, 100)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
     assert_eq!(ids, ["new-1", "new-2"]);
 }
 
@@ -97,7 +142,11 @@ fn a_burst_in_one_second_is_offered_once_each() {
     local_rules::mark_ran(&conn, a, &[("a".into(), 5_000)]).unwrap();
     // "c" arrives later in the same second the watermark reached.
     inbox(&conn, a, &[("c", 5_000)]);
-    let ids: Vec<String> = local_rules::candidates(&conn, a, 100).unwrap().into_iter().map(|m| m.id).collect();
+    let ids: Vec<String> = local_rules::candidates(&conn, a, 100)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
     assert_eq!(ids, ["b", "c"]);
 }
 
@@ -108,10 +157,17 @@ fn the_ran_set_keeps_only_the_last_hour() {
     local_rules::mark_ran(&conn, a, &[("early".into(), 1_000)]).unwrap();
     local_rules::mark_ran(&conn, a, &[("late".into(), 1_000 + 2 * OVERLAP)]).unwrap();
     let kept: i64 = conn
-        .query_row("SELECT COUNT(*) FROM local_rules_ran WHERE account_id = ?1", [a], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM local_rules_ran WHERE account_id = ?1",
+            [a],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(kept, 1);
-    assert_eq!(local_rules::ran_until(&conn, a).unwrap(), Some(1_000 + 2 * OVERLAP));
+    assert_eq!(
+        local_rules::ran_until(&conn, a).unwrap(),
+        Some(1_000 + 2 * OVERLAP)
+    );
 }
 
 #[test]
@@ -129,7 +185,11 @@ fn replacing_a_local_rule_keeps_its_place_in_the_order() {
         local_rules::add(&conn, a, &rule(id, from)).unwrap();
     }
     assert!(local_rules::replace(&conn, a, "local-2", &rule("local-9", "z@")).unwrap());
-    let ids: Vec<_> = local_rules::list(&conn, a).unwrap().into_iter().filter_map(|f| f.id).collect();
+    let ids: Vec<_> = local_rules::list(&conn, a)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| f.id)
+        .collect();
     assert_eq!(ids, ["local-1", "local-9", "local-3"]);
     assert!(!local_rules::replace(&conn, a, "local-missing", &rule("local-8", "y@")).unwrap());
 }

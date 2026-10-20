@@ -141,7 +141,8 @@ mod tests {
 
     #[test]
     fn a_refusal_in_googles_json_says_googles_message() {
-        let body = r#"{"error":{"code":400,"message":"Invalid label name","status":"INVALID_ARGUMENT"}}"#;
+        let body =
+            r#"{"error":{"code":400,"message":"Invalid label name","status":"INVALID_ARGUMENT"}}"#;
         let err = GmailError::Http {
             status: 400,
             body: body.into(),

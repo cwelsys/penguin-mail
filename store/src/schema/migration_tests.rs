@@ -19,7 +19,10 @@ const TO_MAILBOXES: &str = include_str!("26-mailboxes.sql");
 fn put_body_before_57(conn: &Connection, message_id: &str, body: &mailrs_domain::MessageBody) {
     conn.execute_batch("ALTER TABLE bodies ADD COLUMN receipt_to TEXT; ALTER TABLE bodies ADD COLUMN read_report TEXT;").unwrap();
     crate::bodies::put_body(conn, 1, message_id, body, 1).unwrap();
-    conn.execute_batch("ALTER TABLE bodies DROP COLUMN receipt_to; ALTER TABLE bodies DROP COLUMN read_report;").unwrap();
+    conn.execute_batch(
+        "ALTER TABLE bodies DROP COLUMN receipt_to; ALTER TABLE bodies DROP COLUMN read_report;",
+    )
+    .unwrap();
 }
 
 /// Two accounts. Messages carry each role label, both keyword labels,
@@ -462,7 +465,6 @@ fn a_body_decoded_in_the_wrong_charset_is_fetched_again() {
 fn an_invitation_read_without_its_calendar_is_fetched_again() {
     use mailrs_domain::{Attachment, MessageBody};
 
-
     let ics = |mime: &str| Attachment {
         part_id: "1".into(),
         filename: "invite.ics".into(),
@@ -505,7 +507,13 @@ fn an_invitation_read_without_its_calendar_is_fetched_again() {
     let conn = open_with(&path, &MIGRATIONS[..28]).unwrap();
     // Read with plain SQL: `get_body` selects columns migration 57 adds.
     let kept = |id: &str| -> bool {
-        conn.query_row("SELECT COUNT(*) FROM bodies WHERE message_id = ?1", [id], |r| r.get::<_, i64>(0)).unwrap() > 0
+        conn.query_row(
+            "SELECT COUNT(*) FROM bodies WHERE message_id = ?1",
+            [id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
     };
     assert!(!kept("missed"));
     assert!(kept("read"));
@@ -609,18 +617,50 @@ fn a_0_3_0_store_with_mail_keeps_every_row_through_every_migration() {
 
     let conn = open_with(&path, MIGRATIONS).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len() as i64);
-    assert_eq!(strings(&conn, "SELECT email FROM accounts ORDER BY id", []), ["me@gmail.com", "you@gmail.com"]);
-    assert_eq!(strings(&conn, "SELECT id FROM messages ORDER BY id", []), ["a", "b", "c"]);
-    assert_eq!(strings(&conn, "SELECT subject FROM messages ORDER BY id", []), ["One", "Two", "Three"]);
-    assert_eq!(strings(&conn, "SELECT text FROM bodies ORDER BY message_id", []), ["first", "third"]);
-    assert_eq!(strings(&conn, "SELECT message_id FROM remote_refs ORDER BY message_id", []), ["a", "b", "c"]);
-    assert_eq!(strings(&conn, "SELECT summary FROM invitations", []), ["Lunch"]);
-    assert_eq!(strings(&conn, "SELECT provider FROM accounts ORDER BY id", []), ["gmail", "gmail"]);
+    assert_eq!(
+        strings(&conn, "SELECT email FROM accounts ORDER BY id", []),
+        ["me@gmail.com", "you@gmail.com"]
+    );
+    assert_eq!(
+        strings(&conn, "SELECT id FROM messages ORDER BY id", []),
+        ["a", "b", "c"]
+    );
+    assert_eq!(
+        strings(&conn, "SELECT subject FROM messages ORDER BY id", []),
+        ["One", "Two", "Three"]
+    );
+    assert_eq!(
+        strings(&conn, "SELECT text FROM bodies ORDER BY message_id", []),
+        ["first", "third"]
+    );
+    assert_eq!(
+        strings(
+            &conn,
+            "SELECT message_id FROM remote_refs ORDER BY message_id",
+            []
+        ),
+        ["a", "b", "c"]
+    );
+    assert_eq!(
+        strings(&conn, "SELECT summary FROM invitations", []),
+        ["Lunch"]
+    );
+    assert_eq!(
+        strings(&conn, "SELECT provider FROM accounts ORDER BY id", []),
+        ["gmail", "gmail"]
+    );
     // One copy is taken before the climb, named for the version it ends
     // on, and it still holds the 0.3.0 mail.
-    let copy = Connection::open(dir.path().join(format!("mail.db.before-{}", MIGRATIONS.len()))).unwrap();
+    let copy = Connection::open(
+        dir.path()
+            .join(format!("mail.db.before-{}", MIGRATIONS.len())),
+    )
+    .unwrap();
     assert_eq!(schema_version(&copy).unwrap(), 31);
-    assert_eq!(strings(&copy, "SELECT id FROM messages ORDER BY id", []), ["a", "b", "c"]);
+    assert_eq!(
+        strings(&copy, "SELECT id FROM messages ORDER BY id", []),
+        ["a", "b", "c"]
+    );
 }
 
 /// Migration 32 adds IMAP's columns and table. A Gmail account from
@@ -674,8 +714,7 @@ fn migration_32_indexes_remote_refs_by_location() {
     assert!(
         indexes
             .iter()
-            .any(|index| indexed_columns(index)
-                == ["account_id", "mailbox", "uidvalidity", "uid"]),
+            .any(|index| indexed_columns(index) == ["account_id", "mailbox", "uidvalidity", "uid"]),
         "remote_refs has no index on (account_id, mailbox, uidvalidity, uid): {indexes:?}"
     );
 }
@@ -707,7 +746,8 @@ fn the_location_index_leaves_gmail_rows_out_and_still_serves_a_listing() {
         .collect::<rusqlite::Result<_>>()
         .unwrap();
     assert!(
-        plan.iter().any(|step| step.contains("remote_refs_by_location")),
+        plan.iter()
+            .any(|step| step.contains("remote_refs_by_location")),
         "{plan:?}"
     );
 }
@@ -734,15 +774,20 @@ fn a_store_from_before_the_calendar_opens_with_no_calendars() {
     assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len() as i64);
     for table in ["calendars", "events", "calendar_changes"] {
         let count: i64 = conn
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, 0, "{table}");
     }
-    conn.execute("DELETE FROM accounts WHERE id = 2", []).unwrap();
+    conn.execute("DELETE FROM accounts WHERE id = 2", [])
+        .unwrap();
     let servers: i64 = conn
-        .query_row("SELECT COUNT(*) FROM account_servers WHERE account_id = 2", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM account_servers WHERE account_id = 2",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(servers, 0);
 }
@@ -801,10 +846,16 @@ fn migration_39_reads_every_calendar_whole_again() {
     let conn = open_with(&path, MIGRATIONS).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len() as i64);
     let token: Option<String> = conn
-        .query_row("SELECT sync_token FROM calendars WHERE id = 'primary'", [], |row| row.get(0))
+        .query_row(
+            "SELECT sync_token FROM calendars WHERE id = 'primary'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(token, None);
-    let events: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0)).unwrap();
+    let events: i64 = conn
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(events, 1);
 }
 
@@ -831,10 +882,16 @@ fn migration_46_leaves_attachments_unknown_until_a_whole_read() {
     let conn = open_with(&path, &MIGRATIONS[..46]).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), 46);
     let token: Option<String> = conn
-        .query_row("SELECT sync_token FROM calendars WHERE id = 'primary'", [], |row| row.get(0))
+        .query_row(
+            "SELECT sync_token FROM calendars WHERE id = 'primary'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(token, None);
-    let event = crate::calendar::event(&conn, 1, "primary", "a").unwrap().unwrap();
+    let event = crate::calendar::event(&conn, 1, "primary", "a")
+        .unwrap()
+        .unwrap();
     assert_eq!(event.attachments, None);
 }
 
@@ -878,7 +935,11 @@ fn migration_48_adds_the_services_and_rules_tables() {
     let conn = open_with(&path, &MIGRATIONS[..48]).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), 48);
     let ran: Option<i64> = conn
-        .query_row("SELECT rules_ran_until FROM accounts WHERE id = 2", [], |row| row.get(0))
+        .query_row(
+            "SELECT rules_ran_until FROM accounts WHERE id = 2",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(ran, None, "an old account has run no local rules yet");
     conn.execute_batch(
@@ -888,10 +949,18 @@ fn migration_48_adds_the_services_and_rules_tables() {
          INSERT INTO rule_changes (account_id, kind, filter_id) VALUES (2, 'delete', 'r1');",
     )
     .unwrap();
-    conn.execute("DELETE FROM accounts WHERE id = 2", []).unwrap();
-    for table in ["account_services", "local_rules", "local_rules_ran", "rule_changes"] {
+    conn.execute("DELETE FROM accounts WHERE id = 2", [])
+        .unwrap();
+    for table in [
+        "account_services",
+        "local_rules",
+        "local_rules_ran",
+        "rule_changes",
+    ] {
         let left: i64 = conn
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(left, 0, "{table}");
     }
@@ -917,13 +986,19 @@ fn migration_49_adds_the_pop3_tables_and_columns() {
     let conn = open_with(&path, &MIGRATIONS[..49]).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), 49);
     let (mode, days): (String, Option<i64>) = conn
-        .query_row("SELECT pop3_remove, pop3_remove_days FROM accounts WHERE id = 2", [], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(
+            "SELECT pop3_remove, pop3_remove_days FROM accounts WHERE id = 2",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .unwrap();
     assert_eq!((mode.as_str(), days), ("never", None));
     let kept: String = conn
-        .query_row("SELECT host FROM account_servers WHERE account_id = 2 AND role = 'imap'", [], |row| row.get(0))
+        .query_row(
+            "SELECT host FROM account_servers WHERE account_id = 2 AND role = 'imap'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(kept, "imap.fastmail.com");
     conn.execute_batch(
@@ -934,11 +1009,25 @@ fn migration_49_adds_the_pop3_tables_and_columns() {
          INSERT INTO local_messages (account_id, message_id, raw) VALUES (2, 'pop3/u1', X'00');",
     )
     .unwrap();
-    assert!(conn.execute("UPDATE accounts SET pop3_remove = 'sometimes' WHERE id = 2", []).is_err());
-    conn.execute("DELETE FROM accounts WHERE id = 2", []).unwrap();
-    for table in ["pop3_seen", "pop3_failures", "local_messages", "account_servers"] {
+    assert!(
+        conn.execute(
+            "UPDATE accounts SET pop3_remove = 'sometimes' WHERE id = 2",
+            []
+        )
+        .is_err()
+    );
+    conn.execute("DELETE FROM accounts WHERE id = 2", [])
+        .unwrap();
+    for table in [
+        "pop3_seen",
+        "pop3_failures",
+        "local_messages",
+        "account_servers",
+    ] {
         let left: i64 = conn
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(left, 0, "{table}");
     }
@@ -965,7 +1054,12 @@ fn migration_50_counts_an_account_with_downloaded_mail_as_finished() {
     let conn = open_with(&path, &MIGRATIONS[..50]).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), 50);
     let finished = |id: i64| -> i64 {
-        conn.query_row("SELECT pop3_first_check_done FROM accounts WHERE id = ?1", [id], |row| row.get(0)).unwrap()
+        conn.query_row(
+            "SELECT pop3_first_check_done FROM accounts WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
     };
     assert_eq!(finished(2), 1, "it has downloaded mail already");
     assert_eq!(finished(3), 0, "it has downloaded nothing");
@@ -998,7 +1092,10 @@ fn migration_51_names_the_message_each_downloaded_uidl_brought() {
         .unwrap();
     assert_eq!(
         named,
-        [("a/b".to_string(), "pop3/a/b".to_string()), ("u1".to_string(), "pop3/u1".to_string())]
+        [
+            ("a/b".to_string(), "pop3/a/b".to_string()),
+            ("u1".to_string(), "pop3/u1".to_string())
+        ]
     );
 }
 
@@ -1018,15 +1115,21 @@ fn migration_53_keeps_why_a_server_was_not_found() {
 
     let conn = open_with(&path, &MIGRATIONS[..53]).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), 53);
-    conn.execute("INSERT INTO service_misses (account_id, service, reason) VALUES (2, 'caldav', 'refused')", [])
-        .unwrap();
+    conn.execute(
+        "INSERT INTO service_misses (account_id, service, reason) VALUES (2, 'caldav', 'refused')",
+        [],
+    )
+    .unwrap();
     assert!(
         conn.execute("INSERT INTO service_misses (account_id, service, reason) VALUES (2, 'carddav', 'tired')", [])
             .is_err(),
         "a reason is one of the codes"
     );
-    conn.execute("DELETE FROM accounts WHERE id = 2", []).unwrap();
-    let left: i64 = conn.query_row("SELECT count(*) FROM service_misses", [], |row| row.get(0)).unwrap();
+    conn.execute("DELETE FROM accounts WHERE id = 2", [])
+        .unwrap();
+    let left: i64 = conn
+        .query_row("SELECT count(*) FROM service_misses", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(left, 0, "the rows go with the account");
 }
 
@@ -1054,9 +1157,15 @@ fn migration_54_keeps_the_answers_to_saving_new_recipients() {
     };
     offer("ana@example.pt", "declined").unwrap();
     offer("rui@example.pt", "saved").unwrap();
-    assert!(offer("eva@example.pt", "maybe").is_err(), "an answer is one of the codes");
-    conn.execute("DELETE FROM accounts WHERE id = 2", []).unwrap();
-    let left: i64 = conn.query_row("SELECT count(*) FROM contact_offers", [], |row| row.get(0)).unwrap();
+    assert!(
+        offer("eva@example.pt", "maybe").is_err(),
+        "an answer is one of the codes"
+    );
+    conn.execute("DELETE FROM accounts WHERE id = 2", [])
+        .unwrap();
+    let left: i64 = conn
+        .query_row("SELECT count(*) FROM contact_offers", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(left, 0, "the rows go with the account");
 }
 
@@ -1088,13 +1197,20 @@ fn migration_52_turns_stored_over_size_words_into_a_reason() {
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap();
-    let row = |uidl: &str, reason: &str, words: &str| (uidl.to_string(), reason.to_string(), words.to_string());
+    let row = |uidl: &str, reason: &str, words: &str| {
+        (uidl.to_string(), reason.to_string(), words.to_string())
+    };
     assert_eq!(
         rows,
-        [row("big", "too_large", ""), row("grande", "too_large", ""), row("locked", "refused", "mailbox locked")]
+        [
+            row("big", "too_large", ""),
+            row("grande", "too_large", ""),
+            row("locked", "refused", "mailbox locked")
+        ]
     );
     assert!(
-        conn.execute("UPDATE pop3_failures SET reason = 'tired'", []).is_err(),
+        conn.execute("UPDATE pop3_failures SET reason = 'tired'", [])
+            .is_err(),
         "a reason is one of the codes"
     );
 }
@@ -1114,9 +1230,18 @@ fn migration_56_adds_jmap_accounts() {
              VALUES (3, 'https://api.fastmail.com/jmap/session', 'bearer', NULL, 1, '[\"urn:ietf:params:jmap:mail\"]');",
     )
     .unwrap();
-    assert!(conn.execute("UPDATE jmap_accounts SET auth = 'digest' WHERE account_id = 3", []).is_err());
-    conn.execute("DELETE FROM accounts WHERE id = 3", []).unwrap();
-    let left: i64 = conn.query_row("SELECT COUNT(*) FROM jmap_accounts", [], |r| r.get(0)).unwrap();
+    assert!(
+        conn.execute(
+            "UPDATE jmap_accounts SET auth = 'digest' WHERE account_id = 3",
+            []
+        )
+        .is_err()
+    );
+    conn.execute("DELETE FROM accounts WHERE id = 3", [])
+        .unwrap();
+    let left: i64 = conn
+        .query_row("SELECT COUNT(*) FROM jmap_accounts", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(left, 0);
 }
 
@@ -1135,7 +1260,13 @@ fn migration_58_takes_oauth_jmap_accounts() {
     drop(conn);
     let conn = open_with(&path, MIGRATIONS).unwrap();
     assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len() as i64);
-    let auth: String = conn.query_row("SELECT auth FROM jmap_accounts WHERE account_id = 4", [], |r| r.get(0)).unwrap();
+    let auth: String = conn
+        .query_row(
+            "SELECT auth FROM jmap_accounts WHERE account_id = 4",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(auth, "basic");
     conn.execute(
         "UPDATE jmap_accounts SET auth = 'oauth', oauth_client_id = 'c1', oauth_token_url = 'https://s/token' WHERE account_id = 4",
@@ -1159,7 +1290,10 @@ fn migration_59_finds_a_message_by_its_message_id_through_an_index() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(plan.iter().any(|step| step.contains("messages_by_msgid")), "{plan:?}");
+    assert!(
+        plan.iter().any(|step| step.contains("messages_by_msgid")),
+        "{plan:?}"
+    );
 }
 
 /// Migration 60 indexes events by account and lower-case UID, so an
@@ -1180,7 +1314,10 @@ fn migration_60_finds_an_event_by_its_uid_through_an_index() {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert!(plan.iter().any(|step| step.contains("events_by_uid")), "{plan:?}");
+        assert!(
+            plan.iter().any(|step| step.contains("events_by_uid")),
+            "{plan:?}"
+        );
     }
 }
 
@@ -1201,14 +1338,23 @@ fn migration_61_keeps_the_correspondents_tally_in_the_store() {
     drop(conn);
     let conn = open_with(&path, MIGRATIONS).unwrap();
     let marks = |conn: &Connection| -> (bool, i64) {
-        conn.query_row("SELECT stale, counted_row FROM contact_marks", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+        conn.query_row("SELECT stale, counted_row FROM contact_marks", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap()
     };
     assert_eq!(marks(&conn), (true, 0));
     crate::contacts::catch_up(&conn).unwrap();
     assert_eq!(marks(&conn), (false, 1));
-    let kept: i64 = conn.query_row("SELECT COUNT(*) FROM correspondents", [], |r| r.get(0)).unwrap();
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM correspondents", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(kept, 1);
-    conn.execute("UPDATE messages SET from_addr = 'bo@example.org' WHERE id = 'm1'", []).unwrap();
+    conn.execute(
+        "UPDATE messages SET from_addr = 'bo@example.org' WHERE id = 'm1'",
+        [],
+    )
+    .unwrap();
     assert_eq!(marks(&conn), (true, 0));
 }
 
@@ -1231,7 +1377,10 @@ fn migration_64_marks_the_tally_stale_only_for_a_move_into_or_out_of_sent() {
     )
     .unwrap();
     let marks = |conn: &Connection| -> (bool, i64) {
-        conn.query_row("SELECT stale, counted_row FROM contact_marks", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+        conn.query_row("SELECT stale, counted_row FROM contact_marks", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap()
     };
     let move_to = |id: &str| {
         conn.execute(
@@ -1243,7 +1392,11 @@ fn migration_64_marks_the_tally_stale_only_for_a_move_into_or_out_of_sent() {
     crate::contacts::catch_up(&conn).unwrap();
     assert_eq!(marks(&conn), (false, 1));
     move_to("ARCHIVE");
-    assert_eq!(marks(&conn), (false, 1), "a move between two folders that are not Sent");
+    assert_eq!(
+        marks(&conn),
+        (false, 1),
+        "a move between two folders that are not Sent"
+    );
     move_to("SENT");
     assert_eq!(marks(&conn), (true, 0), "a move into Sent");
 }
@@ -1270,7 +1423,9 @@ fn a_store_put_back_after_a_failed_migration_recounts_its_correspondents() {
 
     let back = open_with(&path, MIGRATIONS).unwrap();
     let marks: (bool, i64) = back
-        .query_row("SELECT stale, counted_row FROM contact_marks", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row("SELECT stale, counted_row FROM contact_marks", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .unwrap();
     assert_eq!(marks, (true, 0));
 }

@@ -15,8 +15,8 @@ use crate::passwords::{MemoryPasswords, PasswordStore};
 use crate::services::{CalDav, CardDav, SieveRules};
 use crate::tests::{ServedBy, imap_harness};
 use crate::{
-    AccountSettings, AnyAutoReply, AnyCalendar, AnyContacts, AnyDav, AnyRules, AnySieve, ContactBook,
-    ContactsService, Permitted, Replaced, RulesPlace, connect_imap,
+    AccountSettings, AnyAutoReply, AnyCalendar, AnyContacts, AnyDav, AnyRules, AnySieve,
+    ContactBook, ContactsService, Permitted, Replaced, RulesPlace, connect_imap,
 };
 
 fn found(kind: ServiceKind, url: &str, confirmed: bool) -> FoundService {
@@ -32,13 +32,19 @@ fn found(kind: ServiceKind, url: &str, confirmed: bool) -> FoundService {
 /// An IMAP account saved with servers and a password, as sign-in leaves it.
 async fn saved(
     rows: Vec<FoundService>,
-) -> (mailrs_store::Db, mailrs_domain::Account, Arc<MemoryPasswords>, tempfile::TempDir) {
+) -> (
+    mailrs_store::Db,
+    mailrs_domain::Account,
+    Arc<MemoryPasswords>,
+    tempfile::TempDir,
+) {
     let dir = tempfile::tempdir().unwrap();
     let db = mailrs_store::Db::open(&dir.path().join("mail.db")).unwrap();
     let account = db
         .write(move |c| {
-            let id = mailrs_store::accounts::insert_imap_account(c, "me@example.com", "Example", 0)?
-                .expect("a new account");
+            let id =
+                mailrs_store::accounts::insert_imap_account(c, "me@example.com", "Example", 0)?
+                    .expect("a new account");
             let tls = |host: &str, port| mailrs_discover::Server {
                 host: host.into(),
                 port,
@@ -72,8 +78,13 @@ async fn an_account_with_no_servers_found_keeps_rules_here_and_has_no_reply() {
     let (db, account, passwords, _dir) = saved(Vec::new()).await;
     let services = connect_imap(&db, passwords, &account, 30).await.unwrap();
     assert!(matches!(services.rules, Some(AnyRules::Local(_))));
-    assert_eq!(services.rules.as_ref().map(AnyRules::place), Some(RulesPlace::ThisComputer));
-    assert!(services.auto_reply.is_none() && services.calendar.is_none() && services.contacts.is_none());
+    assert_eq!(
+        services.rules.as_ref().map(AnyRules::place),
+        Some(RulesPlace::ThisComputer)
+    );
+    assert!(
+        services.auto_reply.is_none() && services.calendar.is_none() && services.contacts.is_none()
+    );
     let offers = services.offers();
     assert!(offers.rules && !offers.auto_reply && !offers.calendar);
 }
@@ -91,15 +102,24 @@ async fn confirmed_servers_serve_the_calendar_contacts_rules_and_reply() {
     assert!(matches!(services.contacts, Some(AnyContacts::Dav(_))));
     assert!(matches!(services.rules, Some(AnyRules::Sieve(_))));
     assert!(matches!(services.auto_reply, Some(AnyAutoReply::Sieve(_))));
-    assert_eq!(services.rules.as_ref().map(AnyRules::place), Some(RulesPlace::Server));
+    assert_eq!(
+        services.rules.as_ref().map(AnyRules::place),
+        Some(RulesPlace::Server)
+    );
     let offers = services.offers();
-    assert!(offers.calendar && !offers.event_files && !offers.moves_events && !offers.calendar_list);
+    assert!(
+        offers.calendar && !offers.event_files && !offers.moves_events && !offers.calendar_list
+    );
 }
 
 #[tokio::test]
 async fn a_server_nobody_confirmed_is_not_used() {
-    let (db, account, passwords, _dir) =
-        saved(vec![found(ServiceKind::CalDav, "https://dav.elsewhere.example/", false)]).await;
+    let (db, account, passwords, _dir) = saved(vec![found(
+        ServiceKind::CalDav,
+        "https://dav.elsewhere.example/",
+        false,
+    )])
+    .await;
     let services = connect_imap(&db, passwords, &account, 30).await.unwrap();
     assert!(
         services.calendar.is_none(),
@@ -118,28 +138,42 @@ async fn the_local_copy_reads_a_caldav_calendar_and_sends_an_edit_back() {
          DTEND:20261006T130000Z\r\nSUMMARY:Lunch\r\nX-KEEP:yes\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
     );
     let mail = h.sync.services().mail.clone();
-    let services = h.sync.services().clone().with_calendar(AnyCalendar::Dav(CalDav::new(
-        Arc::new(AnyDav::from(Arc::clone(&dav))),
-        mail,
-        vec!["me@example.com".into()],
-    )));
+    let services = h
+        .sync
+        .services()
+        .clone()
+        .with_calendar(AnyCalendar::Dav(CalDav::new(
+            Arc::new(AnyDav::from(Arc::clone(&dav))),
+            mail,
+            vec!["me@example.com".into()],
+        )));
     let accounts = Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services));
     let copy = CalendarCopy::new(accounts, h.db.clone());
-    copy.refresh(h.account_id, crate::now_millis()).await.unwrap();
-    let account_id = h.account_id;
-    let stored = h
-        .db
-        .read(move |c| mailrs_store::calendar::find_event(c, account_id, "lunch"))
-        .await
-        .unwrap()
-        .expect("read into the copy");
-    assert_eq!(stored.title, "Lunch");
-    copy.save(h.account_id, mailrs_domain::calendar::Event { title: "Lunch, moved".into(), ..stored })
+    copy.refresh(h.account_id, crate::now_millis())
         .await
         .unwrap();
+    let account_id = h.account_id;
+    let stored =
+        h.db.read(move |c| mailrs_store::calendar::find_event(c, account_id, "lunch"))
+            .await
+            .unwrap()
+            .expect("read into the copy");
+    assert_eq!(stored.title, "Lunch");
+    copy.save(
+        h.account_id,
+        mailrs_domain::calendar::Event {
+            title: "Lunch, moved".into(),
+            ..stored
+        },
+    )
+    .await
+    .unwrap();
     copy.send(h.account_id).await.unwrap();
     let body = dav.body("/cal/work/lunch.ics").unwrap();
-    assert!(body.contains("SUMMARY:Lunch\\, moved") && body.contains("X-KEEP:yes"), "{body}");
+    assert!(
+        body.contains("SUMMARY:Lunch\\, moved") && body.contains("X-KEEP:yes"),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -156,8 +190,15 @@ async fn a_lost_token_reads_the_calendar_whole_once_and_doubles_nothing() {
         .sync
         .services()
         .clone()
-        .with_calendar(AnyCalendar::Dav(CalDav::new(Arc::new(AnyDav::from(Arc::clone(&dav))), mail, vec![])));
-    let copy = CalendarCopy::new(Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)), h.db.clone());
+        .with_calendar(AnyCalendar::Dav(CalDav::new(
+            Arc::new(AnyDav::from(Arc::clone(&dav))),
+            mail,
+            vec![],
+        )));
+    let copy = CalendarCopy::new(
+        Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)),
+        h.db.clone(),
+    );
     let now = crate::now_millis();
     copy.refresh(h.account_id, now).await.unwrap();
     dav.remove_resource("/cal/work/a.ics");
@@ -166,7 +207,10 @@ async fn a_lost_token_reads_the_calendar_whole_once_and_doubles_nothing() {
     copy.refresh(h.account_id, now + 120_000).await.unwrap();
     let account_id = h.account_id;
     assert!(
-        h.db.read(move |c| mailrs_store::calendar::find_event(c, account_id, "a")).await.unwrap().is_none()
+        h.db.read(move |c| mailrs_store::calendar::find_event(c, account_id, "a"))
+            .await
+            .unwrap()
+            .is_none()
     );
 }
 
@@ -175,14 +219,26 @@ async fn an_address_book_that_came_reads_the_contacts_whole() {
     let h = imap_harness().await;
     let dav = Arc::new(FakeDav::new());
     dav.add_collection("/card/default/", Kind::AddressBook, "Contacts", None);
-    dav.put_resource("/card/default/a.vcf", "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ana\r\nEMAIL:ana@example.pt\r\nEND:VCARD\r\n");
-    let services = h.sync.services().clone().with_contacts(AnyContacts::Dav(CardDav::new(Arc::new(AnyDav::from(Arc::clone(&dav))))));
+    dav.put_resource(
+        "/card/default/a.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ana\r\nEMAIL:ana@example.pt\r\nEND:VCARD\r\n",
+    );
+    let services = h
+        .sync
+        .services()
+        .clone()
+        .with_contacts(AnyContacts::Dav(CardDav::new(Arc::new(AnyDav::from(
+            Arc::clone(&dav),
+        )))));
     let accounts = Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services));
     let photos = tempfile::tempdir().unwrap();
     let book = ContactBook::new(accounts, h.db.clone(), photos.path().to_path_buf());
     book.refresh(h.account_id).await.unwrap();
     dav.add_collection("/card/work/", Kind::AddressBook, "Work", None);
-    dav.put_resource("/card/work/b.vcf", "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Bruno\r\nEMAIL:bruno@example.org\r\nEND:VCARD\r\n");
+    dav.put_resource(
+        "/card/work/b.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Bruno\r\nEMAIL:bruno@example.org\r\nEND:VCARD\r\n",
+    );
     let Permitted::Done(refreshed) = book.refresh(h.account_id).await.unwrap() else {
         panic!("the contacts were refused");
     };
@@ -195,20 +251,36 @@ async fn the_settings_ask_before_replacing_a_script_and_go_ahead_after_a_yes() {
     let sieve = Arc::new(FakeSieve::new("fileinto vacation imap4flags"));
     sieve.put_elsewhere("mine", "keep;\n", true);
     let imap = h.sync.services().mail.clone();
-    let rules = SieveRules::new(Arc::new(AnySieve::from(Arc::clone(&sieve))), imap, "me@example.com".into(), "Example".into());
+    let rules = SieveRules::new(
+        Arc::new(AnySieve::from(Arc::clone(&sieve))),
+        imap,
+        "me@example.com".into(),
+        "Example".into(),
+    );
     let services = h
         .sync
         .services()
         .clone()
         .with_rules(AnyRules::Sieve(rules.clone()))
         .with_auto_reply(AnyAutoReply::Sieve(rules));
-    let settings =
-        AccountSettings::new(Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)), h.db.clone());
-    let refused = settings.add_rule(h.account_id, Filter::block("pest@example.com")).await.unwrap_err();
-    assert!(matches!(refused, crate::SyncError::Backend(crate::BackendError::WouldReplace { .. })));
+    let settings = AccountSettings::new(
+        Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)),
+        h.db.clone(),
+    );
+    let refused = settings
+        .add_rule(h.account_id, Filter::block("pest@example.com"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        refused,
+        crate::SyncError::Backend(crate::BackendError::WouldReplace { .. })
+    ));
     settings.take_over_rules(h.account_id).await.unwrap();
     assert!(matches!(
-        settings.add_rule(h.account_id, Filter::block("pest@example.com")).await.unwrap(),
+        settings
+            .add_rule(h.account_id, Filter::block("pest@example.com"))
+            .await
+            .unwrap(),
         Permitted::Done(_)
     ));
 }
@@ -218,23 +290,44 @@ async fn an_edit_through_the_settings_keeps_its_place_on_a_sieve_server() {
     let h = imap_harness().await;
     let sieve = Arc::new(FakeSieve::new("fileinto vacation imap4flags"));
     let imap = h.sync.services().mail.clone();
-    let rules = SieveRules::new(Arc::new(AnySieve::from(Arc::clone(&sieve))), imap, "me@example.com".into(), "Example".into());
+    let rules = SieveRules::new(
+        Arc::new(AnySieve::from(Arc::clone(&sieve))),
+        imap,
+        "me@example.com".into(),
+        "Example".into(),
+    );
     let services = h.sync.services().clone().with_rules(AnyRules::Sieve(rules));
-    let settings =
-        AccountSettings::new(Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)), h.db.clone());
-    let Permitted::Done(first) = settings.add_rule(h.account_id, Filter::block("a@example.com")).await.unwrap()
+    let settings = AccountSettings::new(
+        Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)),
+        h.db.clone(),
+    );
+    let Permitted::Done(first) = settings
+        .add_rule(h.account_id, Filter::block("a@example.com"))
+        .await
+        .unwrap()
     else {
         panic!("refused")
     };
-    settings.add_rule(h.account_id, Filter::block("b@example.com")).await.unwrap();
+    settings
+        .add_rule(h.account_id, Filter::block("b@example.com"))
+        .await
+        .unwrap();
     let puts = sieve.puts();
-    let Permitted::Done(Replaced::Swapped(_)) =
-        settings.replace_rule(h.account_id, &first, Filter::block("c@example.com")).await.unwrap()
+    let Permitted::Done(Replaced::Swapped(_)) = settings
+        .replace_rule(h.account_id, &first, Filter::block("c@example.com"))
+        .await
+        .unwrap()
     else {
         panic!("not swapped")
     };
-    assert_eq!(sieve.puts(), puts + 1, "one script write, not a create and a delete");
-    let Permitted::Done(all) = settings.rules(h.account_id).await.unwrap() else { panic!("refused") };
+    assert_eq!(
+        sieve.puts(),
+        puts + 1,
+        "one script write, not a create and a delete"
+    );
+    let Permitted::Done(all) = settings.rules(h.account_id).await.unwrap() else {
+        panic!("refused")
+    };
     assert_eq!(all.len(), 2);
     assert!(format!("{:?}", all[0]).contains("c@example.com"), "{all:?}");
 }
@@ -254,15 +347,28 @@ async fn an_edit_through_the_settings_keeps_its_place_among_local_rules() {
     let h = imap_harness().await;
     let rules = AnyRules::Local(crate::LocalRules::new(h.db.clone(), h.account_id));
     let services = h.sync.services().clone().with_rules(rules);
-    let settings =
-        AccountSettings::new(Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)), h.db.clone());
-    let Permitted::Done(first) = settings.add_rule(h.account_id, Filter::block("a@example.com")).await.unwrap()
+    let settings = AccountSettings::new(
+        Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)),
+        h.db.clone(),
+    );
+    let Permitted::Done(first) = settings
+        .add_rule(h.account_id, Filter::block("a@example.com"))
+        .await
+        .unwrap()
     else {
         panic!("refused")
     };
-    settings.add_rule(h.account_id, Filter::block("b@example.com")).await.unwrap();
-    settings.replace_rule(h.account_id, &first, Filter::block("c@example.com")).await.unwrap();
-    let Permitted::Done(all) = settings.rules(h.account_id).await.unwrap() else { panic!("refused") };
+    settings
+        .add_rule(h.account_id, Filter::block("b@example.com"))
+        .await
+        .unwrap();
+    settings
+        .replace_rule(h.account_id, &first, Filter::block("c@example.com"))
+        .await
+        .unwrap();
+    let Permitted::Done(all) = settings.rules(h.account_id).await.unwrap() else {
+        panic!("refused")
+    };
     assert_eq!(all.len(), 2);
     assert!(format!("{:?}", all[0]).contains("c@example.com"), "{all:?}");
 }
@@ -276,7 +382,11 @@ async fn a_caldav_account_offers_quiet_changes() {
         .sync
         .services()
         .clone()
-        .with_calendar(AnyCalendar::Dav(CalDav::new(Arc::new(AnyDav::from(dav)), mail, vec!["me@example.com".into()])));
+        .with_calendar(AnyCalendar::Dav(CalDav::new(
+            Arc::new(AnyDav::from(dav)),
+            mail,
+            vec!["me@example.com".into()],
+        )));
     assert!(services.offers().quiet_changes);
 }
 
@@ -306,14 +416,20 @@ async fn a_caldav_invitation_to_one_occurrence_says_how_its_series_runs() {
         ),
     );
     let mail = h.sync.services().mail.clone();
-    let services = h.sync.services().clone().with_calendar(AnyCalendar::Dav(CalDav::new(
-        Arc::new(AnyDav::from(Arc::clone(&dav))),
-        mail,
-        vec!["me@example.com".into()],
-    )));
+    let services = h
+        .sync
+        .services()
+        .clone()
+        .with_calendar(AnyCalendar::Dav(CalDav::new(
+            Arc::new(AnyDav::from(Arc::clone(&dav))),
+            mail,
+            vec!["me@example.com".into()],
+        )));
     let accounts = Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services));
     let copy = Arc::new(CalendarCopy::new(Arc::clone(&accounts), h.db.clone()));
-    copy.refresh(h.account_id, crate::now_millis()).await.unwrap();
+    copy.refresh(h.account_id, crate::now_millis())
+        .await
+        .unwrap();
     let invitations = crate::Invitations::new(accounts, h.db.clone(), copy);
 
     let fourth = first + Duration::weeks(3);
@@ -326,9 +442,51 @@ async fn a_caldav_invitation_to_one_occurrence_says_how_its_series_runs() {
     );
     let invitation = mailrs_domain::invitation::read(&ics).expect("an invitation");
     // A moment after the fourth Tuesday starts, six are still to come.
-    let now = fourth.and_hms_opt(9, 0, 0).unwrap().and_utc().timestamp_millis() + 1;
+    let now = fourth
+        .and_hms_opt(9, 0, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp_millis()
+        + 1;
     assert_eq!(
-        invitations.series(h.account_id, &invitation, now).await.unwrap().as_deref(),
+        invitations
+            .series(h.account_id, &invitation, now)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("Every Tuesday, 6 left")
+    );
+}
+
+#[tokio::test]
+async fn a_caldav_calendar_that_refuses_the_login_leaves_the_mail_accounts_state_alone() {
+    let h = imap_harness().await;
+    let dav = Arc::new(FakeDav::new());
+    dav.refuse_login(true);
+    let mail = h.sync.services().mail.clone();
+    let calendar = CalDav::new(Arc::new(AnyDav::from(Arc::clone(&dav))), mail, vec![]);
+    let services = h
+        .sync
+        .services()
+        .clone()
+        .with_calendar(AnyCalendar::Dav(calendar));
+    let copy = CalendarCopy::new(
+        Arc::new(ServedBy::new(h.account_id, Arc::clone(&h.sync), services)),
+        h.db.clone(),
+    );
+    copy.refresh_due(&[h.account_id], crate::now_millis(), true)
+        .await
+        .unwrap();
+    let id = h.account_id;
+    let state =
+        h.db.read(move |c| mailrs_store::accounts::account(c, id))
+            .await
+            .unwrap()
+            .unwrap()
+            .state;
+    assert_ne!(
+        state,
+        mailrs_domain::AccountState::NeedsReauth,
+        "its mail still works, and its loop says how the account is"
     );
 }

@@ -21,6 +21,53 @@ pub fn withheld_for(services: Option<&AccountServices>) -> Withheld {
     services.map_or(Withheld::NONE, AccountServices::withheld)
 }
 
+/// Whether an answer to an invitation on the account, whose provider is
+/// `provider`, reaches its organizer. A calendar account's server says
+/// whether it sends replies only once it has been read, so the event
+/// popover asks each time it opens; until the account has started, and
+/// until its server has said, nobody is taken to hear. An account with
+/// mail that is not running yet sends the reply once it starts. An
+/// account the window does not know (`None`) is not said to be mute.
+pub fn organizer_hears(provider: Option<Provider>, services: Option<&AccountServices>) -> bool {
+    match services {
+        Some(services) => services.tells_organizer(),
+        None => provider.is_none_or(Provider::serves_mail),
+    }
+}
+
+/// Whether the account served by `provider` can propose another time for
+/// a meeting. A proposal goes to the organizer as mail, whatever the
+/// calendar's server does, and a calendar account has none to send,
+/// running or not. An account with mail that is not running yet is not
+/// held back, nor is one the window does not know.
+pub fn can_propose(provider: Option<Provider>, services: Option<&AccountServices>) -> bool {
+    match services {
+        Some(services) => services.serves_mail(),
+        None => provider.is_none_or(Provider::serves_mail),
+    }
+}
+
+/// Whether the window has accounts and none of them has mail. It then
+/// shows the calendar and offers no switch to a mail space that would be
+/// empty. No account at all is the first-run page instead.
+pub fn only_calendars(accounts: &[Account]) -> bool {
+    !accounts.is_empty()
+        && accounts
+            .iter()
+            .all(|account| !account.provider.serves_mail())
+}
+
+/// Whether the window may show `space`. With calendar accounts alone the
+/// calendar is the one space there is, shown though no switch offers it,
+/// and there is no mail to show. Otherwise the calendar shows only while
+/// the switch does.
+pub fn may_show(space: crate::settings::Space, switch_visible: bool, accounts: &[Account]) -> bool {
+    match space {
+        crate::settings::Space::Mail => !only_calendars(accounts),
+        crate::settings::Space::Calendar => only_calendars(accounts) || switch_visible,
+    }
+}
+
 /// Whether the sidebar offers the Mail / Calendar switch. `started` holds
 /// what each running account offers; `waiting` says some account has not
 /// started yet. Once one running account offers a calendar the switch
@@ -74,9 +121,8 @@ pub fn inbox_bar(
     if shows_categories(on, mailbox, accounts, &offers) {
         return Some(InboxBar::Categories);
     }
-    let focus = on
-        && mailbox.takes_categories()
-        && mailbox.account().is_some_and(|id| offers(id).focused);
+    let focus =
+        on && mailbox.takes_categories() && mailbox.account().is_some_and(|id| offers(id).focused);
     focus.then_some(InboxBar::Focus)
 }
 
@@ -119,7 +165,10 @@ pub fn categorize_choices(offers: Offers) -> Vec<Category> {
 pub fn sender_actions(offers: Offers) -> [(&'static str, bool); 2] {
     [
         ("block-sender", offers.rules),
-        ("categorize-sender", (offers.categories || offers.focused) && offers.rules),
+        (
+            "categorize-sender",
+            (offers.categories || offers.focused) && offers.rules,
+        ),
     ]
 }
 
@@ -319,10 +368,14 @@ impl Filing {
     pub fn name_taken(self, name: &str) -> String {
         let name = name.replace('/', " › ");
         match self {
-            Filing::Labels => fill(&gettext("There is a label called “{name}” already"), &[("name", &name)]),
-            Filing::Folders => {
-                fill(&gettext("There is a folder called “{name}” already"), &[("name", &name)])
-            }
+            Filing::Labels => fill(
+                &gettext("There is a label called “{name}” already"),
+                &[("name", &name)],
+            ),
+            Filing::Folders => fill(
+                &gettext("There is a folder called “{name}” already"),
+                &[("name", &name)],
+            ),
         }
     }
 
@@ -384,12 +437,18 @@ impl Filing {
     }
 
     /// What deleting one does to its mail. A label comes off the mail and
-    /// the mail stays; a folder holds the only copy, and its mail goes
-    /// with it.
-    pub fn delete_body(self) -> String {
+    /// the mail stays in `provider`; a folder holds the only copy, and its
+    /// mail goes with it. An empty provider names no account.
+    pub fn delete_body(self, provider: &str) -> String {
         match self {
+            Filing::Labels if !provider.is_empty() => fill(
+                &gettext(
+                    "Its mail stays in {provider}, without the label. Nested labels stay too.",
+                ),
+                &[("provider", provider)],
+            ),
             Filing::Labels => {
-                gettext("Its mail stays in Gmail, without the label. Nested labels stay too.")
+                gettext("Its mail stays in the account, without the label. Nested labels stay too.")
             }
             Filing::Folders => gettext("The mail in the folder is deleted with it."),
         }
@@ -535,7 +594,9 @@ pub fn missing_lines(
 pub fn sign_in_reason(account: &Account) -> String {
     let provider = mailrs_discover::resolved_provider_name(account.provider_name());
     fill(
-        &gettext("{provider} does not let an API token change the automatic reply. Sign in again through the browser to change it here."),
+        &gettext(
+            "{provider} does not let an API token change the automatic reply. Sign in again through the browser to change it here.",
+        ),
         &[("provider", &provider)],
     )
 }
@@ -593,7 +654,8 @@ pub fn failing_lines(failing: &[Failing]) -> Vec<String> {
         .collect()
 }
 
-/// What Remove Account's confirmation says happens to `account`'s mail.
+/// What Remove Account's confirmation says happens to `account`'s mail,
+/// or to a calendar account's calendars.
 /// `remove` is a POP3 account's removal setting. Under one that removes
 /// mail from the server, the server has let go of what came down, so
 /// removing the account loses it.
@@ -607,6 +669,10 @@ pub fn remove_account_body(account: &Account, remove: RemoveSetting) -> String {
             "Mail already removed from the server exists only on this computer, \
              and removing the account deletes it with the saved sign-in. Mail \
              still on the server stays there.",
+        ),
+        (Provider::CalDav, _) => gettext(
+            "Its calendars and saved sign-in are deleted from this computer. \
+             Nothing changes on the server.",
         ),
         _ => fill(
             &gettext(
@@ -684,7 +750,11 @@ pub struct SwitchRows {
 }
 
 fn switch_row(icon: &'static str, title: String, subtitle: String) -> SwitchRow {
-    SwitchRow { icon, title, subtitle }
+    SwitchRow {
+        icon,
+        title,
+        subtitle,
+    }
 }
 
 /// The dialog's rows for `account`. `calendars` says the account reads
@@ -699,19 +769,27 @@ pub fn switch_rows(account: &Account, calendars: bool, token: bool) -> SwitchRow
         switch_row(
             "penguin-mail-inbox-symbolic",
             gettext("New mail arrives as it is sent"),
-            fill(&gettext("{provider} pushes it over JMAP, and you can send from your aliases."), &[("provider", &provider)]),
+            fill(
+                &gettext("{provider} pushes it over JMAP, and you can send from your aliases."),
+                &[("provider", &provider)],
+            ),
         ),
         switch_row(
             "weather-overcast-symbolic",
             gettext("Mail is matched over JMAP"),
-            gettext("Penguin Mail keeps the mail on this computer and downloads again only the messages it cannot match."),
+            gettext(
+                "Penguin Mail keeps the mail on this computer and downloads again only the messages it cannot match.",
+            ),
         ),
     ];
     let mut stays = vec![
         switch_row(
             "penguin-mail-person-symbolic",
             gettext("Name, color and place"),
-            fill(&gettext("{address} keeps its spot in the sidebar."), &[("address", &account.email)]),
+            fill(
+                &gettext("{address} keeps its spot in the sidebar."),
+                &[("address", &account.email)],
+            ),
         ),
         switch_row(
             "penguin-mail-flag-outline-symbolic",
@@ -723,7 +801,12 @@ pub fn switch_rows(account: &Account, calendars: bool, token: bool) -> SwitchRow
         changes.push(switch_row(
             "penguin-mail-calendar-symbolic",
             gettext("Calendars are read again where JMAP serves them"),
-            fill(&gettext("If {provider} offers calendars over JMAP, Penguin Mail reads them from there."), &[("provider", &provider)]),
+            fill(
+                &gettext(
+                    "If {provider} offers calendars over JMAP, Penguin Mail reads them from there.",
+                ),
+                &[("provider", &provider)],
+            ),
         ));
     }
     if calendars && token {
@@ -770,8 +853,25 @@ fn switch_line(reason: &str) -> String {
 /// Its text may hold an address or a server's own words, so it goes to
 /// the log as a kind, and the toast says a fixed sentence.
 fn unexpected(err: &anyhow::Error) -> String {
-    tracing::warn!(kind = crate::add_account::failure_kind(err), "the switch to JMAP failed");
+    tracing::warn!(
+        kind = crate::add_account::failure_kind(err),
+        "the switch to JMAP failed"
+    );
     gettext("Something unexpected stopped it.")
+}
+
+fn does_not_answer(provider: &str) -> String {
+    fill(
+        &gettext("{provider} does not answer."),
+        &[("provider", provider)],
+    )
+}
+
+fn cannot_use_answer(provider: &str) -> String {
+    fill(
+        &gettext("{provider} gave an answer Penguin Mail cannot use. Try again later."),
+        &[("provider", provider)],
+    )
 }
 
 /// The failure toast's words for `err` from `Core::switch_to_jmap`.
@@ -783,7 +883,10 @@ pub fn switch_failure(err: &anyhow::Error, asked: &SwitchAsked) -> SwitchFailure
     let mut again = false;
     let reason = match err.downcast_ref::<SwitchError>() {
         Some(SwitchError::NotImap) => {
-            return SwitchFailure { line: gettext("This account uses JMAP already."), again };
+            return SwitchFailure {
+                line: gettext("This account uses JMAP already."),
+                again,
+            };
         }
         Some(SwitchError::SignIn(JmapError::Unauthorized)) => {
             let refused = match token {
@@ -791,7 +894,10 @@ pub fn switch_failure(err: &anyhow::Error, asked: &SwitchAsked) -> SwitchFailure
                 false => fill(&gettext("{provider} did not accept the password."), &named),
             };
             match asked.browser {
-                true => format!("{refused} {}", gettext("You can choose Sign In With Browser instead.")),
+                true => format!(
+                    "{refused} {}",
+                    gettext("You can choose Sign In With Browser instead.")
+                ),
                 false => refused,
             }
         }
@@ -803,20 +909,25 @@ pub fn switch_failure(err: &anyhow::Error, asked: &SwitchAsked) -> SwitchFailure
             true => gettext("The token holds a character that cannot be sent."),
             false => gettext("The password holds a character that cannot be sent."),
         },
-        Some(SwitchError::SignIn(JmapError::Network(_))) => fill(&gettext("{provider} does not answer."), &named),
-        Some(SwitchError::SignIn(_)) => {
-            fill(&gettext("{provider} gave an answer Penguin Mail cannot use. Try again later."), &named)
-        }
-        Some(SwitchError::Drafts(_)) => {
-            fill(&gettext("{provider} did not give the draft of a message waiting in Send Later."), &named)
-        }
+        Some(SwitchError::SignIn(JmapError::Network(_))) => does_not_answer(provider),
+        Some(SwitchError::SignIn(_)) => cannot_use_answer(provider),
+        Some(SwitchError::Drafts(_)) => fill(
+            &gettext("{provider} did not give the draft of a message waiting in Send Later."),
+            &named,
+        ),
         Some(SwitchError::Sync(SyncError::Backend(BackendError::Changed))) => {
             again = true;
-            fill(&gettext("The mail on {provider} kept changing while Penguin Mail matched it."), &named)
+            fill(
+                &gettext("The mail on {provider} kept changing while Penguin Mail matched it."),
+                &named,
+            )
         }
         _ => unexpected(err),
     };
-    SwitchFailure { line: switch_line(&reason), again }
+    SwitchFailure {
+        line: switch_line(&reason),
+        again,
+    }
 }
 
 /// The failure toast's words when Sign In With Browser did not end in a
@@ -828,18 +939,26 @@ pub fn switch_browser_failure(err: &anyhow::Error, provider: &str) -> Option<Swi
     let reason = match err.downcast_ref::<BrowserSignInError>() {
         Some(BrowserSignInError::Canceled) => return None,
         Some(BrowserSignInError::Jmap(
-            JmapError::Unauthorized | JmapError::BadCredential | JmapError::UnknownClient | JmapError::Forbidden(_),
-        )) => fill(&gettext("{provider} refused the sign-in in the browser."), &named),
-        Some(BrowserSignInError::Jmap(JmapError::Declined)) => {
-            fill(&gettext("You did not allow Penguin Mail on {provider}'s page."), &named)
-        }
-        Some(BrowserSignInError::Jmap(JmapError::Network(_))) => fill(&gettext("{provider} does not answer."), &named),
-        Some(BrowserSignInError::Jmap(_)) => {
-            fill(&gettext("{provider} gave an answer Penguin Mail cannot use. Try again later."), &named)
-        }
+            JmapError::Unauthorized
+            | JmapError::BadCredential
+            | JmapError::UnknownClient
+            | JmapError::Forbidden(_),
+        )) => fill(
+            &gettext("{provider} refused the sign-in in the browser."),
+            &named,
+        ),
+        Some(BrowserSignInError::Jmap(JmapError::Declined)) => fill(
+            &gettext("You did not allow Penguin Mail on {provider}'s page."),
+            &named,
+        ),
+        Some(BrowserSignInError::Jmap(JmapError::Network(_))) => does_not_answer(provider),
+        Some(BrowserSignInError::Jmap(_)) => cannot_use_answer(provider),
         _ => unexpected(err),
     };
-    Some(SwitchFailure { line: switch_line(&reason), again: false })
+    Some(SwitchFailure {
+        line: switch_line(&reason),
+        again: false,
+    })
 }
 
 /// The window's toast once `address` has switched, with the local rules
@@ -866,9 +985,8 @@ mod tests {
     use mailrs_sync::{Missing, Offers};
 
     use super::{
-        failing_lines, held_back_line, hides_addresses, kept_here_lines, offers_for, reason, remove_account_body,
-        shows_space_switch, still_held_line,
-        withheld_for,
+        failing_lines, held_back_line, hides_addresses, kept_here_lines, offers_for, reason,
+        remove_account_body, shows_space_switch, still_held_line, withheld_for,
     };
     use crate::settings::Space;
 
@@ -899,7 +1017,12 @@ mod tests {
         );
     }
 
-    fn failed(reason: FailReason, words: &str, sender: Option<&str>, subject: Option<&str>) -> Failing {
+    fn failed(
+        reason: FailReason,
+        words: &str,
+        sender: Option<&str>,
+        subject: Option<&str>,
+    ) -> Failing {
         Failing {
             uidl: "u1".into(),
             reason,
@@ -912,7 +1035,12 @@ mod tests {
     #[test]
     fn each_message_that_will_not_download_reads_with_its_name_and_reason() {
         let failing = [
-            failed(FailReason::Refused, "no such message", Some("Ana Lima"), Some("Photos")),
+            failed(
+                FailReason::Refused,
+                "no such message",
+                Some("Ana Lima"),
+                Some("Photos"),
+            ),
             failed(FailReason::TooLarge, "", None, Some("Scans")),
             failed(FailReason::Dropped, "", Some("Bo"), None),
             failed(FailReason::Unreadable, "", None, None),
@@ -939,8 +1067,14 @@ mod tests {
                          still on the server stays there.";
         let account = pop3_account();
         assert_eq!(remove_account_body(&account, RemoveSetting::Never), kept);
-        assert_eq!(remove_account_body(&account, RemoveSetting::Downloaded), only_here);
-        assert_eq!(remove_account_body(&account, RemoveSetting::Days(30)), only_here);
+        assert_eq!(
+            remove_account_body(&account, RemoveSetting::Downloaded),
+            only_here
+        );
+        assert_eq!(
+            remove_account_body(&account, RemoveSetting::Days(30)),
+            only_here
+        );
     }
 
     #[test]
@@ -978,7 +1112,10 @@ mod tests {
         for (account, service) in [
             (named(Provider::Gmail, None), "Gmail"),
             (named(Provider::Imap, Some("Fastmail")), "Fastmail"),
-            (named(Provider::Microsoft, Some("Outlook.com")), "Outlook.com"),
+            (
+                named(Provider::Microsoft, Some("Outlook.com")),
+                "Outlook.com",
+            ),
         ] {
             assert_eq!(
                 remove_account_body(&account, RemoveSetting::Never),
@@ -990,6 +1127,122 @@ mod tests {
         }
     }
 
+    fn calendar_account() -> Account {
+        Account {
+            id: 7,
+            email: "robin@cloud.example.org".into(),
+            state: AccountState::Ok,
+            provider: Provider::CalDav,
+            provider_name: None,
+        }
+    }
+
+    /// A calendar account's server says whether it sends replies once
+    /// its calendars are read, which is after the window read what the
+    /// account offers.
+    #[tokio::test]
+    async fn whether_the_organizer_hears_is_read_from_the_services_as_they_stand() {
+        use mailrs_sync::fake::{DavKind, FakeDav};
+        use mailrs_sync::{AccountServices, CalendarService};
+
+        let dav = std::sync::Arc::new(FakeDav::new());
+        dav.add_collection("/cal/personal/", DavKind::Calendar, "Personal", None);
+        dav.set_auto_schedule(true);
+        let services = AccountServices::calendar_only(std::sync::Arc::clone(&dav));
+
+        let calendars = Some(Provider::CalDav);
+        assert!(
+            !super::organizer_hears(calendars, None),
+            "a calendar account that has not started is not heard"
+        );
+        assert!(
+            super::organizer_hears(Some(Provider::Imap), None),
+            "an account with mail sends the reply once it starts"
+        );
+        assert!(
+            !super::organizer_hears(calendars, Some(&services)),
+            "a server that has not said it sends replies is taken to send none"
+        );
+        services
+            .calendar
+            .as_ref()
+            .expect("the calendar")
+            .calendars()
+            .await
+            .expect("the calendar list");
+        assert!(
+            super::organizer_hears(calendars, Some(&services)),
+            "the server has said it sends them"
+        );
+    }
+
+    #[test]
+    fn a_proposal_needs_mail_to_carry_it() {
+        use mailrs_sync::AccountServices;
+        use mailrs_sync::fake::{FakeDav, FakeGmail};
+
+        let with_mail = AccountServices::google(std::sync::Arc::new(FakeGmail::new()));
+        let alone = AccountServices::calendar_only(std::sync::Arc::new(FakeDav::new()));
+        let calendars = Some(Provider::CalDav);
+        assert!(super::can_propose(Some(Provider::Gmail), Some(&with_mail)));
+        assert!(
+            !super::can_propose(calendars, Some(&alone)),
+            "a calendar account has no mail to send it"
+        );
+        assert!(
+            !super::can_propose(calendars, None),
+            "nor one that has not started"
+        );
+        assert!(
+            super::can_propose(Some(Provider::Imap), None),
+            "an account with mail that has not started is not held back"
+        );
+        assert!(
+            super::can_propose(None, None),
+            "nor one the window does not know"
+        );
+    }
+
+    #[test]
+    fn a_window_with_calendar_accounts_alone_has_no_mail_to_show() {
+        use crate::settings::Space;
+
+        assert!(super::only_calendars(&[calendar_account()]));
+        assert!(!super::only_calendars(&[
+            calendar_account(),
+            pop3_account()
+        ]));
+        assert!(
+            !super::only_calendars(&[]),
+            "no account at all is the first-run page's business"
+        );
+
+        let switch_hidden = false;
+        let (calendars_alone, with_mail) =
+            ([calendar_account()], [calendar_account(), pop3_account()]);
+        assert!(
+            super::may_show(Space::Calendar, switch_hidden, &calendars_alone),
+            "it is all there is"
+        );
+        assert!(
+            !super::may_show(Space::Mail, switch_hidden, &calendars_alone),
+            "a shortcut must not open an empty mail window"
+        );
+        assert!(super::may_show(Space::Mail, switch_hidden, &with_mail));
+        assert!(
+            !super::may_show(Space::Calendar, switch_hidden, &with_mail),
+            "no account offers a calendar"
+        );
+        assert!(super::may_show(Space::Calendar, true, &with_mail));
+    }
+
+    #[test]
+    fn removing_a_calendar_account_speaks_of_calendars_not_mail() {
+        let body = remove_account_body(&calendar_account(), RemoveSetting::Never);
+        assert!(body.contains("calendars"), "{body}");
+        assert!(!body.contains("mail"), "{body}");
+    }
+
     #[test]
     fn about_says_which_accounts_keep_their_mail_here_alone() {
         let imap = Account {
@@ -999,13 +1252,19 @@ mod tests {
         };
         assert_eq!(
             kept_here_lines(&[imap, pop3_account()]),
-            ["Mail from dana@example.org is kept only on this computer. To keep a copy, quit Penguin Mail, then back up this file."]
+            [
+                "Mail from dana@example.org is kept only on this computer. To keep a copy, quit Penguin Mail, then back up this file."
+            ]
         );
     }
 
     #[test]
     fn the_switch_shows_once_a_started_account_offers_a_calendar() {
-        assert!(shows_space_switch(&[NO_CALENDAR, Offers::EVERYTHING], false, Space::Mail));
+        assert!(shows_space_switch(
+            &[NO_CALENDAR, Offers::EVERYTHING],
+            false,
+            Space::Mail
+        ));
     }
 
     #[test]
@@ -1043,7 +1302,12 @@ mod tests {
     #[test]
     fn the_switch_says_what_moves_and_what_stays() {
         let rows = super::switch_rows(&fastmail(), true, true);
-        let said: Vec<String> = rows.changes.iter().chain(&rows.stays).map(|r| format!("{} {}", r.title, r.subtitle)).collect();
+        let said: Vec<String> = rows
+            .changes
+            .iter()
+            .chain(&rows.stays)
+            .map(|r| format!("{} {}", r.title, r.subtitle))
+            .collect();
         let said = said.join("\n");
         assert!(said.contains("Fastmail"), "{said}");
         assert!(said.contains("Reminders"), "{said}");
@@ -1052,7 +1316,10 @@ mod tests {
 
     #[test]
     fn a_jmap_calendar_that_refused_the_browser_sign_in_asks_for_an_app_password() {
-        let account = Account { provider: Provider::Jmap, ..fastmail() };
+        let account = Account {
+            provider: Provider::Jmap,
+            ..fastmail()
+        };
         assert_eq!(
             super::reason(&account, Missing::Calendar, Some(Miss::Refused)),
             "Fastmail's calendar server refused the browser sign-in. Choose Sign In Again and give an app password for the calendar."
@@ -1072,19 +1339,39 @@ mod tests {
     #[test]
     fn a_password_server_says_its_calendars_may_come_over_jmap() {
         let rows = super::switch_rows(&fastmail(), true, false);
-        assert_eq!(rows.stays.len(), 2, "no app password stays for the calendar");
+        assert_eq!(
+            rows.stays.len(),
+            2,
+            "no app password stays for the calendar"
+        );
         let last = rows.changes.last().expect("rows");
-        assert_eq!(last.title, "Calendars are read again where JMAP serves them");
-        assert_eq!(last.subtitle, "If Fastmail offers calendars over JMAP, Penguin Mail reads them from there.");
+        assert_eq!(
+            last.title,
+            "Calendars are read again where JMAP serves them"
+        );
+        assert_eq!(
+            last.subtitle,
+            "If Fastmail offers calendars over JMAP, Penguin Mail reads them from there."
+        );
     }
 
-    const TOKEN: super::SwitchAsked<'static> =
-        super::SwitchAsked { provider: "Fastmail", address: "dana@fastmail.com", token: true, browser: false };
+    const TOKEN: super::SwitchAsked<'static> = super::SwitchAsked {
+        provider: "Fastmail",
+        address: "dana@fastmail.com",
+        token: true,
+        browser: false,
+    };
 
     #[test]
     fn a_refused_password_names_the_browser_when_the_server_offers_it() {
-        let refused = anyhow::Error::new(mailrs_sync::switch::SwitchError::SignIn(mailrs_jmap::JmapError::Unauthorized));
-        let asked = super::SwitchAsked { token: false, browser: true, ..TOKEN };
+        let refused = anyhow::Error::new(mailrs_sync::switch::SwitchError::SignIn(
+            mailrs_jmap::JmapError::Unauthorized,
+        ));
+        let asked = super::SwitchAsked {
+            token: false,
+            browser: true,
+            ..TOKEN
+        };
         assert_eq!(
             super::switch_failure(&refused, &asked).line,
             "Could not switch to JMAP: Fastmail did not accept the password. You can choose Sign In With Browser instead. \
@@ -1104,7 +1391,9 @@ mod tests {
 
     #[test]
     fn a_browser_sign_in_the_server_refused_says_so() {
-        let refused = anyhow::Error::new(mailrs_sync::sign_in::BrowserSignInError::Jmap(mailrs_jmap::JmapError::Unauthorized));
+        let refused = anyhow::Error::new(mailrs_sync::sign_in::BrowserSignInError::Jmap(
+            mailrs_jmap::JmapError::Unauthorized,
+        ));
         let failed = super::switch_browser_failure(&refused, "Fastmail").expect("words");
         assert_eq!(
             failed.line,
@@ -1119,7 +1408,12 @@ mod tests {
         let raw = || anyhow::anyhow!("imap.example.com refused dana@fastmail.com: BAD [x]");
         let expected = "Could not switch to JMAP: Something unexpected stopped it. Your IMAP account is unchanged.";
         assert_eq!(super::switch_failure(&raw(), &TOKEN).line, expected);
-        assert_eq!(super::switch_browser_failure(&raw(), "Fastmail").expect("words").line, expected);
+        assert_eq!(
+            super::switch_browser_failure(&raw(), "Fastmail")
+                .expect("words")
+                .line,
+            expected
+        );
     }
 
     #[test]
@@ -1130,7 +1424,9 @@ mod tests {
 
     #[test]
     fn a_refused_token_says_the_imap_account_is_unchanged() {
-        let refused = anyhow::Error::new(mailrs_sync::switch::SwitchError::SignIn(mailrs_jmap::JmapError::Unauthorized));
+        let refused = anyhow::Error::new(mailrs_sync::switch::SwitchError::SignIn(
+            mailrs_jmap::JmapError::Unauthorized,
+        ));
         let failed = super::switch_failure(&refused, &TOKEN);
         assert_eq!(
             failed.line,
@@ -1141,9 +1437,9 @@ mod tests {
 
     #[test]
     fn a_send_later_draft_the_server_kept_back_says_so() {
-        let kept = anyhow::Error::new(mailrs_sync::switch::SwitchError::Drafts(mailrs_sync::SyncError::Backend(
-            mailrs_sync::BackendError::NotFound,
-        )));
+        let kept = anyhow::Error::new(mailrs_sync::switch::SwitchError::Drafts(
+            mailrs_sync::SyncError::Backend(mailrs_sync::BackendError::NotFound),
+        ));
         let failed = super::switch_failure(&kept, &TOKEN);
         assert_eq!(
             failed.line,
@@ -1154,17 +1450,24 @@ mod tests {
 
     #[test]
     fn mail_that_kept_changing_offers_another_try() {
-        let changed = anyhow::Error::new(mailrs_sync::switch::SwitchError::Sync(mailrs_sync::SyncError::Backend(
-            mailrs_sync::BackendError::Changed,
-        )));
+        let changed = anyhow::Error::new(mailrs_sync::switch::SwitchError::Sync(
+            mailrs_sync::SyncError::Backend(mailrs_sync::BackendError::Changed),
+        ));
         let failed = super::switch_failure(&changed, &TOKEN);
         assert!(failed.again);
-        assert!(failed.line.ends_with("Your IMAP account is unchanged."), "{}", failed.line);
+        assert!(
+            failed.line.ends_with("Your IMAP account is unchanged."),
+            "{}",
+            failed.line
+        );
     }
 
     #[test]
     fn the_done_toast_counts_the_rules_the_switch_turned_off() {
-        assert_eq!(super::switched_line("dana@fastmail.com", 0), "dana@fastmail.com now uses JMAP");
+        assert_eq!(
+            super::switched_line("dana@fastmail.com", 0),
+            "dana@fastmail.com now uses JMAP"
+        );
         assert!(super::switched_line("dana@fastmail.com", 2).contains("2 rules"));
     }
 
@@ -1191,9 +1494,18 @@ mod tests {
             ..fastmail()
         };
         for (missing, said) in [
-            (Missing::Calendar, "Penguin Mail cannot show Fastmail's calendar over JMAP yet."),
-            (Missing::Contacts, "Penguin Mail cannot read Fastmail's contacts over JMAP yet."),
-            (Missing::Rules, "Penguin Mail cannot change Fastmail's rules over JMAP yet."),
+            (
+                Missing::Calendar,
+                "Penguin Mail cannot show Fastmail's calendar over JMAP yet.",
+            ),
+            (
+                Missing::Contacts,
+                "Penguin Mail cannot read Fastmail's contacts over JMAP yet.",
+            ),
+            (
+                Missing::Rules,
+                "Penguin Mail cannot change Fastmail's rules over JMAP yet.",
+            ),
             (
                 Missing::AutoReply,
                 "Penguin Mail cannot change Fastmail's automatic reply over JMAP yet.",
@@ -1247,13 +1559,23 @@ mod tests {
 
     #[test]
     fn preferences_words_each_line_by_why_the_search_failed() {
-        let imap = Offers { calendar: false, contacts: false, ..Offers::EVERYTHING };
+        let imap = Offers {
+            calendar: false,
+            contacts: false,
+            ..Offers::EVERYTHING
+        };
         let lines = missing_lines(&[(fastmail(), imap)], |_, missing| {
             (missing == Missing::Calendar).then_some(Miss::Refused)
         });
         let reasons = &lines[0].1;
-        assert!(reasons[0].starts_with("Fastmail refused the password for calendars."), "{lines:?}");
-        assert_eq!(reasons[1], "Penguin Mail found no contacts server for Fastmail.");
+        assert!(
+            reasons[0].starts_with("Fastmail refused the password for calendars."),
+            "{lines:?}"
+        );
+        assert_eq!(
+            reasons[1],
+            "Penguin Mail found no contacts server for Fastmail."
+        );
     }
 
     #[test]
@@ -1291,18 +1613,29 @@ mod tests {
 
     #[test]
     fn masked_email_alone_lets_hide_my_email_in() {
-        let masked = Offers { masked_email: true, rules: false, labels: false, ..Offers::EVERYTHING };
+        let masked = Offers {
+            masked_email: true,
+            rules: false,
+            labels: false,
+            ..Offers::EVERYTHING
+        };
         assert!(hides_addresses(masked));
     }
 
     #[test]
     fn hide_my_email_needs_rules_and_labels() {
-        let folders = Offers { labels: false, ..Offers::EVERYTHING };
+        let folders = Offers {
+            labels: false,
+            ..Offers::EVERYTHING
+        };
         assert!(hides_addresses(Offers::EVERYTHING));
         assert!(!hides_addresses(folders));
         assert_eq!(account_menu_actions(folders)[2], ("hide-my-email", false));
         assert!(!account_action_on("account-hide-my-email", folders));
-        assert!(account_action_on("account-rules", folders), "rules stay on for a folder account");
+        assert!(
+            account_action_on("account-rules", folders),
+            "rules stay on for a folder account"
+        );
         assert_eq!(account_actions(&[folders])[0], ("hide-my-email", false));
     }
 
@@ -1330,21 +1663,37 @@ mod tests {
 
     #[test]
     fn a_gmail_inbox_shows_its_categories() {
-        let inbox = Mailbox::Standard { account_id: 1, which: Standard::Inbox };
+        let inbox = Mailbox::Standard {
+            account_id: 1,
+            which: Standard::Inbox,
+        };
         assert!(shows_categories(true, &inbox, &[1], |_| Offers::EVERYTHING));
-        assert!(!shows_categories(false, &inbox, &[1], |_| Offers::EVERYTHING));
+        assert!(!shows_categories(false, &inbox, &[1], |_| {
+            Offers::EVERYTHING
+        }));
     }
 
     #[test]
     fn an_inbox_whose_server_has_no_categories_hides_the_bar() {
-        let inbox = Mailbox::Standard { account_id: 2, which: Standard::Inbox };
-        assert!(!shows_categories(true, &inbox, &[2], |_| without_categories()));
+        let inbox = Mailbox::Standard {
+            account_id: 2,
+            which: Standard::Inbox,
+        };
+        assert!(!shows_categories(true, &inbox, &[2], |_| {
+            without_categories()
+        }));
     }
 
     #[test]
     fn the_unified_inbox_shows_the_bar_when_one_account_sorts() {
         let all = Mailbox::Unified(Standard::Inbox);
-        let offers = |id| if id == 1 { Offers::EVERYTHING } else { without_categories() };
+        let offers = |id| {
+            if id == 1 {
+                Offers::EVERYTHING
+            } else {
+                without_categories()
+            }
+        };
         assert!(shows_categories(true, &all, &[1, 2], offers));
         assert!(!shows_categories(true, &all, &[2], offers));
     }
@@ -1370,7 +1719,13 @@ mod tests {
 
     #[test]
     fn the_labels_button_says_what_its_picker_says() {
-        let offers = |id| if id == 2 { folders() } else { Offers::EVERYTHING };
+        let offers = |id| {
+            if id == 2 {
+                folders()
+            } else {
+                Offers::EVERYTHING
+            }
+        };
         // Nothing picked: the accounts the mailbox lists decide.
         assert_eq!(Filing::picker(&[], &[2], offers), Filing::Folders);
         assert_eq!(Filing::picker(&[], &[1, 2], offers), Filing::Labels);
@@ -1499,7 +1854,11 @@ mod tests {
         };
         assert_eq!(
             account_menu_actions(imap),
-            [("vacation", false), ("rules", false), ("hide-my-email", false)]
+            [
+                ("vacation", false),
+                ("rules", false),
+                ("hide-my-email", false)
+            ]
         );
         assert_eq!(
             account_menu_actions(Offers::EVERYTHING),
@@ -1511,7 +1870,11 @@ mod tests {
         };
         assert_eq!(
             account_menu_actions(replies_only),
-            [("vacation", true), ("rules", false), ("hide-my-email", false)],
+            [
+                ("vacation", true),
+                ("rules", false),
+                ("hide-my-email", false)
+            ],
             "Hide My Email needs rules, the automatic reply does not"
         );
     }
@@ -1560,8 +1923,16 @@ mod tests {
             "Could not rename the label: {reason}"
         );
         assert_eq!(
-            Filing::Labels.delete_body(),
+            Filing::Labels.delete_body("Gmail"),
             "Its mail stays in Gmail, without the label. Nested labels stay too."
+        );
+        assert_eq!(
+            Filing::Labels.delete_body("Fastmail"),
+            "Its mail stays in Fastmail, without the label. Nested labels stay too."
+        );
+        assert_eq!(
+            Filing::Labels.delete_body(""),
+            "Its mail stays in the account, without the label. Nested labels stay too."
         );
         assert_eq!(
             Filing::Labels.delete_failed(),
@@ -1581,7 +1952,7 @@ mod tests {
             "Could not rename the folder: {reason}"
         );
         assert_eq!(
-            Filing::Folders.delete_body(),
+            Filing::Folders.delete_body("Gmail"),
             "The mail in the folder is deleted with it."
         );
         assert_eq!(
@@ -1606,7 +1977,10 @@ mod tests {
             auto_reply_contacts_only: false,
             ..Offers::EVERYTHING
         };
-        let lines = missing_lines(&[(gmail(), Offers::EVERYTHING), (bare.clone(), lacking)], |_, _| None);
+        let lines = missing_lines(
+            &[(gmail(), Offers::EVERYTHING), (bare.clone(), lacking)],
+            |_, _| None,
+        );
         assert_eq!(
             lines,
             [(
@@ -1686,7 +2060,10 @@ mod tests {
     fn only_gmail_is_asked_which_addresses_it_sends_as() {
         assert!(reads_send_as(&gmail()));
         assert!(!reads_send_as(&fastmail()));
-        let jmap = Account { provider: Provider::Jmap, ..fastmail() };
+        let jmap = Account {
+            provider: Provider::Jmap,
+            ..fastmail()
+        };
         assert!(reads_send_as(&jmap));
     }
 
@@ -1711,29 +2088,75 @@ mod tests {
 
     #[test]
     fn one_microsoft_inbox_shows_focused_and_other() {
-        let offers = |id: AccountId| if id == 2 { microsoft() } else { Offers::EVERYTHING };
-        let outlook = Mailbox::Standard { account_id: 2, which: Standard::Inbox };
-        assert_eq!(inbox_bar(true, &outlook, &[1, 2], offers), Some(InboxBar::Focus));
-        assert_eq!(inbox_bar(false, &outlook, &[1, 2], offers), None, "the categories preference turns both off");
-        let gmail = Mailbox::Standard { account_id: 1, which: Standard::Inbox };
-        assert_eq!(inbox_bar(true, &gmail, &[1, 2], offers), Some(InboxBar::Categories));
+        let offers = |id: AccountId| {
+            if id == 2 {
+                microsoft()
+            } else {
+                Offers::EVERYTHING
+            }
+        };
+        let outlook = Mailbox::Standard {
+            account_id: 2,
+            which: Standard::Inbox,
+        };
+        assert_eq!(
+            inbox_bar(true, &outlook, &[1, 2], offers),
+            Some(InboxBar::Focus)
+        );
+        assert_eq!(
+            inbox_bar(false, &outlook, &[1, 2], offers),
+            None,
+            "the categories preference turns both off"
+        );
+        let gmail = Mailbox::Standard {
+            account_id: 1,
+            which: Standard::Inbox,
+        };
+        assert_eq!(
+            inbox_bar(true, &gmail, &[1, 2], offers),
+            Some(InboxBar::Categories)
+        );
         // The unified inbox keeps Gmail's categories; Outlook mail there
         // counts as Primary.
-        assert_eq!(inbox_bar(true, &Mailbox::Unified(Standard::Inbox), &[1, 2], offers), Some(InboxBar::Categories));
-        assert_eq!(inbox_bar(true, &Mailbox::Unified(Standard::Inbox), &[2], offers), None);
+        assert_eq!(
+            inbox_bar(true, &Mailbox::Unified(Standard::Inbox), &[1, 2], offers),
+            Some(InboxBar::Categories)
+        );
+        assert_eq!(
+            inbox_bar(true, &Mailbox::Unified(Standard::Inbox), &[2], offers),
+            None
+        );
     }
 
     #[test]
     fn switching_bars_moves_the_slice_to_one_the_bar_has() {
-        assert_eq!(category_after(InboxBar::Focus, Category::Social, Category::Primary), Category::Focused);
-        assert_eq!(category_after(InboxBar::Focus, Category::Other, Category::Primary), Category::Other);
-        assert_eq!(category_after(InboxBar::Categories, Category::Other, Category::Primary), Category::Primary);
-        assert_eq!(category_after(InboxBar::Categories, Category::Social, Category::Primary), Category::Social);
+        assert_eq!(
+            category_after(InboxBar::Focus, Category::Social, Category::Primary),
+            Category::Focused
+        );
+        assert_eq!(
+            category_after(InboxBar::Focus, Category::Other, Category::Primary),
+            Category::Other
+        );
+        assert_eq!(
+            category_after(InboxBar::Categories, Category::Other, Category::Primary),
+            Category::Primary
+        );
+        assert_eq!(
+            category_after(InboxBar::Categories, Category::Social, Category::Primary),
+            Category::Social
+        );
     }
 
     #[test]
     fn tags_show_for_mail_from_one_account_that_keeps_them() {
-        let offers = |id: AccountId| if id == 2 { microsoft() } else { Offers::EVERYTHING };
+        let offers = |id: AccountId| {
+            if id == 2 {
+                microsoft()
+            } else {
+                Offers::EVERYTHING
+            }
+        };
         assert!(tags_on(&[2, 2], offers));
         assert!(!tags_on(&[1], offers));
         assert!(!tags_on(&[1, 2], offers), "tags belong to one account");
@@ -1742,17 +2165,41 @@ mod tests {
 
     #[test]
     fn categorize_sender_offers_focus_on_a_microsoft_account() {
-        assert_eq!(categorize_choices(microsoft()), [Category::Focused, Category::Other]);
-        assert_eq!(categorize_choices(Offers::EVERYTHING), [Category::Primary, Category::Updates, Category::Promotions, Category::Social]);
+        assert_eq!(
+            categorize_choices(microsoft()),
+            [Category::Focused, Category::Other]
+        );
+        assert_eq!(
+            categorize_choices(Offers::EVERYTHING),
+            [
+                Category::Primary,
+                Category::Updates,
+                Category::Promotions,
+                Category::Social
+            ]
+        );
         let on = sender_actions(microsoft());
         assert!(on.contains(&("categorize-sender", true)));
     }
 
     #[test]
     fn a_reply_a_token_cannot_reach_names_the_browser_sign_in() {
-        let jmap = Account { provider: Provider::Jmap, provider_name: Some("Fastmail".into()), ..fastmail() };
-        let lacking = Offers { auto_reply: false, auto_reply_needs_sign_in: true, ..Offers::EVERYTHING };
+        let jmap = Account {
+            provider: Provider::Jmap,
+            provider_name: Some("Fastmail".into()),
+            ..fastmail()
+        };
+        let lacking = Offers {
+            auto_reply: false,
+            auto_reply_needs_sign_in: true,
+            ..Offers::EVERYTHING
+        };
         let lines = missing_lines(&[(jmap, lacking)], |_, _| None);
-        assert_eq!(lines[0].1, ["Fastmail does not let an API token change the automatic reply. Sign in again through the browser to change it here."]);
+        assert_eq!(
+            lines[0].1,
+            [
+                "Fastmail does not let an API token change the automatic reply. Sign in again through the browser to change it here."
+            ]
+        );
     }
 }

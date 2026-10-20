@@ -83,9 +83,16 @@ fn a_gmail_filter_survives_the_trip_through_mail_sets() {
     );
     assert_eq!(
         filter.action.remove,
-        [MailSet::Role(Role::Inbox), MailSet::Unseen, MailSet::Role(Role::Junk)]
+        [
+            MailSet::Role(Role::Inbox),
+            MailSet::Unseen,
+            MailSet::Role(Role::Junk)
+        ]
     );
-    assert_eq!(serde_json::to_value(GmailFilter::from(&filter)).unwrap(), wire);
+    assert_eq!(
+        serde_json::to_value(GmailFilter::from(&filter)).unwrap(),
+        wire
+    );
 }
 
 /// Editing a rule writes it again, so every criterion Gmail sends has to
@@ -106,7 +113,10 @@ fn a_gmail_filter_keeps_its_size_and_chat_criteria() {
         .unwrap()
         .into_filter();
     assert_eq!(filter.criteria.size, Some(5_242_880));
-    assert_eq!(serde_json::to_value(GmailFilter::from(&filter)).unwrap(), wire);
+    assert_eq!(
+        serde_json::to_value(GmailFilter::from(&filter)).unwrap(),
+        wire
+    );
 }
 
 #[test]

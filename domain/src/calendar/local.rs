@@ -39,7 +39,11 @@ fn system() -> Tz {
     *ZONE.get_or_init(|| {
         let link = std::fs::read_link("/etc/localtime").ok();
         let file = std::fs::read_to_string("/etc/timezone").ok();
-        let zone = from_system(std::env::var("TZ").ok().as_deref(), link.as_deref(), file.as_deref());
+        let zone = from_system(
+            std::env::var("TZ").ok().as_deref(),
+            link.as_deref(),
+            file.as_deref(),
+        );
         tracing::debug!(zone = zone.name(), "the computer's time zone");
         zone
     })
@@ -54,7 +58,11 @@ pub fn instant<Z: TimeZone>(zone: &Z, naive: NaiveDateTime) -> Option<EpochMilli
         LocalResult::Single(at) | LocalResult::Ambiguous(at, _) => Some(at.timestamp_millis()),
         LocalResult::None => {
             let day_before = naive.checked_sub_signed(TimeDelta::days(1))?;
-            let offset = zone.offset_from_local_datetime(&day_before).earliest()?.fix().local_minus_utc();
+            let offset = zone
+                .offset_from_local_datetime(&day_before)
+                .earliest()?
+                .fix()
+                .local_minus_utc();
             Some(naive.and_utc().timestamp_millis() - i64::from(offset) * 1000)
         }
     }
@@ -64,7 +72,11 @@ pub fn instant<Z: TimeZone>(zone: &Z, naive: NaiveDateTime) -> Option<EpochMilli
 /// `/etc/timezone` text name, tried in that order. `TZ` goes first because
 /// chrono, glibc and GLib let it win over `/etc/localtime`, and the views
 /// draw local times through them.
-pub(crate) fn from_system(tz: Option<&str>, localtime: Option<&Path>, timezone: Option<&str>) -> Tz {
+pub(crate) fn from_system(
+    tz: Option<&str>,
+    localtime: Option<&Path>,
+    timezone: Option<&str>,
+) -> Tz {
     tz.and_then(|value| known(value.strip_prefix(':').unwrap_or(value)))
         .or_else(|| localtime.and_then(from_link))
         .or_else(|| timezone.and_then(known))
@@ -78,7 +90,10 @@ pub(crate) fn from_system(tz: Option<&str>, localtime: Option<&Path>, timezone: 
 fn from_link(target: &Path) -> Option<Tz> {
     let text = target.to_str()?;
     let (_, name) = text.rsplit_once("zoneinfo/")?;
-    let name = name.strip_prefix("posix/").or_else(|| name.strip_prefix("right/")).unwrap_or(name);
+    let name = name
+        .strip_prefix("posix/")
+        .or_else(|| name.strip_prefix("right/"))
+        .unwrap_or(name);
     known(name)
 }
 
@@ -115,18 +130,31 @@ mod tests {
     #[test]
     fn the_tz_variable_wins_over_the_link() {
         let link = Path::new("/usr/share/zoneinfo/Europe/Lisbon");
-        assert_eq!(from_system(Some(":America/New_York"), Some(link), None), New_York);
+        assert_eq!(
+            from_system(Some(":America/New_York"), Some(link), None),
+            New_York
+        );
     }
 
     #[test]
     fn a_posix_rule_in_tz_falls_through_to_the_link() {
         let link = Path::new("/usr/share/zoneinfo/Europe/Lisbon");
-        assert_eq!(from_system(Some("EST5EDT,M3.2.0,M11.1.0"), Some(link), None), Lisbon);
+        assert_eq!(
+            from_system(Some("EST5EDT,M3.2.0,M11.1.0"), Some(link), None),
+            Lisbon
+        );
     }
 
     #[test]
     fn the_timezone_file_names_the_zone_when_nothing_else_does() {
-        assert_eq!(from_system(None, Some(Path::new("/etc/localtime.real")), Some("Europe/Lisbon\n")), Lisbon);
+        assert_eq!(
+            from_system(
+                None,
+                Some(Path::new("/etc/localtime.real")),
+                Some("Europe/Lisbon\n")
+            ),
+            Lisbon
+        );
     }
 
     #[test]

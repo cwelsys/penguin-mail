@@ -6,7 +6,10 @@ use crate::fake::FakeMail;
 use crate::{MailBackend, now_millis};
 
 fn fresh() -> FakeMail {
-    FakeMail { at: now_millis(), ..FakeMail::default() }
+    FakeMail {
+        at: now_millis(),
+        ..FakeMail::default()
+    }
 }
 
 #[tokio::test]
@@ -18,7 +21,10 @@ async fn folders_come_with_their_roles_and_tags_come_as_tags() {
     let inbox = listed.iter().find(|m| m.role == Some(Role::Inbox)).unwrap();
     assert_eq!(inbox.kind, MailboxKind::System);
     let trips = listed.iter().find(|m| m.id == trips).unwrap();
-    assert_eq!((trips.kind, trips.name.as_str()), (MailboxKind::Folder, "Trips"));
+    assert_eq!(
+        (trips.kind, trips.name.as_str()),
+        (MailboxKind::Folder, "Trips")
+    );
     let red = listed.iter().find(|m| m.id == "category:Red").unwrap();
     assert_eq!(red.kind, MailboxKind::Tag);
     assert!(red.color.is_some());
@@ -36,7 +42,9 @@ async fn new_mail_arrives_with_its_marks_and_is_announced() {
     h.fake.classify(&id, true);
     h.look().await;
     let held = h.held(&id).await;
-    assert!(held.mailboxes.contains(&inbox) && held.mailboxes.contains(&"category:Red".to_string()));
+    assert!(
+        held.mailboxes.contains(&inbox) && held.mailboxes.contains(&"category:Red".to_string())
+    );
     assert_eq!(held.keywords, [FLAGGED]);
     assert_eq!(held.categories, [category::OTHER]);
     assert!(h.drain().iter().any(|e| matches!(e, ChangeEvent::NewMail { message_ids, .. } if message_ids == std::slice::from_ref(&id))));
@@ -54,9 +62,20 @@ async fn a_move_between_synced_folders_keeps_the_stored_message() {
     h.look().await;
     assert!(h.stored(&id).await, "the same id, never deleted");
     let held = h.held(&id).await;
-    assert!(held.mailboxes.contains(&archive) && !held.mailboxes.contains(&inbox), "{held:?}");
-    assert!(held.mailboxes.contains(&"category:Red".to_string()), "the tag stays");
-    assert!(!h.drain().iter().any(|e| matches!(e, ChangeEvent::NewMail { .. })), "a move is not new mail");
+    assert!(
+        held.mailboxes.contains(&archive) && !held.mailboxes.contains(&inbox),
+        "{held:?}"
+    );
+    assert!(
+        held.mailboxes.contains(&"category:Red".to_string()),
+        "the tag stays"
+    );
+    assert!(
+        !h.drain()
+            .iter()
+            .any(|e| matches!(e, ChangeEvent::NewMail { .. })),
+        "a move is not new mail"
+    );
 }
 
 #[tokio::test]
@@ -129,11 +148,20 @@ async fn a_refused_delta_link_lists_the_mail_again_under_the_same_ids() {
     h.fake.expire_links();
     h.look().await;
     assert!(h.stored(&id).await, "listed again under the id it had");
-    assert!(h.held(&id).await.mailboxes.contains(&"category:Red".to_string()), "the tag stays");
+    assert!(
+        h.held(&id)
+            .await
+            .mailboxes
+            .contains(&"category:Red".to_string()),
+        "the tag stays"
+    );
     // The feed has its place back: the next look answers from new links.
     h.fake.mark(&id, Some(true), None);
     h.look().await;
-    assert_eq!(h.held(&id).await.keywords, [mailrs_domain::mailbox::keyword::SEEN]);
+    assert_eq!(
+        h.held(&id).await.keywords,
+        [mailrs_domain::mailbox::keyword::SEEN]
+    );
 }
 
 /// An Inbox past the most ids a listing returns leaves the hourly check
@@ -143,15 +171,31 @@ async fn a_refused_delta_link_lists_the_mail_again_under_the_same_ids() {
 async fn an_inbox_too_large_to_list_is_not_compared() {
     let h = outlook().await;
     let inbox = h.fake.folder_id("inbox");
-    let old = h.fake.deliver(&inbox, FakeMail { at: now_millis() - 86_400_000, ..FakeMail::default() });
+    let old = h.fake.deliver(
+        &inbox,
+        FakeMail {
+            at: now_millis() - 86_400_000,
+            ..FakeMail::default()
+        },
+    );
     h.bootstrap_all().await;
     assert!(h.stored(&old).await);
     for i in 0..20_000 {
-        h.fake.deliver(&inbox, FakeMail { at: now_millis() - i, ..FakeMail::default() });
+        h.fake.deliver(
+            &inbox,
+            FakeMail {
+                at: now_millis() - i,
+                ..FakeMail::default()
+            },
+        );
     }
     let before = h.fake.with(|s| s.meta_fetches.len());
     h.sync.reconcile_inbox().await.unwrap();
-    assert_eq!(h.fake.with(|s| s.meta_fetches.len()), before, "nothing fetched again");
+    assert_eq!(
+        h.fake.with(|s| s.meta_fetches.len()),
+        before,
+        "nothing fetched again"
+    );
 }
 
 /// A cut window listing would read as mail gone to a relist that sweeps
@@ -162,11 +206,21 @@ async fn a_window_too_large_to_list_is_refused_rather_than_cut() {
     let h = outlook().await;
     let inbox = h.fake.folder_id("inbox");
     for i in 0..20_001 {
-        h.fake.deliver(&inbox, FakeMail { at: now_millis() - i, ..FakeMail::default() });
+        h.fake.deliver(
+            &inbox,
+            FakeMail {
+                at: now_millis() - i,
+                ..FakeMail::default()
+            },
+        );
     }
     h.sync.services().mail.mailboxes().await.unwrap();
     let listed = h.sync.services().mail.window_ids(30, None).await;
-    assert!(matches!(listed, Err(crate::BackendError::Unsupported)), "{:?}", listed.map(|l| l.len()));
+    assert!(
+        matches!(listed, Err(crate::BackendError::Unsupported)),
+        "{:?}",
+        listed.map(|l| l.len())
+    );
 }
 
 #[tokio::test]
@@ -174,12 +228,29 @@ async fn a_long_backlog_carries_on_at_the_next_look() {
     let h = outlook().await;
     h.bootstrap_all().await;
     let inbox = h.fake.folder_id("inbox");
-    let ids: Vec<String> = (0..1100).map(|i| h.fake.deliver(&inbox, FakeMail { at: now_millis() - i, ..FakeMail::default() })).collect();
+    let ids: Vec<String> = (0..1100)
+        .map(|i| {
+            h.fake.deliver(
+                &inbox,
+                FakeMail {
+                    at: now_millis() - i,
+                    ..FakeMail::default()
+                },
+            )
+        })
+        .collect();
     h.look().await;
-    let first = futures::future::join_all(ids.iter().map(|id| h.stored(id))).await.iter().filter(|s| **s).count();
+    let first = futures::future::join_all(ids.iter().map(|id| h.stored(id)))
+        .await
+        .iter()
+        .filter(|s| **s)
+        .count();
     assert_eq!(first, 1000, "one look reads twenty pages of fifty");
     h.look().await;
-    let all = futures::future::join_all(ids.iter().map(|id| h.stored(id))).await.iter().all(|s| *s);
+    let all = futures::future::join_all(ids.iter().map(|id| h.stored(id)))
+        .await
+        .iter()
+        .all(|s| *s);
     assert!(all);
 }
 
@@ -187,21 +258,45 @@ async fn a_long_backlog_carries_on_at_the_next_look() {
 async fn metadata_reads_graphs_fields_into_the_store_shape() {
     let h = outlook().await;
     let inbox = h.fake.folder_id("inbox");
-    let id = h.fake.deliver(&inbox, FakeMail { subject: "Lunch", conversation: Some("conv-7"), ..fresh() });
+    let id = h.fake.deliver(
+        &inbox,
+        FakeMail {
+            subject: "Lunch",
+            conversation: Some("conv-7"),
+            ..fresh()
+        },
+    );
     h.fake.with(|s| {
-        s.messages.get_mut(&id).unwrap().message.internet_message_headers = Some(vec![mailrs_graph::Header {
+        s.messages
+            .get_mut(&id)
+            .unwrap()
+            .message
+            .internet_message_headers = Some(vec![mailrs_graph::Header {
             name: "List-Unsubscribe".into(),
             value: "<https://news.example/u>".into(),
         }]);
     });
-    let found = h.sync.services().mail.fetch(vec![crate::Want::message(&id)]).await.unwrap();
+    let found = h
+        .sync
+        .services()
+        .mail
+        .fetch(vec![crate::Want::message(&id)])
+        .await
+        .unwrap();
     let meta = &found.metas[0];
     assert_eq!(meta.thread_id, "conv-7");
     assert_eq!(meta.subject, "Lunch");
-    assert!(meta.rfc822_msgid.as_deref().is_some_and(|m| !m.starts_with('<')));
+    assert!(
+        meta.rfc822_msgid
+            .as_deref()
+            .is_some_and(|m| !m.starts_with('<'))
+    );
     assert!(meta.size > 0);
     assert_eq!(meta.roles, [Role::Inbox]);
-    assert_eq!(meta.list_unsubscribe.as_deref(), Some("<https://news.example/u>"));
+    assert_eq!(
+        meta.list_unsubscribe.as_deref(),
+        Some("<https://news.example/u>")
+    );
 }
 
 #[tokio::test]
@@ -210,13 +305,28 @@ async fn a_preview_with_line_breaks_is_stored_as_one_line() {
     // the list row clamps a preview to two lines only within one
     // paragraph, so a preview with breaks filled the row.
     let h = outlook().await;
-    let id = h.fake.deliver(&h.fake.folder_id("inbox"), FakeMail { subject: "Apps", ..fresh() });
+    let id = h.fake.deliver(
+        &h.fake.folder_id("inbox"),
+        FakeMail {
+            subject: "Apps",
+            ..fresh()
+        },
+    );
     h.fake.with(|s| {
         s.messages.get_mut(&id).unwrap().message.body_preview =
             Some("Microsoft account\r\nNew app(s) have access\r\n\r\n  Manage your apps".into());
     });
-    let found = h.sync.services().mail.fetch(vec![crate::Want::message(&id)]).await.unwrap();
-    assert_eq!(found.metas[0].snippet, "Microsoft account New app(s) have access Manage your apps");
+    let found = h
+        .sync
+        .services()
+        .mail
+        .fetch(vec![crate::Want::message(&id)])
+        .await
+        .unwrap();
+    assert_eq!(
+        found.metas[0].snippet,
+        "Microsoft account New app(s) have access Manage your apps"
+    );
 }
 
 #[tokio::test]
@@ -224,14 +334,23 @@ async fn a_large_message_reads_by_its_structure_with_part_paths() {
     let h = outlook().await;
     let id = h.fake.deliver(
         &h.fake.folder_id("inbox"),
-        FakeMail { files: vec![("plan.pdf", "application/pdf", b"%PDF-1.7".to_vec())], ..fresh() },
+        FakeMail {
+            files: vec![("plan.pdf", "application/pdf", b"%PDF-1.7".to_vec())],
+            ..fresh()
+        },
     );
     let mail = &h.sync.services().mail;
     let parts = mail.fetch_structure(&id).await.unwrap();
     assert_eq!(parts.root.children[0].path, "1");
-    assert!(parts.root.children[0].data.is_some(), "the text comes along");
+    assert!(
+        parts.root.children[0].data.is_some(),
+        "the text comes along"
+    );
     let file = &parts.root.children[1];
-    assert_eq!((file.path.as_str(), file.filename.as_deref()), ("2", Some("plan.pdf")));
+    assert_eq!(
+        (file.path.as_str(), file.filename.as_deref()),
+        ("2", Some("plan.pdf"))
+    );
     assert!(file.data.is_none(), "a file waits until it is opened");
     assert_eq!(mail.fetch_part(&id, "2").await.unwrap(), b"%PDF-1.7");
 }

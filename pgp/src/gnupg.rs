@@ -519,7 +519,10 @@ fn one(lines: &[&str]) -> Option<Seen> {
             "TRUST_UNDEFINED" | "TRUST_NEVER" | "TRUST_MARGINAL" | "TRUST_FULLY"
             | "TRUST_ULTIMATE" => {
                 trust = Some(trust_of(keyword));
-                trust_code = rest.split_whitespace().next().and_then(|code| code.parse().ok());
+                trust_code = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|code| code.parse().ok());
                 continue;
             }
             _ => continue,

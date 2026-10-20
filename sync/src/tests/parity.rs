@@ -145,7 +145,8 @@ async fn send_as_lists_confirmed_addresses_with_their_names_and_signatures() {
 async fn a_search_reaches_gmail_as_typed() {
     let h = harness().await;
     let now = now_millis();
-    h.fake.seed(meta("old", "t1", now - 400 * DAY, &["Label_1"]));
+    h.fake
+        .seed(meta("old", "t1", now - 400 * DAY, &["Label_1"]));
     h.fake.seed(meta("new", "t2", now, &["INBOX"]));
     h.fake.with(|s| {
         let old = s.messages.get_mut("old").expect("seeded");
@@ -174,11 +175,19 @@ async fn a_backfill_page_token_gmail_refuses_starts_the_window_again() {
     let h = harness().await;
     let now = now_millis();
     for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
-        h.fake.seed(meta(id, &format!("t{id}"), now - i as i64 * 1000, &["INBOX"]));
+        h.fake.seed(meta(
+            id,
+            &format!("t{id}"),
+            now - i as i64 * 1000,
+            &["INBOX"],
+        ));
     }
     h.sync.bootstrap().await.unwrap();
     assert!(h.cursor().await.backfill_cursor.is_some());
-    h.fake.fail_next(mailrs_gmail::GmailError::Http { status: 400, body: String::new() });
+    h.fake.fail_next(mailrs_gmail::GmailError::Http {
+        status: 400,
+        body: String::new(),
+    });
 
     assert!(h.sync.backfill_step().await.unwrap(), "pages remain");
 

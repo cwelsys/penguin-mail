@@ -385,8 +385,14 @@ mod tests {
             .await
             .unwrap();
         let mut session = Session::new(ours);
-        let refused = session.simple("PUTSCRIPT \"x\" {1+}\r\nx\r\n".into()).await.unwrap_err();
-        assert!(matches!(refused, SieveError::Refused(ref w) if w.contains("unknown command")), "{refused:?}");
+        let refused = session
+            .simple("PUTSCRIPT \"x\" {1+}\r\nx\r\n".into())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(refused, SieveError::Refused(ref w) if w.contains("unknown command")),
+            "{refused:?}"
+        );
         // The literal's closing CRLF is read too, so the next answer
         // starts on its own status line.
         assert!(session.simple("NOOP\r\n".into()).await.is_ok());
@@ -395,7 +401,11 @@ mod tests {
     #[tokio::test]
     async fn a_logout_the_server_never_answers_ends_on_its_own() {
         let (ours, _silent) = tokio::io::duplex(1024);
-        let ended = tokio::time::timeout(LOGOUT_LIMIT + Duration::from_secs(5), Session::new(ours).logout()).await;
+        let ended = tokio::time::timeout(
+            LOGOUT_LIMIT + Duration::from_secs(5),
+            Session::new(ours).logout(),
+        )
+        .await;
         assert!(ended.is_ok(), "logout waited past its limit");
     }
 

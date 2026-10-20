@@ -238,7 +238,9 @@ impl Editor {
         keys.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("Menu|<Shift>F10"),
             Some(gtk::CallbackAction::new(move |_, _| {
-                let open = weak.upgrade().is_some_and(|editor| editor.offer_picture_menu_here());
+                let open = weak
+                    .upgrade()
+                    .is_some_and(|editor| editor.offer_picture_menu_here());
                 match open {
                     true => glib::Propagation::Stop,
                     false => glib::Propagation::Proceed,
@@ -278,12 +280,13 @@ impl Editor {
             return false;
         };
         let place = self.view.iter_location(&at);
-        let (x, y) = self.view.buffer_to_window_coords(
-            gtk::TextWindowType::Widget,
-            place.x(),
-            place.y(),
-        );
-        self.open_picture_menu(anchor, gdk::Rectangle::new(x, y, place.width().max(1), place.height().max(1)))
+        let (x, y) =
+            self.view
+                .buffer_to_window_coords(gtk::TextWindowType::Widget, place.x(), place.y());
+        self.open_picture_menu(
+            anchor,
+            gdk::Rectangle::new(x, y, place.width().max(1), place.height().max(1)),
+        )
     }
 
     /// Opens the picture menu for `anchor`, pointing at `rect` in the
@@ -479,8 +482,7 @@ impl Editor {
         }
         self.busy.set(true);
         for (offset, picture) in swaps {
-            if let Some(anchor) =
-                richbuffer::put_picture_back(&self.view, offset, &picture.widget)
+            if let Some(anchor) = richbuffer::put_picture_back(&self.view, offset, &picture.widget)
             {
                 richbuffer::keep_placed(
                     &mut self.anchors.borrow_mut(),
@@ -1648,7 +1650,10 @@ pub(super) mod checks {
         let with = editor.rich();
         let pictures = shown(&editor);
         assert_eq!(pictures.len(), 1, "{with:?}");
-        assert!(!editor.buffer.can_redo(), "inserting leaves nothing to redo");
+        assert!(
+            !editor.buffer.can_redo(),
+            "inserting leaves nothing to redo"
+        );
         // The cursor sits after the picture, ready for the next word.
         let cursor = editor.buffer.iter_at_mark(&editor.buffer.get_insert());
         assert!(cursor.is_end(), "{}", cursor.offset());
@@ -1768,9 +1773,8 @@ pub(super) mod checks {
             data: png().into(),
             content_id: Some("map@mailrs".into()),
         };
-        let body = RichBody::from_html(
-            "<p>See <img src=\"cid:map@mailrs\" alt=\"Map of the venue\"></p>",
-        );
+        let body =
+            RichBody::from_html("<p>See <img src=\"cid:map@mailrs\" alt=\"Map of the venue\"></p>");
         editor.fill("", Some(&body), &[attachment]);
         assert_eq!(alt(&editor).as_deref(), Some("Map of the venue"));
         // A Markdown body names the picture the same way.
@@ -1966,9 +1970,15 @@ pub(super) mod checks {
         assert!(editor.markdown_left());
         assert!(editor.format_stray_markdown());
         assert!(!editor.markdown_left());
-        assert_eq!(richbuffer::kind_at(&editor.buffer, 2), BlockKind::Heading(1));
+        assert_eq!(
+            richbuffer::kind_at(&editor.buffer, 2),
+            BlockKind::Heading(1)
+        );
         assert_eq!(richbuffer::kind_at(&editor.buffer, 5), BlockKind::Bullet);
-        assert_eq!(editor.rich().to_plain(), "Hi Ann,\n\nPlan\n\n- soup\n- salad");
+        assert_eq!(
+            editor.rich().to_plain(),
+            "Hi Ann,\n\nPlan\n\n- soup\n- salad"
+        );
         // The cursor stays at the end, where the writer was typing.
         let cursor = editor.buffer.iter_at_mark(&editor.buffer.get_insert());
         assert!(cursor.is_end(), "{}", cursor.offset());
@@ -1981,7 +1991,8 @@ pub(super) mod checks {
     }
 
     fn format_keeps_styled_words_and_the_quote() {
-        let (_view, editor) = opened("Hi **Ann**.\n\nOn Monday, Ann wrote:\n\n> \\- one\n> \\- two\n> \\# three");
+        let (_view, editor) =
+            opened("Hi **Ann**.\n\nOn Monday, Ann wrote:\n\n> \\- one\n> \\- two\n> \\# three");
         assert_eq!(richbuffer::kind_at(&editor.buffer, 4), BlockKind::Quote);
         let quoted_before: Vec<Block> = editor.rich().blocks[1..].to_vec();
         cursor_at(&editor, 7);
@@ -2003,7 +2014,10 @@ pub(super) mod checks {
         cursor_at(&editor, 2);
         editor.buffer.insert_at_cursor("\n");
         let pasted = editor.paste_markdown(markdown);
-        assert_eq!(richbuffer::kind_at(&editor.buffer, 1), BlockKind::Heading(1));
+        assert_eq!(
+            richbuffer::kind_at(&editor.buffer, 1),
+            BlockKind::Heading(1)
+        );
         assert_eq!(editor.rich().to_plain(), "Hi\nPlan\n\n- soup\n- salad");
         assert!(!editor.markdown_left());
         assert!(editor.unpaste(pasted));
@@ -2026,7 +2040,10 @@ pub(super) mod checks {
         // rich body shows styled.
         let (_view, editor) = opened("Hi,\n\n## Agenda\n\n1. **Budget**\n2. [Plan](https://e.com)");
         assert!(!editor.markdown_left());
-        assert_eq!(richbuffer::kind_at(&editor.buffer, 2), BlockKind::Heading(2));
+        assert_eq!(
+            richbuffer::kind_at(&editor.buffer, 2),
+            BlockKind::Heading(2)
+        );
         assert_eq!(richbuffer::kind_at(&editor.buffer, 4), BlockKind::Numbered);
     }
 
@@ -2072,8 +2089,16 @@ pub(super) mod checks {
                 // One Undo takes the whole quote back out, and says so, for
                 // the composer to fold it again.
                 editor.buffer.undo();
-                assert_eq!(editor.written().markdown, before.markdown, "{format:?} {typed:?}");
-                assert_eq!(editor.history_present(), Some(false), "{format:?} {typed:?}");
+                assert_eq!(
+                    editor.written().markdown,
+                    before.markdown,
+                    "{format:?} {typed:?}"
+                );
+                assert_eq!(
+                    editor.history_present(),
+                    Some(false),
+                    "{format:?} {typed:?}"
+                );
                 // Folded again, the reply sends as it did before the unfold.
                 let folded = |written: &Written| {
                     let mut draft = crate::compose::Draft::new(
@@ -2093,10 +2118,18 @@ pub(super) mod checks {
                         parsed.body_html(0).map(|h| h.to_string()),
                     )
                 };
-                assert_eq!(folded(&editor.written()), folded(&before), "{format:?} {typed:?}");
+                assert_eq!(
+                    folded(&editor.written()),
+                    folded(&before),
+                    "{format:?} {typed:?}"
+                );
                 // Redo puts it back in the body.
                 editor.buffer.redo();
-                assert_eq!(editor.written().markdown, after.markdown, "{format:?} {typed:?}");
+                assert_eq!(
+                    editor.written().markdown,
+                    after.markdown,
+                    "{format:?} {typed:?}"
+                );
                 assert_eq!(editor.history_present(), Some(true), "{format:?} {typed:?}");
             }
         }

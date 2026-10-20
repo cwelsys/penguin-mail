@@ -86,7 +86,7 @@ impl<A: Accounts> Tools<A> {
             .unwrap_or_default();
         let accounts = match text(input, "account") {
             Some(email) => vec![self.account_named(&email)?],
-            None => self.desk.accounts(),
+            None => mailrs_domain::mail_accounts(&self.desk.accounts()),
         };
         let mut found: Vec<(Account, Sender)> = Vec::new();
         let mut problem: Option<String> = None;
@@ -323,9 +323,7 @@ impl<A: Accounts> Tools<A> {
     /// way out of it.
     async fn leaving(&self, account: Account, thread_id: String) -> Leaving {
         let (name, email, state) = match self.sender_and_way(&account, &thread_id).await {
-            Ok((name, email, Some((how, address)))) => {
-                (name, email, State::Ready { how, address })
-            }
+            Ok((name, email, Some((how, address)))) => (name, email, State::Ready { how, address }),
             Ok((name, email, None)) => (
                 name,
                 email,

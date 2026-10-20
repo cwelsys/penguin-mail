@@ -146,7 +146,11 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBER\r\n\
 --b\r\nContent-Type: image/jpeg\r\nContent-Disposition: attachment\r\n\
 Content-Transfer-Encoding: base64\r\n\r\n/9k=\r\n--b--\r\n";
     let body = read(raw);
-    let names: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    let names: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(names, ["attachment.pdf", "image.jpg"]);
 }
 
@@ -178,7 +182,11 @@ data\r\n--b--\r\n";
     assert_eq!(body.protection, Some(Protection::Encrypted));
     // The control part that carries the version string is structural,
     // not a file: only the ciphertext is something to save.
-    let names: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    let names: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(names, ["encrypted.asc"]);
 }
 
@@ -193,14 +201,16 @@ sig\r\n--b--\r\n";
 
 #[test]
 fn a_message_inside_its_own_signature_says_which_shape_it_is() {
-    let raw = b"Content-Type: application/pkcs7-mime; smime-type=signed-data; name=\"smime.p7m\"\r\n\
+    let raw =
+        b"Content-Type: application/pkcs7-mime; smime-type=signed-data; name=\"smime.p7m\"\r\n\
 Content-Disposition: attachment; filename=\"smime.p7m\"\r\n\r\ndata\r\n";
     assert_eq!(read(raw).protection, Some(Protection::SmimeOpaque));
 }
 
 #[test]
 fn an_enveloped_message_says_which_wrapper_it_arrived_in() {
-    let raw = b"Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"\r\n\
+    let raw =
+        b"Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"\r\n\
 Content-Disposition: attachment; filename=\"smime.p7m\"\r\n\r\ndata\r\n";
     assert_eq!(read(raw).protection, Some(Protection::SmimeEnveloped));
 }
@@ -256,7 +266,10 @@ fn text_parts_with_a_content_id_and_no_name_are_the_body() {
 --b\r\nContent-Type: text/plain\r\nContent-ID: <text-body>\r\n\r\nYou have new invitations\r\n\
 --b\r\nContent-Type: text/html\r\nContent-ID: <html-body>\r\n\r\n<p>You have new invitations</p>\r\n--b--\r\n";
     let body = read(raw);
-    assert_eq!(body.html.as_deref(), Some("<p>You have new invitations</p>"));
+    assert_eq!(
+        body.html.as_deref(),
+        Some("<p>You have new invitations</p>")
+    );
     assert_eq!(body.text.as_deref(), Some("You have new invitations"));
     assert!(body.attachments.is_empty());
 }
@@ -303,7 +316,11 @@ fn a_google_invitation_lists_its_ics_file_once() {
         .map(|a| (a.filename.as_str(), a.mime_type.as_str()))
         .collect();
     assert_eq!(files, [("invite.ics", "application/ics")]);
-    assert!(body.calendar.as_deref().is_some_and(|c| c.contains("UID:abc@google.com")));
+    assert!(
+        body.calendar
+            .as_deref()
+            .is_some_and(|c| c.contains("UID:abc@google.com"))
+    );
     assert_eq!(body.text.as_deref(), Some("You have been invited"));
 }
 
@@ -314,8 +331,16 @@ fn a_calendar_part_arrives_inline_in_a_raw_message() {
 --b\r\nContent-Type: text/calendar\r\nContent-Disposition: attachment; filename=\"invite.ics\"\r\n\r\n\
 BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b--\r\n";
     let body = read(raw);
-    assert!(body.calendar.as_deref().is_some_and(|c| c.contains("BEGIN:VCALENDAR")));
-    let names: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    assert!(
+        body.calendar
+            .as_deref()
+            .is_some_and(|c| c.contains("BEGIN:VCALENDAR"))
+    );
+    let names: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(names, ["invite.ics"]);
 }
 
@@ -325,8 +350,15 @@ fn files_are_named_by_their_part_paths() {
     assert_eq!(body.attachments[0].part_id, "2");
     assert_eq!(body.attachments[0].attachment_id.as_deref(), Some("2"));
     let ics = part(&google_invitation(), "2").unwrap();
-    assert!(String::from_utf8(ics).unwrap().starts_with("BEGIN:VCALENDAR"));
-    assert_eq!(part(&google_invitation(), "1.3").map(|b| b.starts_with(b"BEGIN:VCALENDAR")), Some(true));
+    assert!(
+        String::from_utf8(ics)
+            .unwrap()
+            .starts_with("BEGIN:VCALENDAR")
+    );
+    assert_eq!(
+        part(&google_invitation(), "1.3").map(|b| b.starts_with(b"BEGIN:VCALENDAR")),
+        Some(true)
+    );
     assert_eq!(part(&google_invitation(), "9"), None);
 }
 
@@ -483,7 +515,8 @@ fn a_message_rfc822_part_with_a_transfer_encoding_still_reads_its_file() {
 /// own; concatenating them is what a real reader gets right.
 #[test]
 fn base64_padded_line_by_line_still_decodes() {
-    let raw = b"Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\nSGk=\r\nSGk=\r\n";
+    let raw =
+        b"Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\nSGk=\r\nSGk=\r\n";
     assert_eq!(read(raw).text.as_deref(), Some("HiHi"));
 }
 
@@ -514,7 +547,10 @@ fn quoted_printable_with_a_bad_escape_decodes_the_rest() {
     let raw = b"Content-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n\
 Caf=E9 today =ZZ nice";
     let decoded = part(raw, "1").unwrap();
-    assert_eq!(decoded, [b"Caf".as_slice(), &[0xE9], b" today =ZZ nice"].concat());
+    assert_eq!(
+        decoded,
+        [b"Caf".as_slice(), &[0xE9], b" today =ZZ nice"].concat()
+    );
 }
 
 /// mail-parser accepts multiparts nested to any depth. A message nested
@@ -523,11 +559,18 @@ Caf=E9 today =ZZ nice";
 #[test]
 fn a_deeply_nested_message_reads_on_a_small_stack() {
     let depth = 10_000;
-    let mut raw = String::from("Subject: Deep\r\nContent-Type: multipart/mixed; boundary=\"b0\"\r\n\r\n");
+    let mut raw =
+        String::from("Subject: Deep\r\nContent-Type: multipart/mixed; boundary=\"b0\"\r\n\r\n");
     for level in 1..depth {
-        raw.push_str(&format!("--b{}\r\nContent-Type: multipart/mixed; boundary=\"b{level}\"\r\n\r\n", level - 1));
+        raw.push_str(&format!(
+            "--b{}\r\nContent-Type: multipart/mixed; boundary=\"b{level}\"\r\n\r\n",
+            level - 1
+        ));
     }
-    raw.push_str(&format!("--b{}\r\nContent-Type: text/plain\r\n\r\nBottom\r\n", depth - 1));
+    raw.push_str(&format!(
+        "--b{}\r\nContent-Type: text/plain\r\n\r\nBottom\r\n",
+        depth - 1
+    ));
     for level in (0..depth).rev() {
         raw.push_str(&format!("--b{level}--\r\n"));
     }
@@ -540,7 +583,10 @@ fn a_deeply_nested_message_reads_on_a_small_stack() {
             body
         })
         .unwrap();
-    assert!(reader.join().is_ok(), "reading the message overflowed the stack");
+    assert!(
+        reader.join().is_ok(),
+        "reading the message overflowed the stack"
+    );
 }
 
 /// A sender may wrap base64 at a width that is not a multiple of four,
@@ -603,12 +649,26 @@ fn a_forwarded_message_is_listed_as_an_eml_file() {
     let listed: Vec<(&str, &str, &str)> = body
         .attachments
         .iter()
-        .map(|a| (a.filename.as_str(), a.part_id.as_str(), a.mime_type.as_str()))
+        .map(|a| {
+            (
+                a.filename.as_str(),
+                a.part_id.as_str(),
+                a.mime_type.as_str(),
+            )
+        })
         .collect();
     assert_eq!(listed, [("Lunch.eml", "2", "message/rfc822")]);
     let eml = part(&raw, "2").unwrap();
-    assert!(eml.starts_with(b"Subject: Lunch\r\n"), "{}", String::from_utf8_lossy(&eml));
-    assert!(eml.ends_with(b"--inner--"), "{}", String::from_utf8_lossy(&eml));
+    assert!(
+        eml.starts_with(b"Subject: Lunch\r\n"),
+        "{}",
+        String::from_utf8_lossy(&eml)
+    );
+    assert!(
+        eml.ends_with(b"--inner--"),
+        "{}",
+        String::from_utf8_lossy(&eml)
+    );
     assert_eq!(body.attachments[0].size, eml.len() as i64);
 }
 
@@ -616,7 +676,11 @@ fn a_forwarded_message_is_listed_as_an_eml_file() {
 /// message can have no subject at all.
 #[test]
 fn a_forwarded_messages_file_name_is_safe_to_save() {
-    let named = |subject: &str| read(&note_with_a_forwarded_message(subject)).attachments[0].filename.clone();
+    let named = |subject: &str| {
+        read(&note_with_a_forwarded_message(subject)).attachments[0]
+            .filename
+            .clone()
+    };
     assert_eq!(named("Re: Q3/Q4 plan"), "Re Q3-Q4 plan.eml");
     assert_eq!(named(""), "message.eml");
 }
@@ -664,7 +728,10 @@ fn an_unreadable_forwarded_message_is_still_an_eml_file() {
     let raw = forwarded_encoded(4);
     let parts = mailrs_mime::parts(&raw).unwrap();
     let leaf = parts.find("2.1.1.1").unwrap();
-    assert_eq!((leaf.mime_type.as_str(), leaf.children.len()), ("message/rfc822", 0));
+    assert_eq!(
+        (leaf.mime_type.as_str(), leaf.children.len()),
+        ("message/rfc822", 0)
+    );
     let body = read(&raw);
     let listed: Vec<(&str, &str)> = body
         .attachments
@@ -672,7 +739,10 @@ fn an_unreadable_forwarded_message_is_still_an_eml_file() {
         .map(|a| (a.filename.as_str(), a.part_id.as_str()))
         .collect();
     assert_eq!(listed.last(), Some(&("message.eml", "2.1.1.1")));
-    assert_eq!(part(&raw, "2.1.1.1").as_deref(), Some(b"Subject: Deepest\r\n\r\nHello".as_slice()));
+    assert_eq!(
+        part(&raw, "2.1.1.1").as_deref(),
+        Some(b"Subject: Deepest\r\n\r\nHello".as_slice())
+    );
 }
 
 /// Forwarded messages nested inside each other become one parsed message
@@ -685,7 +755,10 @@ fn deeply_nested_forwarded_messages_read_on_a_small_stack() {
         .stack_size(2 << 20)
         .spawn(move || read(raw.as_bytes()))
         .unwrap();
-    assert!(reader.join().is_ok(), "reading the message overflowed the stack");
+    assert!(
+        reader.join().is_ok(),
+        "reading the message overflowed the stack"
+    );
 }
 
 #[test]
@@ -698,6 +771,9 @@ fn a_part_fetched_on_its_own_decodes_by_its_transfer_encoding() {
         undo_transfer_encoding(Some("quoted-printable"), b"caf=C3=A9 =\r\nbar").as_deref(),
         Some("café bar".as_bytes())
     );
-    assert_eq!(undo_transfer_encoding(None, b"as is").as_deref(), Some(&b"as is"[..]));
+    assert_eq!(
+        undo_transfer_encoding(None, b"as is").as_deref(),
+        Some(&b"as is"[..])
+    );
     assert_eq!(undo_transfer_encoding(Some("base64"), b"!!!!"), None);
 }

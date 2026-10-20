@@ -79,7 +79,8 @@ impl FakeGraph {
             let message = Message {
                 id: id.clone(),
                 conversation_id: Some(
-                    mail.conversation.map_or_else(|| format!("conv-{id}"), str::to_string),
+                    mail.conversation
+                        .map_or_else(|| format!("conv-{id}"), str::to_string),
                 ),
                 internet_message_id: Some(format!("<{id}@outlook.example>")),
                 parent_folder_id: Some(folder.to_string()),
@@ -91,7 +92,9 @@ impl FakeGraph {
                 has_attachments: Some(!files.is_empty()),
                 is_read: Some(false),
                 is_draft: Some(false),
-                flag: Some(Flag { flag_status: "notFlagged".into() }),
+                flag: Some(Flag {
+                    flag_status: "notFlagged".into(),
+                }),
                 categories: Some(Vec::new()),
                 inference_classification: Some("focused".into()),
                 single_value_extended_properties: Some(vec![mailrs_graph::ExtendedProperty {
@@ -100,7 +103,15 @@ impl FakeGraph {
                 }]),
                 ..Message::default()
             };
-            s.messages.insert(id.clone(), FakeMessage { folder: folder.into(), message, raw, files });
+            s.messages.insert(
+                id.clone(),
+                FakeMessage {
+                    folder: folder.into(),
+                    message,
+                    raw,
+                    files,
+                },
+            );
             log(s, folder, &id);
             id
         })
@@ -112,7 +123,9 @@ impl FakeGraph {
 
     pub fn mark(&self, id: &str, read: Option<bool>, flagged: Option<bool>) {
         self.with(|s| {
-            let Some(held) = s.messages.get_mut(id) else { return };
+            let Some(held) = s.messages.get_mut(id) else {
+                return;
+            };
             if let Some(read) = read {
                 held.message.is_read = Some(read);
             }
@@ -126,7 +139,9 @@ impl FakeGraph {
 
     pub fn tag(&self, id: &str, categories: &[&str]) {
         self.with(|s| {
-            let Some(held) = s.messages.get_mut(id) else { return };
+            let Some(held) = s.messages.get_mut(id) else {
+                return;
+            };
             held.message.categories = Some(categories.iter().map(|c| c.to_string()).collect());
             let folder = held.folder.clone();
             log(s, &folder, id);
@@ -135,7 +150,9 @@ impl FakeGraph {
 
     pub fn classify(&self, id: &str, other: bool) {
         self.with(|s| {
-            let Some(held) = s.messages.get_mut(id) else { return };
+            let Some(held) = s.messages.get_mut(id) else {
+                return;
+            };
             held.message.inference_classification = Some(classification(other));
             let folder = held.folder.clone();
             log(s, &folder, id);
@@ -153,7 +170,9 @@ impl FakeGraph {
 }
 
 fn flag(flagged: bool) -> Flag {
-    Flag { flag_status: if flagged { "flagged" } else { "notFlagged" }.into() }
+    Flag {
+        flag_status: if flagged { "flagged" } else { "notFlagged" }.into(),
+    }
 }
 
 fn classification(other: bool) -> String {
@@ -171,11 +190,17 @@ fn recipient(name: &str, address: &str) -> Recipient {
 
 fn log(s: &mut GraphState, folder: &str, id: &str) {
     let seq = s.next_seq();
-    s.mail_log.push(Logged { seq, place: folder.to_string(), id: id.to_string() });
+    s.mail_log.push(Logged {
+        seq,
+        place: folder.to_string(),
+        id: id.to_string(),
+    });
 }
 
 fn move_to(s: &mut GraphState, id: &str, folder: &str) {
-    let Some(held) = s.messages.get_mut(id) else { return };
+    let Some(held) = s.messages.get_mut(id) else {
+        return;
+    };
     let from = std::mem::replace(&mut held.folder, folder.to_string());
     held.message.parent_folder_id = Some(folder.to_string());
     log(s, &from, id);
@@ -189,7 +214,9 @@ fn millis(text: &str) -> i64 {
 fn removed_message(id: &str) -> Message {
     Message {
         id: id.to_string(),
-        removed: Some(Removed { reason: Some("deleted".into()) }),
+        removed: Some(Removed {
+            reason: Some("deleted".into()),
+        }),
         ..Message::default()
     }
 }
@@ -202,7 +229,11 @@ fn folder_info(s: &GraphState, id: &str) -> Option<MailFolder> {
         id: id.to_string(),
         display_name: folder.name.clone(),
         parent_folder_id: folder.parent.clone(),
-        child_folder_count: s.folders.values().filter(|f| f.parent.as_deref() == Some(id)).count() as u32,
+        child_folder_count: s
+            .folders
+            .values()
+            .filter(|f| f.parent.as_deref() == Some(id))
+            .count() as u32,
         total_item_count: held().count() as u64,
         unread_item_count: held().filter(|m| m.message.is_read != Some(true)).count() as u64,
         ..MailFolder::default()
@@ -216,18 +247,29 @@ fn file_message(s: &mut GraphState, folder: &str, raw: Vec<u8>, draft: bool) -> 
         .parse(&raw)
         .ok_or_else(|| GraphError::Decode("not a message".into()))?;
     let id = s.new_id("msg");
-    let address = |a: &mail_parser::Addr| recipient(a.name.as_deref().unwrap_or(""), a.address.as_deref().unwrap_or(""));
-    let preview: String = parsed.body_text(0).unwrap_or_default().chars().take(255).collect();
+    let address = |a: &mail_parser::Addr| {
+        recipient(
+            a.name.as_deref().unwrap_or(""),
+            a.address.as_deref().unwrap_or(""),
+        )
+    };
+    let preview: String = parsed
+        .body_text(0)
+        .unwrap_or_default()
+        .chars()
+        .take(255)
+        .collect();
     let files: Vec<(AttachmentInfo, Vec<u8>)> = parsed
         .attachments()
         .enumerate()
         .map(|(i, part)| {
-            let kind = part
-                .content_type()
-                .map_or_else(|| "application/octet-stream".to_string(), |c| match c.subtype() {
+            let kind = part.content_type().map_or_else(
+                || "application/octet-stream".to_string(),
+                |c| match c.subtype() {
                     Some(sub) => format!("{}/{sub}", c.ctype()),
                     None => c.ctype().to_string(),
-                });
+                },
+            );
             (
                 AttachmentInfo {
                     id: format!("{id}-att-{i}"),
@@ -245,7 +287,9 @@ fn file_message(s: &mut GraphState, folder: &str, raw: Vec<u8>, draft: bool) -> 
         id: id.clone(),
         conversation_id: Some(format!("conv-{id}")),
         internet_message_id: Some(
-            parsed.message_id().map_or_else(|| format!("<{id}@outlook.example>"), |m| format!("<{m}>")),
+            parsed
+                .message_id()
+                .map_or_else(|| format!("<{id}@outlook.example>"), |m| format!("<{m}>")),
         ),
         parent_folder_id: Some(folder.to_string()),
         subject: parsed.subject().map(str::to_string),
@@ -256,7 +300,10 @@ fn file_message(s: &mut GraphState, folder: &str, raw: Vec<u8>, draft: bool) -> 
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         ),
         from: parsed.from().and_then(|a| a.first()).map(address),
-        to_recipients: parsed.to().map(|a| a.iter().map(address).collect()).unwrap_or_default(),
+        to_recipients: parsed
+            .to()
+            .map(|a| a.iter().map(address).collect())
+            .unwrap_or_default(),
         has_attachments: Some(!files.is_empty()),
         is_read: Some(true),
         is_draft: Some(draft),
@@ -269,7 +316,15 @@ fn file_message(s: &mut GraphState, folder: &str, raw: Vec<u8>, draft: bool) -> 
         }]),
         ..Message::default()
     };
-    s.messages.insert(id.clone(), FakeMessage { folder: folder.into(), message, raw, files });
+    s.messages.insert(
+        id.clone(),
+        FakeMessage {
+            folder: folder.into(),
+            message,
+            raw,
+            files,
+        },
+    );
     log(s, folder, &id);
     Ok(id)
 }
@@ -286,7 +341,11 @@ pub(super) fn well_known(s: &mut GraphState, names: &[&str]) -> Answer<Vec<Optio
         .collect())
 }
 
-pub(super) fn folders(s: &mut GraphState, parent: Option<&str>, _next: Option<&str>) -> Answer<Page<MailFolder>> {
+pub(super) fn folders(
+    s: &mut GraphState,
+    parent: Option<&str>,
+    _next: Option<&str>,
+) -> Answer<Page<MailFolder>> {
     s.refuses(Area::Mail)?;
     let value = s
         .folders
@@ -294,7 +353,10 @@ pub(super) fn folders(s: &mut GraphState, parent: Option<&str>, _next: Option<&s
         .filter(|(_, f)| f.parent.as_deref() == parent)
         .filter_map(|(id, _)| folder_info(s, id))
         .collect();
-    Ok(Page { value, next_link: None })
+    Ok(Page {
+        value,
+        next_link: None,
+    })
 }
 
 pub(super) fn categories(s: &mut GraphState) -> Answer<Vec<MasterCategory>> {
@@ -306,7 +368,7 @@ pub(super) fn message_delta(
     s: &mut GraphState,
     folder: &str,
     link_text: Option<&str>,
-    since: &str,
+    since: Option<&str>,
 ) -> Answer<DeltaPage<Message>> {
     s.refuses(Area::Mail)?;
     if !s.folders.contains_key(folder) {
@@ -317,7 +379,7 @@ pub(super) fn message_delta(
     // filter after a `#since=` on each link it gives, and answers such a
     // change as a removal, which the adapter checks and drops.
     let (link_text, since_ms) = match link_text {
-        None => (None, millis(since)),
+        None => (None, since.map(millis).unwrap_or(i64::MIN)),
         Some(text) => match text.split_once("#since=") {
             Some((link, ms)) => (Some(link), ms.parse().unwrap_or(0)),
             None => (Some(text), 0),
@@ -325,18 +387,35 @@ pub(super) fn message_delta(
     };
     let inside = move |m: &FakeMessage| m.message.received_millis().unwrap_or(0) >= since_ms;
     let s = &*s;
-    let mut page = Round { log: &s.mail_log, expired_before: s.expired_before, now: s.seq, place: folder }.run(
+    let mut page = Round {
+        log: &s.mail_log,
+        expired_before: s.expired_before,
+        now: s.seq,
+        place: folder,
+    }
+    .run(
         link_text,
         || {
-            let mut here: Vec<&FakeMessage> =
-                s.messages.values().filter(|m| m.folder == folder && inside(m)).collect();
+            let mut here: Vec<&FakeMessage> = s
+                .messages
+                .values()
+                .filter(|m| m.folder == folder && inside(m))
+                .collect();
             here.sort_by_key(|m| std::cmp::Reverse(m.message.received_millis()));
             here.into_iter().map(|m| m.message.clone()).collect()
         },
-        |id| s.messages.get(id).filter(|m| m.folder == folder && inside(m)).map(|m| m.message.clone()),
+        |id| {
+            s.messages
+                .get(id)
+                .filter(|m| m.folder == folder && inside(m))
+                .map(|m| m.message.clone())
+        },
         removed_message,
     )?;
-    for link in [&mut page.next_link, &mut page.delta_link].into_iter().flatten() {
+    for link in [&mut page.next_link, &mut page.delta_link]
+        .into_iter()
+        .flatten()
+    {
         link.push_str(&format!("#since={since_ms}"));
     }
     Ok(page)
@@ -350,7 +429,11 @@ fn clause_words(clause: &str) -> String {
         Some((key, rest)) if key.chars().all(char::is_alphabetic) => rest,
         _ => clause,
     };
-    clause.trim_start_matches(['>', '<', '=']).replace('"', "").trim().to_lowercase()
+    clause
+        .trim_start_matches(['>', '<', '='])
+        .replace('"', "")
+        .trim()
+        .to_lowercase()
 }
 
 fn matches_search(m: &FakeMessage, kql: &str) -> bool {
@@ -385,8 +468,11 @@ pub(super) fn list_messages(
     s.refuses(Area::Mail)?;
     let (listing, offset, slot) = match next {
         Some(text) => {
-            let (kind, place, _, offset) = read_link(text).ok_or_else(|| GraphError::Decode("bad link".into()))?;
-            let slot: usize = place.parse().map_err(|_| GraphError::Decode("bad link".into()))?;
+            let (kind, place, _, offset) =
+                read_link(text).ok_or_else(|| GraphError::Decode("bad link".into()))?;
+            let slot: usize = place
+                .parse()
+                .map_err(|_| GraphError::Decode("bad link".into()))?;
             match (kind.as_str(), s.pending.get(slot)) {
                 ("list", Some(Pending::Listing(l))) => (l.clone(), offset, Some(slot)),
                 _ => return Err(GraphError::Decode("bad link".into())),
@@ -412,16 +498,39 @@ pub(super) fn list_messages(
         .values()
         .filter(|m| listing.folder.as_ref().is_none_or(|f| &m.folder == f))
         .filter(|m| since.is_none_or(|t| m.message.received_millis().unwrap_or(0) >= t))
-        .filter(|m| listing.conversation.as_ref().is_none_or(|c| m.message.conversation_id.as_ref() == Some(c)))
         .filter(|m| {
-            listing.internet_message_id.as_ref().is_none_or(|i| m.message.internet_message_id.as_ref() == Some(i))
+            listing
+                .conversation
+                .as_ref()
+                .is_none_or(|c| m.message.conversation_id.as_ref() == Some(c))
         })
-        .filter(|m| listing.search.as_deref().is_none_or(|kql| matches_search(m, kql)))
-        .filter(|m| listing.category.as_ref().is_none_or(|c| m.message.categories.iter().flatten().any(|n| n == c)))
+        .filter(|m| {
+            listing
+                .internet_message_id
+                .as_ref()
+                .is_none_or(|i| m.message.internet_message_id.as_ref() == Some(i))
+        })
+        .filter(|m| {
+            listing
+                .search
+                .as_deref()
+                .is_none_or(|kql| matches_search(m, kql))
+        })
+        .filter(|m| {
+            listing
+                .category
+                .as_ref()
+                .is_none_or(|c| m.message.categories.iter().flatten().any(|n| n == c))
+        })
         .collect();
     found.sort_by_key(|m| std::cmp::Reverse(m.message.received_millis()));
     let top = listing.top.clamp(1, 1000) as usize;
-    let value: Vec<Message> = found.iter().skip(offset).take(top).map(|m| m.message.clone()).collect();
+    let value: Vec<Message> = found
+        .iter()
+        .skip(offset)
+        .take(top)
+        .map(|m| m.message.clone())
+        .collect();
     let more = offset + value.len() < found.len();
     let next_link = if more {
         let slot = match slot {
@@ -438,7 +547,10 @@ pub(super) fn list_messages(
 pub(super) fn messages(s: &mut GraphState, ids: &[String]) -> Answer<Vec<Answer<Message>>> {
     s.refuses(Area::Mail)?;
     s.meta_fetches.push(ids.to_vec());
-    Ok(ids.iter().map(|id| held(s, id).map(|m| m.message.clone())).collect())
+    Ok(ids
+        .iter()
+        .map(|id| held(s, id).map(|m| m.message.clone()))
+        .collect())
 }
 
 pub(super) fn raw(s: &mut GraphState, id: &str, limit: usize) -> Answer<Vec<u8>> {
@@ -459,12 +571,20 @@ pub(super) fn body(s: &mut GraphState, id: &str) -> Answer<MessageBody> {
         .or_else(|| held.message.body_preview.clone())
         .unwrap_or_default();
     Ok(MessageBody {
-        body: ItemBody { content_type: "text".into(), content: text },
+        body: ItemBody {
+            content_type: "text".into(),
+            content: text,
+        },
         attachments: held.files.iter().map(|(info, _)| info.clone()).collect(),
     })
 }
 
-pub(super) fn attachment(s: &mut GraphState, message: &str, attachment: &str, limit: usize) -> Answer<Vec<u8>> {
+pub(super) fn attachment(
+    s: &mut GraphState,
+    message: &str,
+    attachment: &str,
+    limit: usize,
+) -> Answer<Vec<u8>> {
     s.refuses(Area::Mail)?;
     let (_, bytes) = held(s, message)?
         .files
@@ -505,7 +625,11 @@ fn write_one(s: &mut GraphState, write: &Write) -> Answer<()> {
         }
         Write::Delete { id } => {
             held(s, id)?;
-            let bin = s.well_known.get("deleteditems").cloned().ok_or(GraphError::NotFound)?;
+            let bin = s
+                .well_known
+                .get("deleteditems")
+                .cloned()
+                .ok_or(GraphError::NotFound)?;
             move_to(s, id, &bin);
         }
         Write::PermanentDelete { id } => {
@@ -521,13 +645,23 @@ pub(super) fn apply(s: &mut GraphState, writes: &[Write]) -> Answer<Vec<Answer<(
     Ok(writes.iter().map(|w| write_one(s, w)).collect())
 }
 
-pub(super) fn create_folder(s: &mut GraphState, parent: Option<&str>, name: &str) -> Answer<MailFolder> {
+pub(super) fn create_folder(
+    s: &mut GraphState,
+    parent: Option<&str>,
+    name: &str,
+) -> Answer<MailFolder> {
     s.refuses(Area::Mail)?;
     if parent.is_some_and(|p| !s.folders.contains_key(p)) {
         return Err(GraphError::NotFound);
     }
     let id = s.new_id("folder");
-    s.folders.insert(id.clone(), FakeFolder { name: name.into(), parent: parent.map(str::to_string) });
+    s.folders.insert(
+        id.clone(),
+        FakeFolder {
+            name: name.into(),
+            parent: parent.map(str::to_string),
+        },
+    );
     folder_info(s, &id).ok_or(GraphError::NotFound)
 }
 
@@ -547,7 +681,12 @@ pub(super) fn delete_folder(s: &mut GraphState, id: &str) -> Answer<()> {
     let mut at = 0;
     while at < doomed.len() {
         let parent = doomed[at].clone();
-        doomed.extend(s.folders.iter().filter(|(_, f)| f.parent.as_deref() == Some(&parent)).map(|(k, _)| k.clone()));
+        doomed.extend(
+            s.folders
+                .iter()
+                .filter(|(_, f)| f.parent.as_deref() == Some(&parent))
+                .map(|(k, _)| k.clone()),
+        );
         at += 1;
     }
     let lost: Vec<(String, String)> = s
@@ -567,23 +706,39 @@ pub(super) fn delete_folder(s: &mut GraphState, id: &str) -> Answer<()> {
     Ok(())
 }
 
-pub(super) fn set_category_color(s: &mut GraphState, id: &str, color: &str) -> Answer<MasterCategory> {
+pub(super) fn set_category_color(
+    s: &mut GraphState,
+    id: &str,
+    color: &str,
+) -> Answer<MasterCategory> {
     s.refuses(Area::Mail)?;
-    let category = s.categories.iter_mut().find(|c| c.id == id).ok_or(GraphError::NotFound)?;
+    let category = s
+        .categories
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or(GraphError::NotFound)?;
     category.color = color.into();
     Ok(category.clone())
 }
 
 pub(super) fn send_mime(s: &mut GraphState, raw: &[u8]) -> Answer<()> {
     s.refuses(Area::Mail)?;
-    let sent = s.well_known.get("sentitems").cloned().ok_or(GraphError::NotFound)?;
+    let sent = s
+        .well_known
+        .get("sentitems")
+        .cloned()
+        .ok_or(GraphError::NotFound)?;
     file_message(s, &sent, raw.to_vec(), false)?;
     s.sent.push(raw.to_vec());
     Ok(())
 }
 
 fn draft_message(s: &mut GraphState, raw: Vec<u8>) -> Answer<Message> {
-    let drafts = s.well_known.get("drafts").cloned().ok_or(GraphError::NotFound)?;
+    let drafts = s
+        .well_known
+        .get("drafts")
+        .cloned()
+        .ok_or(GraphError::NotFound)?;
     let id = file_message(s, &drafts, raw, true)?;
     Ok(held(s, &id)?.message.clone())
 }
@@ -607,7 +762,9 @@ pub(super) fn create_draft(s: &mut GraphState, draft: &Value) -> Answer<Message>
             builder = builder.to(address);
         }
     }
-    let raw = builder.write_to_vec().map_err(|e| GraphError::Decode(e.to_string()))?;
+    let raw = builder
+        .write_to_vec()
+        .map_err(|e| GraphError::Decode(e.to_string()))?;
     draft_message(s, raw)
 }
 
@@ -637,7 +794,13 @@ pub(super) fn upload_session(
     Ok(url)
 }
 
-pub(super) fn upload_chunk(s: &mut GraphState, url: &str, offset: u64, total: u64, bytes: &[u8]) -> Answer<bool> {
+pub(super) fn upload_chunk(
+    s: &mut GraphState,
+    url: &str,
+    offset: u64,
+    total: u64,
+    bytes: &[u8],
+) -> Answer<bool> {
     s.refuses(Area::Mail)?;
     let upload = s.uploads.get_mut(url).ok_or(GraphError::NotFound)?;
     if offset != upload.bytes.len() as u64 {
@@ -647,8 +810,13 @@ pub(super) fn upload_chunk(s: &mut GraphState, url: &str, offset: u64, total: u6
     if (upload.bytes.len() as u64) < total.max(upload.size) {
         return Ok(false);
     }
-    let Some(done) = s.uploads.remove(url) else { return Ok(false) };
-    let held = s.messages.get_mut(&done.message).ok_or(GraphError::NotFound)?;
+    let Some(done) = s.uploads.remove(url) else {
+        return Ok(false);
+    };
+    let held = s
+        .messages
+        .get_mut(&done.message)
+        .ok_or(GraphError::NotFound)?;
     let info = AttachmentInfo {
         id: format!("{}-att-{}", done.message, held.files.len()),
         name: done.name,
@@ -667,7 +835,11 @@ pub(super) fn upload_chunk(s: &mut GraphState, url: &str, offset: u64, total: u6
 pub(super) fn send_draft(s: &mut GraphState, id: &str) -> Answer<()> {
     s.refuses(Area::Mail)?;
     let raw = held(s, id)?.raw.clone();
-    let sent = s.well_known.get("sentitems").cloned().ok_or(GraphError::NotFound)?;
+    let sent = s
+        .well_known
+        .get("sentitems")
+        .cloned()
+        .ok_or(GraphError::NotFound)?;
     move_to(s, id, &sent);
     if let Some(message) = s.messages.get_mut(id) {
         message.message.is_draft = Some(false);
@@ -700,7 +872,10 @@ mod tests {
     ) -> (Vec<mailrs_graph::Message>, String) {
         let (mut seen, mut link) = (Vec::new(), link);
         loop {
-            let page = fake.message_delta(folder, link.as_deref(), SINCE).await.unwrap();
+            let page = fake
+                .message_delta(folder, link.as_deref(), Some(SINCE))
+                .await
+                .unwrap();
             seen.extend(page.value);
             match (page.next_link, page.delta_link) {
                 (Some(next), _) => link = Some(next),
@@ -714,7 +889,13 @@ mod tests {
     async fn a_delta_names_a_move_as_a_removal_and_an_addition() {
         let fake = FakeGraph::new();
         let (inbox, archive) = (fake.folder_id("inbox"), fake.folder_id("archive"));
-        let id = fake.deliver(&inbox, FakeMail { subject: "Lunch", ..FakeMail::default() });
+        let id = fake.deliver(
+            &inbox,
+            FakeMail {
+                subject: "Lunch",
+                ..FakeMail::default()
+            },
+        );
         let (first, inbox_link) = to_the_end(&fake, &inbox, None).await;
         assert_eq!(first.len(), 1);
         let (_, archive_link) = to_the_end(&fake, &archive, None).await;
@@ -722,7 +903,10 @@ mod tests {
         let (from_inbox, _) = to_the_end(&fake, &inbox, Some(inbox_link)).await;
         let (into_archive, _) = to_the_end(&fake, &archive, Some(archive_link)).await;
         assert!(from_inbox[0].removed.is_some() && from_inbox[0].id == id);
-        assert!(into_archive[0].removed.is_none() && into_archive[0].id == id, "the id stays");
+        assert!(
+            into_archive[0].removed.is_none() && into_archive[0].id == id,
+            "the id stays"
+        );
     }
 
     #[tokio::test]
@@ -731,7 +915,7 @@ mod tests {
         let inbox = fake.folder_id("inbox");
         let (_, link) = to_the_end(&fake, &inbox, None).await;
         fake.expire_links();
-        let lost = fake.message_delta(&inbox, Some(&link), SINCE).await;
+        let lost = fake.message_delta(&inbox, Some(&link), Some(SINCE)).await;
         assert!(matches!(lost, Err(GraphError::SyncStateLost)));
     }
 
@@ -741,7 +925,11 @@ mod tests {
         let inbox = fake.folder_id("inbox");
         fake.expire_links();
         let (_, link) = to_the_end(&fake, &inbox, None).await;
-        assert!(fake.message_delta(&inbox, Some(&link), SINCE).await.is_ok());
+        assert!(
+            fake.message_delta(&inbox, Some(&link), Some(SINCE))
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -749,9 +937,15 @@ mod tests {
         let fake = FakeGraph::new();
         let inbox = fake.folder_id("inbox");
         for i in 0..120 {
-            fake.deliver(&inbox, FakeMail { at: i, ..FakeMail::default() });
+            fake.deliver(
+                &inbox,
+                FakeMail {
+                    at: i,
+                    ..FakeMail::default()
+                },
+            );
         }
-        let page = fake.message_delta(&inbox, None, SINCE).await.unwrap();
+        let page = fake.message_delta(&inbox, None, Some(SINCE)).await.unwrap();
         assert_eq!(page.value.len(), 50);
         assert!(page.next_link.is_some() && page.delta_link.is_none());
     }
@@ -764,7 +958,10 @@ mod tests {
         let done = fake
             .apply(&[
                 Write::Delete { id: "gone".into() },
-                Write::Move { id: id.clone(), folder: fake.folder_id("archive") },
+                Write::Move {
+                    id: id.clone(),
+                    folder: fake.folder_id("archive"),
+                },
             ])
             .await
             .unwrap();
@@ -776,8 +973,20 @@ mod tests {
     async fn a_search_finds_the_subject_without_regard_to_case() {
         let fake = FakeGraph::new();
         let inbox = fake.folder_id("inbox");
-        fake.deliver(&inbox, FakeMail { subject: "Weekly Report", ..FakeMail::default() });
-        fake.deliver(&inbox, FakeMail { subject: "Lunch", ..FakeMail::default() });
+        fake.deliver(
+            &inbox,
+            FakeMail {
+                subject: "Weekly Report",
+                ..FakeMail::default()
+            },
+        );
+        fake.deliver(
+            &inbox,
+            FakeMail {
+                subject: "Lunch",
+                ..FakeMail::default()
+            },
+        );
         let listing = mailrs_graph::Listing {
             search: Some("subject:\"weekly report\"".into()),
             top: 10,
@@ -792,12 +1001,25 @@ mod tests {
         let fake = FakeGraph::new();
         let inbox = fake.folder_id("inbox");
         for i in 0..5 {
-            fake.deliver(&inbox, FakeMail { at: i, ..FakeMail::default() });
+            fake.deliver(
+                &inbox,
+                FakeMail {
+                    at: i,
+                    ..FakeMail::default()
+                },
+            );
         }
-        let listing = mailrs_graph::Listing { folder: Some(inbox), top: 3, ..Default::default() };
+        let listing = mailrs_graph::Listing {
+            folder: Some(inbox),
+            top: 3,
+            ..Default::default()
+        };
         let first = fake.list_messages(&listing, None).await.unwrap();
         assert_eq!(first.value.len(), 3);
-        let second = fake.list_messages(&listing, first.next_link.as_deref()).await.unwrap();
+        let second = fake
+            .list_messages(&listing, first.next_link.as_deref())
+            .await
+            .unwrap();
         assert_eq!(second.value.len(), 2);
         assert!(second.next_link.is_none());
     }
@@ -809,7 +1031,14 @@ mod tests {
         fake.send_mime(raw).await.unwrap();
         let sent = fake.folder_id("sentitems");
         let page = fake
-            .list_messages(&mailrs_graph::Listing { folder: Some(sent), top: 10, ..Default::default() }, None)
+            .list_messages(
+                &mailrs_graph::Listing {
+                    folder: Some(sent),
+                    top: 10,
+                    ..Default::default()
+                },
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(page.value[0].subject.as_deref(), Some("Hi"));
@@ -819,13 +1048,27 @@ mod tests {
     #[tokio::test]
     async fn an_upload_in_pieces_adds_the_file_to_the_draft() {
         let fake = FakeGraph::new();
-        let draft = fake.create_draft(&serde_json::json!({"subject": "With file"})).await.unwrap();
-        let url = fake.upload_session(&draft.id, "a.txt", 4, false, None).await.unwrap();
+        let draft = fake
+            .create_draft(&serde_json::json!({"subject": "With file"}))
+            .await
+            .unwrap();
+        let url = fake
+            .upload_session(&draft.id, "a.txt", 4, false, None)
+            .await
+            .unwrap();
         assert!(!fake.upload_chunk(&url, 0, 4, b"ab").await.unwrap());
-        assert!(fake.upload_chunk(&url, 1, 4, b"cd").await.is_err(), "a gap is refused");
+        assert!(
+            fake.upload_chunk(&url, 1, 4, b"cd").await.is_err(),
+            "a gap is refused"
+        );
         assert!(fake.upload_chunk(&url, 2, 4, b"cd").await.unwrap());
         let body = fake.body(&draft.id).await.unwrap();
         assert_eq!(body.attachments[0].name, "a.txt");
-        assert_eq!(fake.attachment(&draft.id, &body.attachments[0].id, 100).await.unwrap(), b"abcd");
+        assert_eq!(
+            fake.attachment(&draft.id, &body.attachments[0].id, 100)
+                .await
+                .unwrap(),
+            b"abcd"
+        );
     }
 }

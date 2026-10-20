@@ -326,7 +326,14 @@ fn spoken(unread: bool, invitation: bool, sender: &str, subject: &str, snippet: 
         (false, true) => gettext("Invitation, {sender}, {subject}, {snippet}"),
         (false, false) => gettext("{sender}, {subject}, {snippet}"),
     };
-    fill(&pattern, &[("sender", sender), ("subject", subject), ("snippet", snippet)])
+    fill(
+        &pattern,
+        &[
+            ("sender", sender),
+            ("subject", subject),
+            ("snippet", snippet),
+        ],
+    )
 }
 
 /// What opens a row's menu, at the point a click landed on, or over the
@@ -406,11 +413,15 @@ impl ThreadRow {
         };
         get(&imp.from).set_markup(&sender_markup(&name, &thread.from_email));
         get(&imp.from_name).set_text(&name);
-        imp.floor.replace(address_floor_markup(&name, &thread.from_email));
+        imp.floor
+            .replace(address_floor_markup(&name, &thread.from_email));
         let date = get(&imp.date);
         // A Send Later row's preview says when it goes.
         date.set_visible(!thread.scheduled);
-        imp.held.get().expect("held chip exists").set_visible(thread.held);
+        imp.held
+            .get()
+            .expect("held chip exists")
+            .set_visible(thread.held);
         date.set_label(&relative_date(thread.last_message_at, Local::now()));
         if thread.unread {
             date.add_css_class("unread");
@@ -545,8 +556,13 @@ mod tests {
     #[test]
     fn a_held_row_puts_the_servers_line_under_the_hour() {
         assert_eq!(
-            held_lines("Sends Mon 19 Oct at 08:30.\nThe server sends it even if Penguin Mail is closed."),
-            ("Sends Mon 19 Oct at 08:30.", Some("The server sends it even if Penguin Mail is closed."))
+            held_lines(
+                "Sends Mon 19 Oct at 08:30.\nThe server sends it even if Penguin Mail is closed."
+            ),
+            (
+                "Sends Mon 19 Oct at 08:30.",
+                Some("The server sends it even if Penguin Mail is closed.")
+            )
         );
         assert_eq!(
             held_lines("The server has not sent this message yet."),
@@ -556,7 +572,10 @@ mod tests {
 
     #[test]
     fn a_row_addressed_to_someone_draws_their_face() {
-        let theo = mailrs_domain::Address { name: Some("Theo Brandt".into()), email: "theo@example.org".into() };
+        let theo = mailrs_domain::Address {
+            name: Some("Theo Brandt".into()),
+            email: "theo@example.org".into(),
+        };
         let sent = mailrs_domain::ThreadSummary {
             from: "To Theo Brandt".into(),
             from_email: "me@example.org".into(),
@@ -570,7 +589,10 @@ mod tests {
             from_email: "ines@example.org".into(),
             ..Default::default()
         };
-        assert_eq!(super::person(&received), ("Ines Duarte", "ines@example.org"));
+        assert_eq!(
+            super::person(&received),
+            ("Ines Duarte", "ines@example.org")
+        );
         assert_eq!(super::display_name(&received), "Ines Duarte");
     }
 
@@ -597,7 +619,9 @@ mod tests {
         // "priya@" after it and drops the address below that.
         assert_eq!(
             address_floor_markup("Priya Raman", "priya@fernwood.example").as_deref(),
-            Some("Priya Raman\u{2002}<span weight=\"normal\" alpha=\"64%\" size=\"89%\">priya@</span>")
+            Some(
+                "Priya Raman\u{2002}<span weight=\"normal\" alpha=\"64%\" size=\"89%\">priya@</span>"
+            )
         );
     }
 
@@ -609,7 +633,10 @@ mod tests {
 
     #[test]
     fn a_name_that_is_the_address_shows_once() {
-        assert_eq!(sender_markup("k@uni.example", "k@uni.example"), "k@uni.example");
+        assert_eq!(
+            sender_markup("k@uni.example", "k@uni.example"),
+            "k@uni.example"
+        );
         assert_eq!(sender_markup("Kemi", ""), "Kemi");
     }
 
@@ -620,8 +647,14 @@ mod tests {
 
     #[test]
     fn a_row_says_what_its_marks_show() {
-        assert_eq!(spoken(false, false, "Ann", "Rent", "Due Friday"), "Ann, Rent, Due Friday");
-        assert_eq!(spoken(true, false, "Ann", "Rent", "Due Friday"), "Unread, Ann, Rent, Due Friday");
+        assert_eq!(
+            spoken(false, false, "Ann", "Rent", "Due Friday"),
+            "Ann, Rent, Due Friday"
+        );
+        assert_eq!(
+            spoken(true, false, "Ann", "Rent", "Due Friday"),
+            "Unread, Ann, Rent, Due Friday"
+        );
         assert_eq!(
             spoken(false, true, "Priya", "Design review", "Wednesday"),
             "Invitation, Priya, Design review, Wednesday"

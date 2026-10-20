@@ -80,7 +80,12 @@ impl Default for FakePop3 {
                 numbered: Vec::new(),
                 marked: BTreeSet::new(),
                 in_session: false,
-                capabilities: Capabilities { uidl: true, stls: false, sasl_plain: true, top: true },
+                capabilities: Capabilities {
+                    uidl: true,
+                    stls: false,
+                    sasl_plain: true,
+                    top: true,
+                },
                 refuse_sign_in: false,
                 failing: BTreeSet::new(),
                 broken: BTreeMap::new(),
@@ -125,7 +130,9 @@ impl FakePop3 {
 
     /// Puts a message on the server now, as mail arriving between checks.
     pub fn add(&self, uidl: &str, raw: &[u8]) {
-        self.lock().messages.push((uidl.to_string(), Arc::from(raw)));
+        self.lock()
+            .messages
+            .push((uidl.to_string(), Arc::from(raw)));
     }
 
     /// Takes a message off the server, as another client's DELE and QUIT
@@ -256,7 +263,11 @@ impl FakePop3 {
 
     /// The UIDLs the server holds now.
     pub fn held(&self) -> Vec<String> {
-        self.lock().messages.iter().map(|(uidl, _)| uidl.clone()).collect()
+        self.lock()
+            .messages
+            .iter()
+            .map(|(uidl, _)| uidl.clone())
+            .collect()
     }
 }
 
@@ -297,7 +308,10 @@ impl Inner {
 
     /// The bytes of message `id` this session.
     fn raw_at(&self, id: u32) -> Vec<u8> {
-        self.numbered.get(id as usize - 1).map(|(_, raw)| raw.to_vec()).unwrap_or_default()
+        self.numbered
+            .get(id as usize - 1)
+            .map(|(_, raw)| raw.to_vec())
+            .unwrap_or_default()
     }
 
     fn live(&self) -> impl Iterator<Item = (u32, &String, &Arc<[u8]>)> {
@@ -324,7 +338,9 @@ impl Pop3Api for FakePop3 {
             return Err(Pop3Error::Network("the server cannot be reached".into()));
         }
         if inner.refuse_sign_in {
-            return Err(Pop3Error::Auth { text: "invalid login".into() });
+            return Err(Pop3Error::Auth {
+                text: "invalid login".into(),
+            });
         }
         if !inner.capabilities.uidl {
             return Err(Pop3Error::Unsupported("UIDL"));
@@ -345,7 +361,10 @@ impl Pop3Api for FakePop3 {
         inner.commands.push("STAT");
         inner.session()?;
         let live: Vec<u64> = inner.live().map(|(_, _, raw)| raw.len() as u64).collect();
-        Ok(Stat { count: live.len() as u32, octets: live.iter().sum() })
+        Ok(Stat {
+            count: live.len() as u32,
+            octets: live.iter().sum(),
+        })
     }
 
     async fn uidl(&self) -> Result<UidlListing, Pop3Error> {
@@ -354,9 +373,15 @@ impl Pop3Api for FakePop3 {
         inner.session()?;
         let (garbled, messages): (Vec<Uidl>, Vec<Uidl>) = inner
             .live()
-            .map(|(id, uidl, _)| Uidl { id, uidl: uidl.clone() })
+            .map(|(id, uidl, _)| Uidl {
+                id,
+                uidl: uidl.clone(),
+            })
             .partition(|u| inner.garbled.contains(&u.uidl));
-        Ok(UidlListing { messages, unreadable: garbled.len() })
+        Ok(UidlListing {
+            messages,
+            unreadable: garbled.len(),
+        })
     }
 
     async fn list(&self) -> Result<Vec<ListItem>, Pop3Error> {
@@ -381,12 +406,18 @@ impl Pop3Api for FakePop3 {
             inner.hold.take()
         };
         if let Some(hold) = hold {
-            let mut gone = Abandoned { fake: self, waiting: true };
+            let mut gone = Abandoned {
+                fake: self,
+                waiting: true,
+            };
             hold.notified().await;
             gone.waiting = false;
         }
         let mut inner = self.lock();
-        if inner.drop_after_retrs.is_some_and(|n| inner.retr_calls.len() > n) {
+        if inner
+            .drop_after_retrs
+            .is_some_and(|n| inner.retr_calls.len() > n)
+        {
             inner.end_session();
             inner.gone = true;
             return Err(Pop3Error::Network("the connection dropped".into()));
@@ -411,7 +442,10 @@ impl Pop3Api for FakePop3 {
             return Err(err);
         }
         let raw = inner.raw_at(id);
-        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").map_or(raw.len(), |p| p + 4);
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map_or(raw.len(), |p| p + 4);
         let (head, body) = raw.split_at(split);
         let mut out = head.to_vec();
         for line in body.split_inclusive(|b| *b == b'\n').take(lines as usize) {
@@ -460,11 +494,23 @@ mod tests {
     #[tokio::test]
     async fn seeded_messages_answer_within_a_session() {
         let fake = FakePop3::default().with_message("u1", b"Subject: hi\r\n\r\nbody\r\n");
-        assert!(matches!(fake.uidl().await, Err(Pop3Error::Protocol(_))), "no session yet");
+        assert!(
+            matches!(fake.uidl().await, Err(Pop3Error::Protocol(_))),
+            "no session yet"
+        );
         fake.connect().await.unwrap();
-        assert_eq!(fake.uidl().await.unwrap().messages, [Uidl { id: 1, uidl: "u1".into() }]);
+        assert_eq!(
+            fake.uidl().await.unwrap().messages,
+            [Uidl {
+                id: 1,
+                uidl: "u1".into()
+            }]
+        );
         assert_eq!(fake.list().await.unwrap(), [ListItem { id: 1, octets: 21 }]);
-        assert_eq!(fake.retr(1, 21).await.unwrap(), b"Subject: hi\r\n\r\nbody\r\n");
+        assert_eq!(
+            fake.retr(1, 21).await.unwrap(),
+            b"Subject: hi\r\n\r\nbody\r\n"
+        );
         assert_eq!(fake.retr_calls(), [1]);
         fake.quit().await.unwrap();
         assert_eq!((fake.connects(), fake.in_flight()), (1, 0));
@@ -472,14 +518,25 @@ mod tests {
 
     #[tokio::test]
     async fn dele_takes_effect_only_at_a_clean_quit() {
-        let fake = FakePop3::default().with_message("u1", &pop3_mail(1)).with_message("u2", &pop3_mail(2));
+        let fake = FakePop3::default()
+            .with_message("u1", &pop3_mail(1))
+            .with_message("u2", &pop3_mail(2));
         fake.connect().await.unwrap();
         fake.dele(1).await.unwrap();
-        assert_eq!(fake.uidl().await.unwrap().messages, [Uidl { id: 2, uidl: "u2".into() }], "numbers hold for the session");
+        assert_eq!(
+            fake.uidl().await.unwrap().messages,
+            [Uidl {
+                id: 2,
+                uidl: "u2".into()
+            }],
+            "numbers hold for the session"
+        );
         fake.quit().await.unwrap();
         assert_eq!(fake.held(), ["u2"]);
 
-        let dropping = FakePop3::default().with_message("u1", &pop3_mail(1)).dropping_before_quit();
+        let dropping = FakePop3::default()
+            .with_message("u1", &pop3_mail(1))
+            .dropping_before_quit();
         dropping.connect().await.unwrap();
         dropping.dele(1).await.unwrap();
         assert!(matches!(dropping.quit().await, Err(Pop3Error::Network(_))));
@@ -489,19 +546,30 @@ mod tests {
 
     #[tokio::test]
     async fn a_second_session_meets_the_lock_and_scripted_failures_answer() {
-        let fake = FakePop3::default().with_message("u1", &pop3_mail(1)).failing_retr("u1").claiming_size("u1", 1 << 40);
+        let fake = FakePop3::default()
+            .with_message("u1", &pop3_mail(1))
+            .failing_retr("u1")
+            .claiming_size("u1", 1 << 40);
         fake.connect().await.unwrap();
         assert!(matches!(fake.connect().await, Err(Pop3Error::InUse(_))));
         assert_eq!(fake.most_in_flight(), 1);
         assert!(matches!(fake.retr(1, 0).await, Err(Pop3Error::Refused(_))));
         assert_eq!(fake.list().await.unwrap()[0].octets, 1 << 40);
-        assert!(matches!(FakePop3::default().refusing_sign_in().connect().await, Err(Pop3Error::Auth { .. })));
-        assert_eq!(FakePop3::default().without_uidl().connect().await, Err(Pop3Error::Unsupported("UIDL")));
+        assert!(matches!(
+            FakePop3::default().refusing_sign_in().connect().await,
+            Err(Pop3Error::Auth { .. })
+        ));
+        assert_eq!(
+            FakePop3::default().without_uidl().connect().await,
+            Err(Pop3Error::Unsupported("UIDL"))
+        );
     }
 
     #[tokio::test]
     async fn a_held_retr_waits_for_its_release() {
-        let (fake, release) = FakePop3::default().with_message("u1", &pop3_mail(1)).holding_retr();
+        let (fake, release) = FakePop3::default()
+            .with_message("u1", &pop3_mail(1))
+            .holding_retr();
         let fake = Arc::new(fake);
         fake.connect().await.unwrap();
         let waiting = tokio::spawn({

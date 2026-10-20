@@ -8,10 +8,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use adw::prelude::*;
-use mailrs_domain::translate::{fill_plural, gettext};
 use crate::ui::name;
 use crate::web::{Finder, WebView};
+use adw::prelude::*;
+use mailrs_domain::translate::{fill_plural, gettext};
 
 /// Where a search stands: the query, how many matches the page holds,
 /// and which one is highlighted.

@@ -28,7 +28,10 @@ const FAR: i64 = 5 * 365 * 24 * 60 * 60 * 1000;
 
 fn at(ms: i64) -> DateTimeZone {
     let when = chrono::DateTime::from_timestamp_millis(ms).unwrap_or_default();
-    DateTimeZone { date_time: when.format("%Y-%m-%dT%H:%M:%S").to_string(), time_zone: "UTC".into() }
+    DateTimeZone {
+        date_time: when.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        time_zone: "UTC".into(),
+    }
 }
 
 fn millis(at: &DateTimeZone) -> Option<i64> {
@@ -39,8 +42,14 @@ fn millis(at: &DateTimeZone) -> Option<i64> {
 
 /// Plain text as the HTML Graph keeps: escaped, a `<br>` per line.
 fn html_of(text: &str) -> String {
-    let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    format!("<p>{}</p>", escaped.lines().collect::<Vec<_>>().join("<br>"))
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(
+        "<p>{}</p>",
+        escaped.lines().collect::<Vec<_>>().join("<br>")
+    )
 }
 
 /// The reply as the dialog shows it. A schedule that runs years past its
@@ -49,8 +58,12 @@ fn html_of(text: &str) -> String {
 fn vacation_of(replies: &AutomaticReplies, now: i64) -> Vacation {
     let enabled = replies.status != "disabled";
     let scheduled = replies.status == "scheduled";
-    let mut start = scheduled.then(|| replies.scheduled_start_date_time.as_ref().and_then(millis)).flatten();
-    let mut end = scheduled.then(|| replies.scheduled_end_date_time.as_ref().and_then(millis)).flatten();
+    let mut start = scheduled
+        .then(|| replies.scheduled_start_date_time.as_ref().and_then(millis))
+        .flatten();
+    let mut end = scheduled
+        .then(|| replies.scheduled_end_date_time.as_ref().and_then(millis))
+        .flatten();
     if let (Some(from), Some(to)) = (start, end)
         && to - from >= FAR
     {
@@ -60,7 +73,9 @@ fn vacation_of(replies: &AutomaticReplies, now: i64) -> Vacation {
     Vacation {
         enabled,
         subject: String::new(),
-        body: html_to_text(&replies.internal_reply_message).trim().to_string(),
+        body: html_to_text(&replies.internal_reply_message)
+            .trim()
+            .to_string(),
         contacts_only: replies.external_audience == "contactsOnly",
         // A mailbox whose reply is off still names an audience, and a new
         // Outlook.com one names `none`. The dialog does not show this
@@ -99,7 +114,10 @@ fn replies_of(vacation: &Vacation, now: i64) -> AutomaticReplies {
 
 /// The words of a reply message, whatever HTML Graph wraps them in.
 fn words(html: &str) -> String {
-    html_to_text(html).split_whitespace().collect::<Vec<_>>().join(" ")
+    html_to_text(html)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Whether the mailbox kept the status and, for a reply that is on, the
@@ -188,7 +206,11 @@ mod tests {
     #[test]
     fn a_reply_with_a_later_start_and_no_end_keeps_its_start() {
         let now = 1_790_000_000_000;
-        let away = Vacation { enabled: true, start: Some(now + 3 * DAY), ..Vacation::default() };
+        let away = Vacation {
+            enabled: true,
+            start: Some(now + 3 * DAY),
+            ..Vacation::default()
+        };
         let read = vacation_of(&replies_of(&away, now), now);
         assert_eq!((read.start, read.end), (Some(now + 3 * DAY), None));
     }

@@ -87,7 +87,9 @@ fn ask_snapctl() -> Option<i32> {
 static CHECKED: Mutex<Option<Plug>> = Mutex::new(None);
 
 fn last_checked() -> Option<Plug> {
-    *CHECKED.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    *CHECKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The plug as the last check found it; `Unknown` in a snap before the
@@ -118,7 +120,9 @@ pub async fn check(unplugged_demo: bool) -> Plug {
     if plug != Plug::NotNeeded {
         tracing::info!(?plug, "read the password-manager-service plug");
     }
-    *CHECKED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(plug);
+    *CHECKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(plug);
     plug
 }
 

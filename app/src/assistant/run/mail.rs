@@ -160,7 +160,11 @@ impl<A: Accounts> Tools<A> {
         let targets = self.parse_targets(input)?;
         let muted = flag(input, "mute").unwrap_or(true);
         let from = self.moved_from(input)?;
-        report(&self.act_from(targets, MailAction::Mute { muted }, from).await)
+        report(
+            &self
+                .act_from(targets, MailAction::Mute { muted }, from)
+                .await,
+        )
     }
 
     pub(super) async fn delete_forever<'a>(&'a self, input: &'a Value) -> Result<Plan<'a>, String> {
@@ -287,7 +291,9 @@ impl<A: Accounts> Tools<A> {
         // Sending rebuilds the message from the draft as Gmail holds it,
         // which is the only copy of its Bcc, its reply headers and its files.
         let (s, id) = (Arc::clone(&sync), message.id.clone());
-        let raw = self.call(async move { s.raw_message(&id).await }).await?;
+        let raw = self
+            .call_for(account.id, async move { s.raw_message(&id).await })
+            .await?;
         // An encrypted draft opens only with the writer's passphrase, so
         // the writer sends that one from the composer.
         if crate::protection::draft::standard_of(&raw).is_some() {
@@ -295,7 +301,7 @@ impl<A: Accounts> Tools<A> {
         }
         let id = message.id.clone();
         let draft_id = self
-            .call(async move { sync.draft_id_for(&id).await })
+            .call_for(account.id, async move { sync.draft_id_for(&id).await })
             .await?
             .ok_or("Gmail no longer holds that draft.")?;
         let mut draft = self.effects.new_draft(account.id)?;
@@ -348,18 +354,22 @@ impl<A: Accounts> Tools<A> {
     }
 
     pub(super) async fn read_attachment(&self, input: &Value) -> ToolResult {
-        let (_, sync) = self.sync_for(&required(input, "account")?)?;
+        let (account, sync) = self.sync_for(&required(input, "account")?)?;
         let message_id = required(input, "message_id")?;
         let wanted = required(input, "attachment")?;
         let (s, id) = (Arc::clone(&sync), message_id.clone());
-        let body = self.call(async move { s.body(&id).await }).await?;
+        let body = self
+            .call_for(account.id, async move { s.body(&id).await })
+            .await?;
         let file = named_attachment(&body.attachments, &wanted)?;
         let handle = file
             .attachment_id
             .clone()
             .ok_or("The server gives no way to fetch that attachment.")?;
         let bytes = self
-            .call(async move { sync.attachment(&message_id, &handle).await })
+            .call_for(account.id, async move {
+                sync.attachment(&message_id, &handle).await
+            })
             .await?;
         let mut result = json!({
             "name": file.filename,
@@ -368,7 +378,9 @@ impl<A: Accounts> Tools<A> {
         });
         let text = match kind_of(&file.mime_type, &file.filename) {
             Kind::Text => Some(String::from_utf8_lossy(&bytes).into_owned()),
-            Kind::Html => Some(mailrs_mime::html::html_to_text(&String::from_utf8_lossy(&bytes))),
+            Kind::Html => Some(mailrs_mime::html::html_to_text(&String::from_utf8_lossy(
+                &bytes,
+            ))),
             Kind::Pdf => match self.away(pdf_text(bytes)).await?? {
                 Some(text) => Some(text),
                 None => {

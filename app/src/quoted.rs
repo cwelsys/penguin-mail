@@ -23,8 +23,10 @@ fn html_history(html: &str) -> Option<Range<usize>> {
         let kind = tree.opens_history(at)?;
         let node = &tree.nodes[at];
         let parent = &tree.nodes[node.parent];
-        if ["p", "table", "tbody", "thead", "tr", "ul", "ol", "dl", "select"]
-            .contains(&tree.name(parent))
+        if [
+            "p", "table", "tbody", "thead", "tr", "ul", "ol", "dl", "select",
+        ]
+        .contains(&tree.name(parent))
         {
             return None;
         }
@@ -151,8 +153,8 @@ struct Tree<'a> {
 }
 
 const VOID: [&str; 14] = [
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-    "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 
 const INLINE: [&str; 11] = [
@@ -220,9 +222,7 @@ impl<'a> Tree<'a> {
                 tree.push(at, close, close, close, parent, false);
                 at = close;
             } else if name == "style" || name == "script" {
-                let inner = html[close..]
-                    .find("</")
-                    .map_or(html.len(), |i| close + i);
+                let inner = html[close..].find("</").map_or(html.len(), |i| close + i);
                 let end = tag_close(html, inner);
                 tree.push(at, close, inner, end, parent, false);
                 at = end;
@@ -374,7 +374,10 @@ impl<'a> Tree<'a> {
         let from = ["From:", "De:"].iter().any(|w| words.starts_with(w));
         // 1200 bytes can end inside a character, such as a receipt's
         // figure space, so the cut moves back to where that one starts.
-        let head = &self.html[node.start..self.html.floor_char_boundary(node.end.min(node.start + 1200))];
+        let head = &self.html[node.start
+            ..self
+                .html
+                .floor_char_boundary(node.end.min(node.start + 1200))];
         let sent = ["Sent:", "Enviado:", "Enviada:", "Date:", "Data:"]
             .iter()
             .any(|w| head.contains(w));
@@ -515,10 +518,7 @@ mod tests {
     fn fold(html: &str) -> Option<(String, String)> {
         let clean = sanitize_html(html, None);
         let range = history_in_html(&clean)?;
-        Some((
-            clean[..range.start].to_string(),
-            clean[range].to_string(),
-        ))
+        Some((clean[..range.start].to_string(), clean[range].to_string()))
     }
 
     #[test]
@@ -532,7 +532,10 @@ mod tests {
              <div dir=\"ltr\">Lunch on Monday?</div></blockquote></div>",
         )
         .expect("a fold");
-        assert!(shown.contains("Sounds good") && !shown.contains("wrote:"), "{shown}");
+        assert!(
+            shown.contains("Sounds good") && !shown.contains("wrote:"),
+            "{shown}"
+        );
         assert!(hidden.starts_with("<div class=\"gmail_quote"), "{hidden}");
         assert!(hidden.contains("Lunch on Monday?"), "{hidden}");
     }
@@ -559,22 +562,32 @@ mod tests {
         )
         .expect("a fold");
         assert!(shown.contains("Monday works."), "{shown}");
-        assert!(hidden.starts_with("<p style=\"margin:0 0 1em\">On Monday"), "{hidden}");
+        assert!(
+            hidden.starts_with("<p style=\"margin:0 0 1em\">On Monday"),
+            "{hidden}"
+        );
         assert!(hidden.ends_with("</blockquote>"), "{hidden}");
     }
 
     #[test]
     fn a_reply_quoted_one_blockquote_per_paragraph_still_folds() {
-        let quote = "<blockquote style=\"margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-left:1ex\">";
+        let quote =
+            "<blockquote style=\"margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-left:1ex\">";
         let (shown, hidden) = fold(&format!(
             "<div><p>Here is the video.</p><p>On Wednesday, 30 September 2026 at 02:01, Ann Lee wrote:</p>\
              {quote}<p>Hello,</p></blockquote>{quote}<p>Thank you for waiting.</p></blockquote>\
              {quote}<p>Ann</p></blockquote></div>"
         ))
         .expect("a fold");
-        assert!(shown.contains("Here is the video.") && !shown.contains("wrote:"), "{shown}");
+        assert!(
+            shown.contains("Here is the video.") && !shown.contains("wrote:"),
+            "{shown}"
+        );
         assert!(hidden.starts_with("<p>On Wednesday"), "{hidden}");
-        assert!(hidden.contains("Thank you for waiting.") && hidden.ends_with("</blockquote>"), "{hidden}");
+        assert!(
+            hidden.contains("Thank you for waiting.") && hidden.ends_with("</blockquote>"),
+            "{hidden}"
+        );
     }
 
     #[test]
@@ -640,7 +653,10 @@ mod tests {
         )
         .expect("a fold");
         assert!(shown.contains("Works for me."), "{shown}");
-        assert!(hidden.starts_with("<div class=\"moz-cite-prefix\">"), "{hidden}");
+        assert!(
+            hidden.starts_with("<div class=\"moz-cite-prefix\">"),
+            "{hidden}"
+        );
     }
 
     #[test]
@@ -702,7 +718,9 @@ mod tests {
     #[test]
     fn a_quote_nobody_is_said_to_have_written_stays() {
         assert_eq!(
-            fold("<p>As the poem goes:</p><blockquote>The fog comes on little cat feet.</blockquote>"),
+            fold(
+                "<p>As the poem goes:</p><blockquote>The fog comes on little cat feet.</blockquote>"
+            ),
             None
         );
     }
@@ -723,7 +741,10 @@ mod tests {
 
     #[test]
     fn plain_text_with_answers_between_quotes_stays_whole() {
-        assert_eq!(history_in_text("> Lunch?\nYes.\n> Where?\nThe usual place.\n"), None);
+        assert_eq!(
+            history_in_text("> Lunch?\nYes.\n> Where?\nThe usual place.\n"),
+            None
+        );
     }
 
     #[test]

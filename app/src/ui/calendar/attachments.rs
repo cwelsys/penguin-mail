@@ -42,7 +42,12 @@ pub fn uploaded(answer: Result<Permitted<Attachment>, SyncError>) -> Uploaded {
 /// office formats share the office icons; anything else falls back on its
 /// top-level type, and an unknown type on the paper clip.
 pub fn icon_name(mime: &str) -> &'static str {
-    let mime = mime.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    let mime = mime
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
     let (top, sub) = mime.split_once('/').unwrap_or((mime.as_str(), ""));
     let has = |words: &[&str]| words.iter().any(|w| sub.contains(w));
     if top == "application" && has(&["google-apps.folder"]) {
@@ -53,9 +58,18 @@ pub fn icon_name(mime: &str) -> &'static str {
         "x-office-spreadsheet-symbolic"
     } else if has(&["presentation", "ms-powerpoint"]) {
         "x-office-presentation-symbolic"
-    } else if top == "application" && (has(&["google-apps.document", "wordprocessing", "opendocument.text", "msword"]) || sub == "pdf") {
+    } else if top == "application"
+        && (has(&[
+            "google-apps.document",
+            "wordprocessing",
+            "opendocument.text",
+            "msword",
+        ]) || sub == "pdf")
+    {
         "x-office-document-symbolic"
-    } else if top == "application" && has(&["zip", "gzip", "x-tar", "x-7z", "x-rar", "x-bzip", "x-xz"]) {
+    } else if top == "application"
+        && has(&["zip", "gzip", "x-tar", "x-7z", "x-rar", "x-bzip", "x-xz"])
+    {
         "package-x-generic-symbolic"
     } else {
         match top {
@@ -90,7 +104,10 @@ pub fn note(file: &Attachment) -> Option<String> {
         None => gettext("Uploads when you are back online"),
         Some(UploadProblem::NeedsAccess) => gettext("Waiting for access"),
         Some(UploadProblem::NotFound) => gettext("File not found"),
-        Some(UploadProblem::Refused(reason)) => fill(&gettext("Could not upload: {reason}"), &[("reason", reason)]),
+        Some(UploadProblem::Refused(reason)) => fill(
+            &gettext("Could not upload: {reason}"),
+            &[("reason", reason)],
+        ),
     })
 }
 
@@ -114,7 +131,10 @@ pub fn open(file: &Attachment, from: &impl IsA<gtk::Widget>) {
 
 /// The words a screen reader hears for a row that opens `file`.
 pub fn open_words(file: &Attachment) -> String {
-    fill(&gettext("Open {file} in the browser"), &[("file", &title(file))])
+    fill(
+        &gettext("Open {file} in the browser"),
+        &[("file", &title(file))],
+    )
 }
 
 /// A row for `file`: its icon, its title, what happens to it if it still
@@ -150,9 +170,15 @@ pub(crate) mod checks {
     /// A row reads its title as Pango markup unless told otherwise, and a
     /// Drive file called "Q&A.pdf" failed to parse and showed no title.
     fn a_file_name_with_markup_characters_shows_as_written() {
-        let file = Attachment { title: "Q&A <draft>.pdf".into(), ..Attachment::default() };
+        let file = Attachment {
+            title: "Q&A <draft>.pdf".into(),
+            ..Attachment::default()
+        };
         let row = row(&file);
-        assert!(!row.uses_markup(), "a file's name is shown as text, not markup");
+        assert!(
+            !row.uses_markup(),
+            "a file's name is shown as text, not markup"
+        );
         assert_eq!(row.title(), "Q&A <draft>.pdf");
     }
 }
@@ -172,11 +198,26 @@ mod tests {
 
     #[test]
     fn google_files_take_the_office_icon_of_their_kind() {
-        assert_eq!(icon_name("application/vnd.google-apps.document"), "x-office-document-symbolic");
-        assert_eq!(icon_name("application/vnd.google-apps.spreadsheet"), "x-office-spreadsheet-symbolic");
-        assert_eq!(icon_name("application/vnd.google-apps.presentation"), "x-office-presentation-symbolic");
-        assert_eq!(icon_name("application/vnd.google-apps.drawing"), "x-office-drawing-symbolic");
-        assert_eq!(icon_name("application/vnd.google-apps.folder"), "inode-directory-symbolic");
+        assert_eq!(
+            icon_name("application/vnd.google-apps.document"),
+            "x-office-document-symbolic"
+        );
+        assert_eq!(
+            icon_name("application/vnd.google-apps.spreadsheet"),
+            "x-office-spreadsheet-symbolic"
+        );
+        assert_eq!(
+            icon_name("application/vnd.google-apps.presentation"),
+            "x-office-presentation-symbolic"
+        );
+        assert_eq!(
+            icon_name("application/vnd.google-apps.drawing"),
+            "x-office-drawing-symbolic"
+        );
+        assert_eq!(
+            icon_name("application/vnd.google-apps.folder"),
+            "inode-directory-symbolic"
+        );
     }
 
     #[test]
@@ -186,9 +227,18 @@ mod tests {
             icon_name("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             "x-office-document-symbolic"
         );
-        assert_eq!(icon_name("application/vnd.oasis.opendocument.text"), "x-office-document-symbolic");
-        assert_eq!(icon_name("application/msword"), "x-office-document-symbolic");
-        assert_eq!(icon_name("application/vnd.ms-excel"), "x-office-spreadsheet-symbolic");
+        assert_eq!(
+            icon_name("application/vnd.oasis.opendocument.text"),
+            "x-office-document-symbolic"
+        );
+        assert_eq!(
+            icon_name("application/msword"),
+            "x-office-document-symbolic"
+        );
+        assert_eq!(
+            icon_name("application/vnd.ms-excel"),
+            "x-office-spreadsheet-symbolic"
+        );
         assert_eq!(
             icon_name("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             "x-office-spreadsheet-symbolic"
@@ -198,7 +248,10 @@ mod tests {
             icon_name("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
             "x-office-presentation-symbolic"
         );
-        assert_eq!(icon_name("application/vnd.oasis.opendocument.presentation"), "x-office-presentation-symbolic");
+        assert_eq!(
+            icon_name("application/vnd.oasis.opendocument.presentation"),
+            "x-office-presentation-symbolic"
+        );
     }
 
     #[test]
@@ -211,7 +264,12 @@ mod tests {
 
     #[test]
     fn archives_take_the_package_icon() {
-        for mime in ["application/zip", "application/gzip", "application/x-tar", "application/x-7z-compressed"] {
+        for mime in [
+            "application/zip",
+            "application/gzip",
+            "application/x-tar",
+            "application/x-7z-compressed",
+        ] {
             assert_eq!(icon_name(mime), "package-x-generic-symbolic", "{mime}");
         }
     }
@@ -219,23 +277,35 @@ mod tests {
     #[test]
     fn a_type_read_in_any_case_or_with_parameters_finds_its_icon() {
         assert_eq!(icon_name("Image/JPEG"), "image-x-generic-symbolic");
-        assert_eq!(icon_name("text/plain; charset=utf-8"), "text-x-generic-symbolic");
+        assert_eq!(
+            icon_name("text/plain; charset=utf-8"),
+            "text-x-generic-symbolic"
+        );
     }
 
     #[test]
     fn an_unknown_or_missing_type_takes_the_paper_clip() {
-        assert_eq!(icon_name("application/octet-stream"), "mail-attachment-symbolic");
+        assert_eq!(
+            icon_name("application/octet-stream"),
+            "mail-attachment-symbolic"
+        );
         assert_eq!(icon_name(""), "mail-attachment-symbolic");
     }
 
     #[test]
     fn a_row_shows_the_files_title() {
-        assert_eq!(title(&named("  Agenda.pdf ", "application/pdf")), "Agenda.pdf");
+        assert_eq!(
+            title(&named("  Agenda.pdf ", "application/pdf")),
+            "Agenda.pdf"
+        );
     }
 
     #[test]
     fn a_waiting_file_without_a_title_shows_its_file_name() {
-        let waiting = Attachment { waiting: Some("/home/me/Slides/Plan.odp".into()), ..Attachment::default() };
+        let waiting = Attachment {
+            waiting: Some("/home/me/Slides/Plan.odp".into()),
+            ..Attachment::default()
+        };
         assert_eq!(title(&waiting), "Plan.odp");
     }
 
@@ -247,7 +317,10 @@ mod tests {
     #[test]
     fn an_upload_that_went_through_is_linked() {
         let file = named("Agenda.pdf", "application/pdf");
-        assert_eq!(uploaded(Ok(Permitted::Done(file.clone()))), Uploaded::Done(file));
+        assert_eq!(
+            uploaded(Ok(Permitted::Done(file.clone()))),
+            Uploaded::Done(file)
+        );
     }
 
     #[test]
@@ -260,47 +333,76 @@ mod tests {
 
     #[test]
     fn an_upload_without_drive_asks_for_it() {
-        assert_eq!(uploaded(Ok(Permitted::NeedsPermission)), Uploaded::NeedsPermission);
+        assert_eq!(
+            uploaded(Ok(Permitted::NeedsPermission)),
+            Uploaded::NeedsPermission
+        );
     }
 
     #[test]
     fn a_refused_upload_says_why() {
         let refused = SyncError::Backend(BackendError::Refused("the file is too large".into()));
-        assert_eq!(uploaded(Err(refused)), Uploaded::Failed("refused: the file is too large".into()));
+        assert_eq!(
+            uploaded(Err(refused)),
+            Uploaded::Failed("refused: the file is too large".into())
+        );
     }
 
     fn stuck(problem: UploadProblem) -> Attachment {
-        Attachment { waiting: Some("/home/me/Plan.odp".into()), problem: Some(problem), ..named("Plan.odp", "") }
+        Attachment {
+            waiting: Some("/home/me/Plan.odp".into()),
+            problem: Some(problem),
+            ..named("Plan.odp", "")
+        }
     }
 
     #[test]
     fn a_file_waiting_for_drive_access_says_so() {
-        assert_eq!(note(&stuck(UploadProblem::NeedsAccess)).as_deref(), Some("Waiting for access"));
+        assert_eq!(
+            note(&stuck(UploadProblem::NeedsAccess)).as_deref(),
+            Some("Waiting for access")
+        );
     }
 
     #[test]
     fn a_file_that_moved_says_it_is_not_found() {
-        assert_eq!(note(&stuck(UploadProblem::NotFound)).as_deref(), Some("File not found"));
+        assert_eq!(
+            note(&stuck(UploadProblem::NotFound)).as_deref(),
+            Some("File not found")
+        );
     }
 
     #[test]
     fn a_file_drive_refused_says_why() {
         let refused = stuck(UploadProblem::Refused("the file is too large".into()));
-        assert_eq!(note(&refused).as_deref(), Some("Could not upload: the file is too large"));
+        assert_eq!(
+            note(&refused).as_deref(),
+            Some("Could not upload: the file is too large")
+        );
     }
 
     fn uploaded_by_us(share: bool) -> Attachment {
-        Attachment { share: Some(share), file_id: "1abc".into(), ..named("Plan.odp", "") }
+        Attachment {
+            share: Some(share),
+            file_id: "1abc".into(),
+            ..named("Plan.odp", "")
+        }
     }
 
     #[test]
     fn a_shared_file_tells_the_organizer_the_guests_can_open_it() {
-        assert_eq!(share_note(&uploaded_by_us(true), true).as_deref(), Some("Guests can open this file"));
+        assert_eq!(
+            share_note(&uploaded_by_us(true), true).as_deref(),
+            Some("Guests can open this file")
+        );
     }
 
     #[test]
     fn an_unshared_file_says_the_guests_cannot() {
-        assert_eq!(share_note(&uploaded_by_us(false), true).as_deref(), Some("Not shared with the guests"));
+        assert_eq!(
+            share_note(&uploaded_by_us(false), true).as_deref(),
+            Some("Not shared with the guests")
+        );
     }
 
     #[test]
@@ -316,7 +418,13 @@ mod tests {
 
     #[test]
     fn a_waiting_file_says_when_it_uploads() {
-        let waiting = Attachment { waiting: Some("/home/me/Plan.odp".into()), ..named("Plan.odp", "") };
-        assert_eq!(note(&waiting).as_deref(), Some("Uploads when you are back online"));
+        let waiting = Attachment {
+            waiting: Some("/home/me/Plan.odp".into()),
+            ..named("Plan.odp", "")
+        };
+        assert_eq!(
+            note(&waiting).as_deref(),
+            Some("Uploads when you are back online")
+        );
     }
 }

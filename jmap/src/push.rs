@@ -51,7 +51,9 @@ pub struct StateChange {
 
 impl StateChange {
     pub fn touches(&self, account: &str, types: &[&str]) -> bool {
-        self.changed.get(account).is_some_and(|moved| moved.keys().any(|t| types.contains(&t.as_str())))
+        self.changed
+            .get(account)
+            .is_some_and(|moved| moved.keys().any(|t| types.contains(&t.as_str())))
     }
 }
 
@@ -81,13 +83,19 @@ impl Parser {
     /// when the line ends one.
     pub fn line(&mut self, line: &str) -> Option<StateChange> {
         if line.is_empty() {
-            let (event, data) = (std::mem::take(&mut self.event), std::mem::take(&mut self.data));
+            let (event, data) = (
+                std::mem::take(&mut self.event),
+                std::mem::take(&mut self.data),
+            );
             if std::mem::take(&mut self.too_big) || event == "ping" || data.is_empty() {
                 return None;
             }
             let parsed: serde_json::Value = serde_json::from_str(&data).ok()?;
-            let says_state = event == "state" || parsed.get("@type").and_then(|t| t.as_str()) == Some("StateChange");
-            return says_state.then(|| serde_json::from_value(parsed).ok()).flatten();
+            let says_state = event == "state"
+                || parsed.get("@type").and_then(|t| t.as_str()) == Some("StateChange");
+            return says_state
+                .then(|| serde_json::from_value(parsed).ok())
+                .flatten();
         }
         if line.starts_with(':') {
             return None;
@@ -181,7 +189,9 @@ impl EventStream {
         match self.read(idle, "the event stream did not open").await? {
             Read::Opened => Ok(()),
             Read::Failed(err) => Err(err),
-            Read::Bytes(_) => Err(JmapError::Network("the event stream sent bytes before its head".into())),
+            Read::Bytes(_) => Err(JmapError::Network(
+                "the event stream sent bytes before its head".into(),
+            )),
         }
     }
 
@@ -201,7 +211,9 @@ impl EventStream {
             }
             // Only a line still waiting for its end counts against the cap.
             if self.pending.len() > MOST_EVENT_BYTES {
-                return Err(JmapError::AnswerTooLarge { limit: MOST_EVENT_BYTES });
+                return Err(JmapError::AnswerTooLarge {
+                    limit: MOST_EVENT_BYTES,
+                });
             }
             match self.read(idle, "the event stream went quiet").await? {
                 Read::Bytes(chunk) => self.pending.extend_from_slice(&chunk),
@@ -216,16 +228,26 @@ impl JmapClient {
     /// Starts the task that opens the stream and reads it, and marks the
     /// stream open from now on: a call stalled behind a stream that is
     /// still opening can close it too.
-    async fn open_events(&self, template: &str, refused: Option<&HeaderValue>) -> Result<(EventStream, HeaderValue), JmapError> {
+    async fn open_events(
+        &self,
+        template: &str,
+        refused: Option<&HeaderValue>,
+    ) -> Result<(EventStream, HeaderValue), JmapError> {
         let ping = PING_SECONDS.to_string();
         let url = match template.contains("{types}") {
             true => {
-                let url = expand(template, &[("types", TYPES), ("closeafter", "no"), ("ping", &ping)]);
+                let url = expand(
+                    template,
+                    &[("types", TYPES), ("closeafter", "no"), ("ping", &ping)],
+                );
                 self.endpoint(&url)?
             }
             false => {
                 let mut url = self.endpoint(template)?;
-                url.query_pairs_mut().append_pair("types", TYPES).append_pair("closeafter", "no").append_pair("ping", &ping);
+                url.query_pairs_mut()
+                    .append_pair("types", TYPES)
+                    .append_pair("closeafter", "no")
+                    .append_pair("ping", &ping);
                 url
             }
         };
@@ -237,7 +259,15 @@ impl JmapClient {
         self.set_probing(true);
         self.set_streaming(true);
         self.keep_reader(reader.clone());
-        Ok((EventStream { reads, reader, pending: Vec::new(), parser: Parser::new() }, header))
+        Ok((
+            EventStream {
+                reads,
+                reader,
+                pending: Vec::new(),
+                parser: Parser::new(),
+            },
+            header,
+        ))
     }
 
     /// Waits until the server says the mail account changed. The stream
@@ -260,7 +290,10 @@ impl JmapClient {
         let Some(template) = session.event_source_url.clone() else {
             return Ok(Pushed::NoPush);
         };
-        let account = session.account_for(MAIL).ok_or_else(|| JmapError::UnknownCapability(MAIL.into()))?.to_string();
+        let account = session
+            .account_for(MAIL)
+            .ok_or_else(|| JmapError::UnknownCapability(MAIL.into()))?
+            .to_string();
         let mut held = self.events().lock().await;
         let close = |held: &mut Option<EventStream>, err: JmapError| {
             *held = None;
@@ -294,16 +327,22 @@ impl JmapClient {
                 match self.answers_beside_a_stream().await {
                     Ok(true) => self.set_probing(false),
                     Ok(false) => {
-                        tracing::info!("the server holds calls while a push stream is open; polling instead");
+                        tracing::info!(
+                            "the server holds calls while a push stream is open; polling instead"
+                        );
                         self.stop_pushing();
                         return close(&mut held, JmapError::Network("push was turned off".into()));
                     }
                     Err(err) => return close(&mut held, err),
                 }
             }
-            let Some(stream) = held.as_mut() else { continue };
+            let Some(stream) = held.as_mut() else {
+                continue;
+            };
             match stream.next(idle).await {
-                Ok(change) if change.touches(&account, &["Email", "Mailbox", "EmailDelivery"]) => return Ok(Pushed::Changed),
+                Ok(change) if change.touches(&account, &["Email", "Mailbox", "EmailDelivery"]) => {
+                    return Ok(Pushed::Changed);
+                }
                 Ok(_) => {}
                 Err(err) => return close(&mut held, err),
             }
@@ -317,7 +356,9 @@ impl JmapClient {
             return Ok(Pushed::NoPush);
         }
         match self.push_paused() {
-            Some(_) => Err(JmapError::Network("a call stalled behind the event stream".into())),
+            Some(_) => Err(JmapError::Network(
+                "a call stalled behind the event stream".into(),
+            )),
             None => Err(err),
         }
     }
@@ -377,7 +418,10 @@ mod tests {
 
     #[test]
     fn an_event_without_a_name_counts_as_state_when_it_says_state_change() {
-        let got = fed(&[r#"data: {"@type":"StateChange","changed":{"A1":{"EmailDelivery":"d1"}}}"#, ""]);
+        let got = fed(&[
+            r#"data: {"@type":"StateChange","changed":{"A1":{"EmailDelivery":"d1"}}}"#,
+            "",
+        ]);
         assert!(got[0].touches("A1", &["EmailDelivery"]));
     }
 
@@ -393,7 +437,10 @@ mod tests {
         for _ in 0..(MOST_EVENT_BYTES / filler.len() + 2) {
             assert!(parser.line(&format!("data: {filler}")).is_none());
         }
-        assert!(parser.data.len() <= MOST_EVENT_BYTES, "the data kept growing");
+        assert!(
+            parser.data.len() <= MOST_EVENT_BYTES,
+            "the data kept growing"
+        );
         assert!(parser.line("").is_none());
         parser.line("event: state");
         parser.line(r#"data: {"@type":"StateChange","changed":{"A1":{"Email":"e3"}}}"#);

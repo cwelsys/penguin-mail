@@ -85,7 +85,10 @@ mod tests {
     fn portugal_comes_first() {
         let first = &regions()[0];
         assert_eq!(first.name, "Portugal");
-        assert_eq!(first.calendar_id(), "en.portuguese#holiday@group.v.calendar.google.com");
+        assert_eq!(
+            first.calendar_id(),
+            "en.portuguese#holiday@group.v.calendar.google.com"
+        );
     }
 
     #[test]
@@ -94,12 +97,16 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_by_key(|name| name.to_lowercase());
         assert_eq!(names, sorted);
-        assert!(!names.contains(&"Portugal".to_string()), "Portugal shows once");
+        assert!(
+            !names.contains(&"Portugal".to_string()),
+            "Portugal shows once"
+        );
     }
 
     #[test]
     fn each_region_has_one_calendar() {
-        let ids: std::collections::HashSet<String> = regions().iter().map(Region::calendar_id).collect();
+        let ids: std::collections::HashSet<String> =
+            regions().iter().map(Region::calendar_id).collect();
         assert_eq!(ids.len(), regions().len());
     }
 

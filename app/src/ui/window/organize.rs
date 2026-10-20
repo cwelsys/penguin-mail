@@ -8,14 +8,14 @@ use gtk::glib;
 use mailrs_domain::{AccountId, Label, LabelKind};
 use mailrs_sync::{History, MailAction, NewLabels};
 
+use super::press::{Press, Scope};
+use super::reach::Reach;
 use super::{MainWindow, Target};
 use crate::offered::Filing;
 use crate::ui::Mailbox;
+use crate::ui::confirm::{Tone, confirm};
 use crate::ui::sidebar::LabelDrop;
 use crate::ui::sidebar::tree::{self, Placement, Refusal, label_rows};
-use crate::ui::confirm::{Tone, confirm};
-use super::press::{Press, Scope};
-use super::reach::Reach;
 use mailrs_domain::translate::{fill, gettext};
 
 /// What to do with a label once it exists, given it.
@@ -57,7 +57,12 @@ impl MainWindow {
 
     /// The New Label dialog with `start` in its entry and the cursor
     /// after it.
-    fn new_label_from(self: &Rc<Self>, account_id: AccountId, then: Option<AfterCreate>, start: &str) {
+    fn new_label_from(
+        self: &Rc<Self>,
+        account_id: AccountId,
+        then: Option<AfterCreate>,
+        start: &str,
+    ) {
         let filing = Filing::of([self.offers(account_id)]);
         let entry = gtk::Entry::builder()
             .text(start)
@@ -91,7 +96,7 @@ impl MainWindow {
             let wanted = name.clone();
             match this
                 .core
-                .call(async move { sync.create_label(&wanted).await })
+                .call_for(account_id, async move { sync.create_label(&wanted).await })
                 .await
             {
                 Ok(label) => match then {
@@ -140,7 +145,9 @@ impl MainWindow {
             let wanted = name.clone();
             if let Err(err) = this
                 .core
-                .call(async move { sync.rename_label(&label_id, &wanted).await })
+                .call_for(account_id, async move {
+                    sync.rename_label(&label_id, &wanted).await
+                })
                 .await
             {
                 this.failed(&filing.rename_failed(), &err);
@@ -185,7 +192,9 @@ impl MainWindow {
             let Placement { name, order } = placement;
             if let Err(err) = this
                 .core
-                .call(async move { sync.place_label(&label_id, &name, &order).await })
+                .call_for(account_id, async move {
+                    sync.place_label(&label_id, &name, &order).await
+                })
                 .await
             {
                 this.failed(&filing.rename_failed(), &err);
@@ -198,9 +207,13 @@ impl MainWindow {
             return;
         };
         let filing = Filing::of([self.offers(account_id)]);
+        let provider = self
+            .account(account_id)
+            .map(|account| mailrs_discover::resolved_provider_name(account.provider_name()))
+            .unwrap_or_default();
         let question = confirm(
             &fill(&gettext("Delete “{name}”?"), &[("name", &name)]),
-            &filing.delete_body(),
+            &filing.delete_body(&provider),
             &gettext("Delete"),
             Tone::Destructive,
         );
@@ -215,11 +228,12 @@ impl MainWindow {
             let deleted = label_id.clone();
             match this
                 .core
-                .call(async move { sync.delete_label(&deleted).await })
+                .call_for(account_id, async move { sync.delete_label(&deleted).await })
                 .await
             {
                 Ok(()) => {
-                    this.listing.change(|screen| screen.label_deleted(account_id, &label_id));
+                    this.listing
+                        .change(|screen| screen.label_deleted(account_id, &label_id));
                     this.toast(&fill(&gettext("Deleted “{name}”"), &[("name", &name)]));
                 }
                 Err(err) => this.failed(&filing.delete_failed(), &err),
@@ -248,7 +262,9 @@ impl MainWindow {
         glib::spawn_future_local(async move {
             if let Err(err) = this
                 .core
-                .call(async move { sync.set_label_color(&label_id, color).await })
+                .call_for(account_id, async move {
+                    sync.set_label_color(&label_id, color).await
+                })
                 .await
             {
                 this.failed(&gettext("Could not change the color: {reason}"), &err);

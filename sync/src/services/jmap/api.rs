@@ -7,8 +7,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mailrs_jmap::{
-    AddressBook, CalendarEvents, Canceled, CardChanges, CardWrite, CardsPage, Email, EmailQuery, Got, Hold, HeldSubmission, Identity, Imported, JmapClient, JmapError, Listed,
-    ChangesResponse, EventWrite, EventsPage, JmapCalendar, MailChanges, Mailbox, MailboxWrite, MaskedEmail, MaskedState, MdnOut, Pushed, Queried, Quota, Saved, Session, SetResponse, SieveScript,
+    AddressBook, CalendarEvents, Canceled, CardChanges, CardWrite, CardsPage, ChangesResponse,
+    Email, EmailQuery, EventWrite, EventsPage, Got, HeldSubmission, Hold, Identity, Imported,
+    JmapCalendar, JmapClient, JmapError, Listed, MailChanges, Mailbox, MailboxWrite, MaskedEmail,
+    MaskedState, MdnOut, Pushed, Queried, Quota, Saved, Session, SetResponse, SieveScript,
     Submission, SubmissionState, Threads, VacationPatch, VacationResponse,
 };
 use serde_json::{Map, Value};
@@ -21,45 +23,115 @@ const PUSH_IDLE: Duration = Duration::from_secs(2 * mailrs_jmap::push::PING_SECO
 pub trait JmapApi: Send + Sync + 'static {
     fn session(&self) -> impl Future<Output = Answer<Arc<Session>>> + Send;
     fn calendars(&self) -> impl Future<Output = Answer<Vec<JmapCalendar>>> + Send;
-    fn calendar_event_changes(&self, since: &str, max: usize) -> impl Future<Output = Answer<ChangesResponse>> + Send;
-    fn calendar_events(&self, ids: &[String]) -> impl Future<Output = Answer<CalendarEvents>> + Send;
-    fn calendar_events_page(&self, filter: &Value, position: u64, limit: usize) -> impl Future<Output = Answer<EventsPage>> + Send;
-    fn set_calendar_event(&self, write: &EventWrite, send: bool, state: Option<&str>) -> impl Future<Output = Answer<Option<Value>>> + Send;
+    fn calendar_event_changes(
+        &self,
+        since: &str,
+        max: usize,
+    ) -> impl Future<Output = Answer<ChangesResponse>> + Send;
+    fn calendar_events(
+        &self,
+        ids: &[String],
+    ) -> impl Future<Output = Answer<CalendarEvents>> + Send;
+    fn calendar_events_page(
+        &self,
+        filter: &Value,
+        position: u64,
+        limit: usize,
+    ) -> impl Future<Output = Answer<EventsPage>> + Send;
+    fn set_calendar_event(
+        &self,
+        write: &EventWrite,
+        send: bool,
+        state: Option<&str>,
+    ) -> impl Future<Output = Answer<Option<Value>>> + Send;
     fn mailboxes(&self) -> impl Future<Output = Answer<Listed<Mailbox>>> + Send;
-    fn mail_changes(&self, email: &str, mailbox: &str, max: usize) -> impl Future<Output = Answer<MailChanges>> + Send;
+    fn mail_changes(
+        &self,
+        email: &str,
+        mailbox: &str,
+        max: usize,
+    ) -> impl Future<Output = Answer<MailChanges>> + Send;
     fn email_state(&self) -> impl Future<Output = Answer<String>> + Send;
     fn query(&self, query: &EmailQuery) -> impl Future<Output = Answer<Queried>> + Send;
-    fn query_after(&self, query: &EmailQuery, anchor: &str) -> impl Future<Output = Answer<Queried>> + Send;
-    fn emails(&self, ids: &[String], properties: &[&str]) -> impl Future<Output = Answer<Got<Email>>> + Send;
+    fn query_after(
+        &self,
+        query: &EmailQuery,
+        anchor: &str,
+    ) -> impl Future<Output = Answer<Queried>> + Send;
+    fn emails(
+        &self,
+        ids: &[String],
+        properties: &[&str],
+    ) -> impl Future<Output = Answer<Got<Email>>> + Send;
     fn threads(&self, ids: &[String]) -> impl Future<Output = Answer<Threads>> + Send;
-    fn set_emails(&self, update: &Map<String, Value>, destroy: &[String]) -> impl Future<Output = Answer<SetResponse>> + Send;
+    fn set_emails(
+        &self,
+        update: &Map<String, Value>,
+        destroy: &[String],
+    ) -> impl Future<Output = Answer<SetResponse>> + Send;
     fn set_mailbox(&self, write: &MailboxWrite) -> impl Future<Output = Answer<String>> + Send;
-    fn download(&self, blob_id: &str, limit: usize) -> impl Future<Output = Answer<Vec<u8>>> + Send;
+    fn download(&self, blob_id: &str, limit: usize)
+    -> impl Future<Output = Answer<Vec<u8>>> + Send;
     fn upload(&self, bytes: Vec<u8>) -> impl Future<Output = Answer<String>> + Send;
-    fn import(&self, blob_id: &str, mailbox_ids: &[String], keywords: &[&str], destroy: Option<&str>) -> impl Future<Output = Answer<Saved>> + Send;
+    fn import(
+        &self,
+        blob_id: &str,
+        mailbox_ids: &[String],
+        keywords: &[&str],
+        destroy: Option<&str>,
+    ) -> impl Future<Output = Answer<Saved>> + Send;
     fn submit(&self, submission: &Submission) -> impl Future<Output = Answer<Imported>> + Send;
     fn identities(&self) -> impl Future<Output = Answer<Vec<Identity>>> + Send;
     fn vacation(&self) -> impl Future<Output = Answer<VacationResponse>> + Send;
     fn set_vacation(&self, reply: &VacationPatch) -> impl Future<Output = Answer<()>> + Send;
     fn address_books(&self) -> impl Future<Output = Answer<Vec<AddressBook>>> + Send;
-    fn cards_page(&self, position: u64, limit: usize) -> impl Future<Output = Answer<CardsPage>> + Send;
-    fn card_changes(&self, since: &str, max: usize) -> impl Future<Output = Answer<CardChanges>> + Send;
+    fn cards_page(
+        &self,
+        position: u64,
+        limit: usize,
+    ) -> impl Future<Output = Answer<CardsPage>> + Send;
+    fn card_changes(
+        &self,
+        since: &str,
+        max: usize,
+    ) -> impl Future<Output = Answer<CardChanges>> + Send;
     fn card(&self, id: &str) -> impl Future<Output = Answer<Option<Value>>> + Send;
     fn set_card(&self, write: &CardWrite) -> impl Future<Output = Answer<Value>> + Send;
     fn sieve_scripts(&self) -> impl Future<Output = Answer<Vec<SieveScript>>> + Send;
     fn sieve_text(&self, blob_id: &str) -> impl Future<Output = Answer<String>> + Send;
-    fn put_sieve(&self, name: &str, existing: Option<&str>, text: &str) -> impl Future<Output = Answer<String>> + Send;
+    fn put_sieve(
+        &self,
+        name: &str,
+        existing: Option<&str>,
+        text: &str,
+    ) -> impl Future<Output = Answer<String>> + Send;
     fn activate_sieve(&self, id: &str) -> impl Future<Output = Answer<()>> + Send;
     fn sieve_extensions(&self) -> impl Future<Output = Answer<Vec<String>>> + Send;
     fn masked_emails(&self) -> impl Future<Output = Answer<Vec<MaskedEmail>>> + Send;
-    fn create_masked(&self, for_domain: &str, description: &str) -> impl Future<Output = Answer<MaskedEmail>> + Send;
-    fn set_masked_state(&self, id: &str, state: MaskedState) -> impl Future<Output = Answer<()>> + Send;
+    fn create_masked(
+        &self,
+        for_domain: &str,
+        description: &str,
+    ) -> impl Future<Output = Answer<MaskedEmail>> + Send;
+    fn set_masked_state(
+        &self,
+        id: &str,
+        state: MaskedState,
+    ) -> impl Future<Output = Answer<()>> + Send;
     fn hold(&self, hold: &Hold) -> impl Future<Output = Answer<HeldSubmission>> + Send;
-    fn submissions(&self, ids: &[String]) -> impl Future<Output = Answer<Vec<SubmissionState>>> + Send;
+    fn submissions(
+        &self,
+        ids: &[String],
+    ) -> impl Future<Output = Answer<Vec<SubmissionState>>> + Send;
     fn answers_submission_get(&self) -> impl Future<Output = Answer<bool>> + Send;
     fn submissions_for(&self, email_id: &str) -> impl Future<Output = Answer<Vec<String>>> + Send;
     fn cancel_submission(&self, id: &str) -> impl Future<Output = Answer<Canceled>> + Send;
-    fn file_held(&self, email_id: &str, drafts: &str, sent: &str) -> impl Future<Output = Answer<()>> + Send;
+    fn file_held(
+        &self,
+        email_id: &str,
+        drafts: &str,
+        sent: &str,
+    ) -> impl Future<Output = Answer<()>> + Send;
     fn unhold(&self, email_id: &str) -> impl Future<Output = Answer<()>> + Send;
     fn quotas(&self) -> impl Future<Output = Answer<Vec<Quota>>> + Send;
     fn send_mdn(&self, mdn: &MdnOut) -> impl Future<Output = Answer<()>> + Send;
@@ -78,10 +150,20 @@ impl JmapApi for JmapClient {
     async fn calendar_events(&self, ids: &[String]) -> Answer<CalendarEvents> {
         JmapClient::calendar_events(self, ids).await
     }
-    async fn calendar_events_page(&self, filter: &Value, position: u64, limit: usize) -> Answer<EventsPage> {
+    async fn calendar_events_page(
+        &self,
+        filter: &Value,
+        position: u64,
+        limit: usize,
+    ) -> Answer<EventsPage> {
         JmapClient::calendar_events_page(self, filter, position, limit).await
     }
-    async fn set_calendar_event(&self, write: &EventWrite, send: bool, state: Option<&str>) -> Answer<Option<Value>> {
+    async fn set_calendar_event(
+        &self,
+        write: &EventWrite,
+        send: bool,
+        state: Option<&str>,
+    ) -> Answer<Option<Value>> {
         JmapClient::set_calendar_event(self, write, send, state).await
     }
     async fn session(&self) -> Answer<Arc<Session>> {
@@ -108,7 +190,11 @@ impl JmapApi for JmapClient {
     async fn threads(&self, ids: &[String]) -> Answer<Threads> {
         JmapClient::threads(self, ids).await
     }
-    async fn set_emails(&self, update: &Map<String, Value>, destroy: &[String]) -> Answer<SetResponse> {
+    async fn set_emails(
+        &self,
+        update: &Map<String, Value>,
+        destroy: &[String],
+    ) -> Answer<SetResponse> {
         JmapClient::set_emails(self, update, destroy).await
     }
     async fn set_mailbox(&self, write: &MailboxWrite) -> Answer<String> {
@@ -116,13 +202,29 @@ impl JmapApi for JmapClient {
     }
     async fn download(&self, blob_id: &str, limit: usize) -> Answer<Vec<u8>> {
         let account = self.mail_account().await?;
-        JmapClient::download(self, &account, blob_id, "message.eml", "application/octet-stream", limit).await
+        JmapClient::download(
+            self,
+            &account,
+            blob_id,
+            "message.eml",
+            "application/octet-stream",
+            limit,
+        )
+        .await
     }
     async fn upload(&self, bytes: Vec<u8>) -> Answer<String> {
         let account = self.mail_account().await?;
-        Ok(JmapClient::upload(self, &account, "message/rfc822", bytes).await?.blob_id)
+        Ok(JmapClient::upload(self, &account, "message/rfc822", bytes)
+            .await?
+            .blob_id)
     }
-    async fn import(&self, blob_id: &str, mailbox_ids: &[String], keywords: &[&str], destroy: Option<&str>) -> Answer<Saved> {
+    async fn import(
+        &self,
+        blob_id: &str,
+        mailbox_ids: &[String],
+        keywords: &[&str],
+        destroy: Option<&str>,
+    ) -> Answer<Saved> {
         JmapClient::import(self, blob_id, mailbox_ids, keywords, destroy).await
     }
     async fn submit(&self, submission: &Submission) -> Answer<Imported> {

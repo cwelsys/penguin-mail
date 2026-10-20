@@ -51,13 +51,11 @@ use mailrs_domain::calendar::series::{self, RepeatScope};
 use mailrs_domain::calendar::{Access, Calendar, Event, Occurrence};
 use mailrs_domain::invitation::Answer;
 use mailrs_domain::translate::{date_locale, gettext, with_reason};
-use mailrs_domain::{Account, AccountId, EpochMillis};
+use mailrs_domain::{Account, AccountId, EpochMillis, Provider};
 use mailrs_sync::Permitted;
-use mailrs_sync::calendar_copy::event_change::{
-    self, Action, Ask, Edit, EventChange, Facts, Undo,
-};
-use mailrs_sync::calendar_copy::{Held, new_event_id};
 use mailrs_sync::calendar_copy::Listed;
+use mailrs_sync::calendar_copy::event_change::{self, Action, Ask, Edit, EventChange, Facts, Undo};
+use mailrs_sync::calendar_copy::{Held, new_event_id};
 use mailrs_sync::{Offers, SyncError, Withheld};
 
 use crate::core::Core;
@@ -117,7 +115,6 @@ pub struct Hooks {
     /// time it is read again, for the Calendar toggle's badge.
     pub waiting: Box<dyn Fn(usize)>,
 }
-
 
 /// An account as the calendar reads it: who it is, what its provider
 /// offers, and what its consent withheld.
@@ -207,6 +204,9 @@ pub struct CalendarView {
     older_spinner: gtk::Spinner,
     older_label: gtk::Label,
     carousel: adw::Carousel,
+    /// The wait for the carousel's width before it goes to its middle
+    /// page, while one runs.
+    laid_out: pager::LaidOut,
     pages: RefCell<Vec<Rc<Page>>>,
     list: Rc<Agenda>,
     results: Rc<Agenda>,
@@ -268,6 +268,18 @@ pub struct CalendarView {
 }
 
 impl CalendarView {
+    /// Keeps adjoining toolbar containers at the same height as their bars change.
+    pub(crate) fn group_toolbar_height(&self, group: &gtk::SizeGroup) {
+        if let Some(bar) = crate::ui::top_bar(&self.header) {
+            group.add_widget(&bar);
+        }
+    }
+
+    /// The assistant takes the main window controls while it occupies the outer edge.
+    pub(crate) fn set_assistant_docked(&self, docked: bool) {
+        self.header.set_show_end_title_buttons(!docked);
+    }
+
     pub fn new(
         core: Rc<Core>,
         settings: impl Fn() -> Settings + 'static,
@@ -536,8 +548,13 @@ impl CalendarView {
         let quick = Quick::new(&card);
 
         let view = Rc::new_cyclic(|weak: &Weak<CalendarView>| {
-            let (on_date, on_change, on_grant, on_open_waiting, on_open_mail) =
-                (weak.clone(), weak.clone(), weak.clone(), weak.clone(), weak.clone());
+            let (on_date, on_change, on_grant, on_open_waiting, on_open_mail) = (
+                weak.clone(),
+                weak.clone(),
+                weak.clone(),
+                weak.clone(),
+                weak.clone(),
+            );
             let calendar_sidebar = CalendarSidebar::new(
                 move |day| {
                     if let Some(view) = on_date.upgrade() {
@@ -600,6 +617,7 @@ impl CalendarView {
                 older_spinner,
                 older_label,
                 carousel,
+                laid_out: pager::LaidOut::default(),
                 pages: RefCell::new(Vec::new()),
                 list,
                 results,
@@ -703,9 +721,21 @@ impl CalendarView {
             }
         });
         let weak = Rc::downgrade(&view);
-        view.carousel.connect_map(move |_| {
+        view.carousel.connect_map(move |carousel| {
+            // A mapped carousel is not laid out yet, and the middle page
+            // needs a width.
+            let Some(view) = weak.upgrade() else { return };
+            let weak = weak.clone();
+            view.laid_out.then(carousel, move || {
+                if let Some(view) = weak.upgrade() {
+                    view.center();
+                }
+            });
+        });
+        let weak = Rc::downgrade(&view);
+        view.carousel.connect_unmap(move |_| {
             if let Some(view) = weak.upgrade() {
-                view.center();
+                view.laid_out.stop();
             }
         });
         let weak = Rc::downgrade(&view);
@@ -748,8 +778,12 @@ impl CalendarView {
                 view.show_extras();
             }
         });
-        view.calendar_sidebar
-            .set_folded((view.settings)().folded_calendar_accounts.into_iter().collect());
+        view.calendar_sidebar.set_folded(
+            (view.settings)()
+                .folded_calendar_accounts
+                .into_iter()
+                .collect(),
+        );
 
         view.build_switch();
         view.rebuild_pages();
@@ -835,7 +869,8 @@ impl CalendarView {
     /// succeeded, [`words::offline_line`] decides the rest.
     fn show_offline_line(&self) {
         let last = self.last_synced.get().map(crate::clock_format::time_text);
-        let text = words::offline_line(self.core.network(), self.sync_failed.get(), last.as_deref());
+        let text =
+            words::offline_line(self.core.network(), self.sync_failed.get(), last.as_deref());
         self.calendar_sidebar.set_offline_line(text.as_deref());
     }
 
@@ -860,7 +895,11 @@ impl CalendarView {
     fn wanted_from(&self) -> EpochMillis {
         let day = match self.showing() {
             Showing::Agenda => range::agenda_window(self.day.get()).0,
-            _ => return Range::around(self.effective_kind(), self.day.get()).span(&chrono::Local).0,
+            _ => {
+                return Range::around(self.effective_kind(), self.day.get())
+                    .span(&chrono::Local)
+                    .0;
+            }
         };
         day_span(day, day).0
     }
@@ -900,9 +939,11 @@ impl CalendarView {
         picker.connect_day_selected(move |picker| {
             let Some(this) = weak.upgrade() else { return };
             let picked = picker.date();
-            if let Some(day) =
-                NaiveDate::from_ymd_opt(picked.year(), picked.month() as u32, picked.day_of_month() as u32)
-            {
+            if let Some(day) = NaiveDate::from_ymd_opt(
+                picked.year(),
+                picked.month() as u32,
+                picked.day_of_month() as u32,
+            ) {
                 this.go_to(day);
             }
             closing.popdown();
@@ -935,8 +976,15 @@ impl CalendarView {
     /// not the series' first one: an invitation to next Tuesday's design
     /// review names that Tuesday, not the series' beginning. Nothing
     /// happens when the store no longer has the event.
-    pub fn open(self: &Rc<Self>, account_id: AccountId, calendar: &str, id: &str, start: EpochMillis) {
-        self.run.open((account_id, calendar.to_string(), id.to_string()), start);
+    pub fn open(
+        self: &Rc<Self>,
+        account_id: AccountId,
+        calendar: &str,
+        id: &str,
+        start: EpochMillis,
+    ) {
+        self.run
+            .open((account_id, calendar.to_string(), id.to_string()), start);
     }
 
     /// Answers the window's narrow breakpoint: a list in place of Week
@@ -973,7 +1021,11 @@ impl CalendarView {
             self.switch_slot.prepend(&self.switch);
             self.header.pack_start(&self.today_button);
             self.header.pack_start(&self.arrows);
-            if self.new_slot.parent().is_some_and(|p| p == *self.bottom_row.upcast_ref::<gtk::Widget>()) {
+            if self
+                .new_slot
+                .parent()
+                .is_some_and(|p| p == *self.bottom_row.upcast_ref::<gtk::Widget>())
+            {
                 // New Event goes back between the switch and Search, so
                 // the switch comes off and follows it.
                 self.bottom_row.remove(&self.new_slot);
@@ -1057,12 +1109,20 @@ impl CalendarView {
     }
 
     fn account_ids(&self) -> Vec<AccountId> {
-        self.accounts.borrow().iter().map(|(a, _, _)| a.id).collect()
+        self.accounts
+            .borrow()
+            .iter()
+            .map(|(a, _, _)| a.id)
+            .collect()
     }
 
     /// The page the run knows by `id`, while the carousel holds it.
     fn page_by_id(&self, id: PageId) -> Option<Rc<Page>> {
-        self.pages.borrow().iter().find(|page| page.id == id).cloned()
+        self.pages
+            .borrow()
+            .iter()
+            .find(|page| page.id == id)
+            .cloned()
     }
 
     // ---- The header -----------------------------------------------------
@@ -1077,7 +1137,8 @@ impl CalendarView {
                 continue;
             }
             let label = shown::toggle_label(name);
-            self.switch.add(adw::Toggle::builder().name(name).label(&label).build());
+            self.switch
+                .add(adw::Toggle::builder().name(name).label(&label).build());
         }
         self.switch.set_active_name(Some(self.active_toggle()));
         self.switching.set(false);
@@ -1088,7 +1149,8 @@ impl CalendarView {
         let room = &self.header_room;
         // A phone drops the year and the week whatever the room.
         let subtitle = crate::ui::narrow_header::header_layout(self.narrow.get()).subtitle;
-        self.title_dim.set_visible(subtitle && room.keeps(Extra::Year));
+        self.title_dim
+            .set_visible(subtitle && room.keeps(Extra::Year));
         self.title_week.set_visible(
             subtitle && !self.title_week.label().is_empty() && room.keeps(Extra::Week),
         );
@@ -1252,7 +1314,10 @@ impl CalendarView {
         self.clear_ghost();
         let current = Range::around(self.effective_kind(), self.day.get());
         let pages = self.pages.borrow().clone();
-        for (page, range) in pages.iter().zip([current.previous(), current, current.next()]) {
+        for (page, range) in pages
+            .iter()
+            .zip([current.previous(), current, current.next()])
+        {
             page.range.set(range);
         }
         if let Some(middle) = pages.get(1) {
@@ -1274,20 +1339,36 @@ impl CalendarView {
     /// the write is held; a Cancel or a failed write runs `spring_back`,
     /// which the view the drag happened in hands over holding that view
     /// weakly, so it acts only while the view is still on screen.
-    pub(super) fn moved(self: &Rc<Self>, spring_back: Rc<dyn Fn()>, o: &Occurrence, landing: drag::Landing) {
+    pub(super) fn moved(
+        self: &Rc<Self>,
+        spring_back: Rc<dyn Fn()>,
+        o: &Occurrence,
+        landing: drag::Landing,
+    ) {
         let this = Rc::clone(self);
         let o = o.clone();
-        let drag::Landing { start, end, all_day } = landing;
+        let drag::Landing {
+            start,
+            end,
+            all_day,
+        } = landing;
         glib::spawn_future_local(async move {
             let rules = this.series_rules(&o).await;
             let mut draft = Draft::open(&o, &rules, draft::local_zone());
             draft.land(start, end, all_day);
             let when = words::landing_words(start, end, all_day, &draft::local_zone());
             let edited = draft.to_event(&new_event_id(), &new_event_id());
-            let how = Edit { moves: true, ..Edit::default() };
+            let how = Edit {
+                moves: true,
+                ..Edit::default()
+            };
             let changing = Changing {
                 account_id: o.account_id,
-                change: EventChange::Edit { occurrence: o.clone(), edited, how },
+                change: EventChange::Edit {
+                    occurrence: o.clone(),
+                    edited,
+                    how,
+                },
                 kept_time: None,
                 shown: Event::clone(&o.event),
                 when: Some(when),
@@ -1315,10 +1396,12 @@ impl CalendarView {
         shown: &Event,
         when: Option<&str>,
     ) -> Result<Option<scope::Answer>, SyncError> {
-        Ok(match self.core.calendar_copy().ask_before(account_id, change)? {
-            Ask::Question(question) => scope::ask(&self.page, &question, shown, when).await,
-            Ask::Settled(choice) => Some(choice.into()),
-        })
+        Ok(
+            match self.core.calendar_copy().ask_before(account_id, change)? {
+                Ask::Question(question) => scope::ask(&self.page, &question, shown, when).await,
+                Ask::Settled(choice) => Some(choice.into()),
+            },
+        )
     }
 
     /// The rules of the series `o` belongs to: its own, or for a changed
@@ -1530,7 +1613,10 @@ impl CalendarView {
         let weak = Rc::downgrade(self);
         grid.set_can_move(move |o| weak.upgrade().is_some_and(|view| view.can_move(o)));
         let weak = Rc::downgrade(self);
-        grid.set_can_select(move || weak.upgrade().is_some_and(|view| !view.writable().is_empty()));
+        grid.set_can_select(move || {
+            weak.upgrade()
+                .is_some_and(|view| !view.writable().is_empty())
+        });
         let carousel = self.carousel.clone();
         grid.connect_carousel_interactive(move |on| carousel.set_interactive(on));
         let carousel = self.carousel.clone();
@@ -1549,14 +1635,15 @@ impl CalendarView {
     /// furthest away goes round to the other end for the next range.
     fn settled_on(self: &Rc<Self>, index: u32) {
         let pages = self.pages.borrow().clone();
-        // An unmapped carousel has no width to hold a position in and
-        // reports its first page; `connect_map` puts it back on the middle.
-        if self.arranging.get() || pages.len() != 3 || !self.carousel.is_mapped() {
+        // A carousel with no width, off screen or not laid out yet, reports
+        // its first page; it comes to rest on the middle once it has one.
+        if self.arranging.get() || pages.len() != 3 || !pager::rests(&self.carousel) {
             return;
         }
         // Which of the view's pages the carousel landed on, by widget:
         // the index alone says nothing once pages have been reordered.
-        let Some(landed) = (index < self.carousel.n_pages()).then(|| self.carousel.nth_page(index)) else {
+        let Some(landed) = (index < self.carousel.n_pages()).then(|| self.carousel.nth_page(index))
+        else {
             return;
         };
         let by = if landed == pages[0].holder.clone().upcast::<gtk::Widget>() {
@@ -1577,7 +1664,8 @@ impl CalendarView {
         // Keep the day inside the range the carousel landed on, which a
         // month step with a clamped date can otherwise miss.
         let range = arrived.range.get();
-        if !(range.first..range.first + Days::new(u64::from(range.days))).contains(&self.day.get()) {
+        if !(range.first..range.first + Days::new(u64::from(range.days))).contains(&self.day.get())
+        {
             self.day.set(match range.kind {
                 ViewKind::Month => range.month(),
                 _ => range.first,
@@ -1657,7 +1745,14 @@ impl CalendarView {
                 self.fill_headings(&grid.headings, &days, &places);
                 grid.strip.show(&days, &found, &calendars);
                 let now = chrono::Local::now().timestamp_millis();
-                grid.grid.show(&days, &found, &calendars, now, &chrono::Local, settings.working_hours);
+                grid.grid.show(
+                    &days,
+                    &found,
+                    &calendars,
+                    now,
+                    &chrono::Local,
+                    settings.working_hours,
+                );
                 Some(grid.scroller.clone())
             }
             PageView::Month(month) => {
@@ -1721,7 +1816,10 @@ impl CalendarView {
             if day == today {
                 button.add_css_class("today");
             }
-            crate::ui::name(&button, &kinds::heading_words(&words::full_date_words(day), place.as_deref()));
+            crate::ui::name(
+                &button,
+                &kinds::heading_words(&words::full_date_words(day), place.as_deref()),
+            );
             let weak = Rc::downgrade(self);
             button.connect_clicked(move |_| {
                 if let Some(view) = weak.upgrade() {
@@ -1748,9 +1846,20 @@ impl CalendarView {
 
     /// The list's events from `first` to `last`, without the declined
     /// ones the settings hide.
-    fn agenda_events(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate) -> Vec<Occurrence> {
+    fn agenda_events(
+        &self,
+        found: Vec<Occurrence>,
+        first: NaiveDate,
+        last: NaiveDate,
+    ) -> Vec<Occurrence> {
         let show_declined = (self.settings)().show_declined_events;
-        keep_agenda_events(found, show_declined, self.run.pending().as_ref(), first, last)
+        keep_agenda_events(
+            found,
+            show_declined,
+            self.run.pending().as_ref(),
+            first,
+            last,
+        )
     }
 
     fn connect_lists(self: &Rc<Self>) {
@@ -1799,14 +1908,15 @@ impl CalendarView {
             }
         });
         let weak = Rc::downgrade(self);
-        self.search_bar.connect_search_mode_enabled_notify(move |bar| {
-            let Some(view) = weak.upgrade() else { return };
-            if !bar.is_search_mode() {
-                view.search_entry.set_text("");
-                view.run.search("");
-                view.show_range();
-            }
-        });
+        self.search_bar
+            .connect_search_mode_enabled_notify(move |bar| {
+                let Some(view) = weak.upgrade() else { return };
+                if !bar.is_search_mode() {
+                    view.search_entry.set_text("");
+                    view.run.search("");
+                    view.show_range();
+                }
+            });
     }
 
     fn search_open(&self) -> bool {
@@ -1825,7 +1935,11 @@ impl CalendarView {
     /// show for an event the account may change as a whole; a guest gets
     /// Edit, limited to their own parts, and Remove.
     fn show_event(self: &Rc<Self>, anchor: &gtk::Widget, o: &Occurrence) {
-        if self.editor_opened.get().is_some_and(|at| within_double_click(at.elapsed())) {
+        if self
+            .editor_opened
+            .get()
+            .is_some_and(|at| within_double_click(at.elapsed()))
+        {
             return;
         }
         let calendar = self
@@ -1855,10 +1969,14 @@ impl CalendarView {
             }) as Box<dyn Fn()>;
             (b.removal, run)
         });
+        let running = self.core.account(o.account_id);
+        let services = running.as_deref().map(|sync| sync.services());
         // A proposal moves a meeting's time, so a whole-day event and one
-        // with nobody to ask get no door to it.
+        // with nobody to ask get no door to it, and nor does an account
+        // with no mail to send it.
         let proposable = !o.event.all_day
-            && (o.event.organizer.is_some() || o.event.guests.iter().any(|g| g.organizer && !g.me));
+            && (o.event.organizer.is_some() || o.event.guests.iter().any(|g| g.organizer && !g.me))
+            && crate::offered::can_propose(self.provider_of(o.account_id), services);
         let propose_view = Rc::downgrade(self);
         let propose_o = o.clone();
         let on_propose = proposable.then(|| {
@@ -1872,6 +1990,7 @@ impl CalendarView {
             anchor,
             o,
             &calendar,
+            crate::offered::organizer_hears(self.provider_of(o.account_id), services),
             move |answer, note| {
                 if let Some(view) = weak.upgrade() {
                     view.answer(occurrence.clone(), answer, note);
@@ -2023,13 +2142,20 @@ impl CalendarView {
     /// that event by its key. A block without the focus is left alone.
     fn focus_past(&self, key: &EventKey) {
         let Some(root) = self.page.root() else { return };
-        let Some(page) = self.pages.borrow().get(1).cloned() else { return };
+        let Some(page) = self.pages.borrow().get(1).cloned() else {
+            return;
+        };
         let view = page.view.borrow();
         if view.focused_key().as_ref() != Some(key) {
             return;
         }
-        let Some(block) = view.block_of(key) else { return };
-        for direction in [gtk::DirectionType::TabForward, gtk::DirectionType::TabBackward] {
+        let Some(block) = view.block_of(key) else {
+            return;
+        };
+        for direction in [
+            gtk::DirectionType::TabForward,
+            gtk::DirectionType::TabBackward,
+        ] {
             block.grab_focus();
             root.child_focus(direction);
             if view.focused_key().is_some_and(|k| k != *key) {
@@ -2083,9 +2209,13 @@ impl CalendarView {
     fn watch_held(self: &Rc<Self>, id: u64) {
         let weak = Rc::downgrade(self);
         glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
-            let Some(view) = weak.upgrade() else { return glib::ControlFlow::Break };
+            let Some(view) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
             let holding = view.holding.borrow();
-            let Some(held) = holding.peek(id) else { return glib::ControlFlow::Break };
+            let Some(held) = holding.peek(id) else {
+                return glib::ControlFlow::Break;
+            };
             if view.core.calendar_copy().still_waiting(held) {
                 return glib::ControlFlow::Continue;
             }
@@ -2110,7 +2240,9 @@ impl CalendarView {
     }
 
     fn undo_held(self: &Rc<Self>, id: u64) {
-        let Some(held) = self.holding.borrow_mut().take(id) else { return };
+        let Some(held) = self.holding.borrow_mut().take(id) else {
+            return;
+        };
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let copy = this.core.calendar_copy();
@@ -2123,7 +2255,9 @@ impl CalendarView {
     }
 
     fn commit_held(self: &Rc<Self>, id: u64) {
-        let Some(held) = self.holding.borrow_mut().take(id) else { return };
+        let Some(held) = self.holding.borrow_mut().take(id) else {
+            return;
+        };
         let account_id = held.account_id;
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
@@ -2180,15 +2314,20 @@ impl CalendarView {
         let page = self.page.clone();
         glib::spawn_future_local(async move {
             let offered = series::answer_scopes(&o.event);
-            let scope = match event_change::question(Action::Answer, &offered, &[], Facts::default()) {
-                Some(question) => match scope::ask(&page, &question, &o.event, None).await {
-                    Some(picked) => picked.scope.unwrap_or(RepeatScope::All),
-                    None => return,
-                },
-                None => RepeatScope::All,
-            };
+            let scope =
+                match event_change::question(Action::Answer, &offered, &[], Facts::default()) {
+                    Some(question) => match scope::ask(&page, &question, &o.event, None).await {
+                        Some(picked) => picked.scope.unwrap_or(RepeatScope::All),
+                        None => return,
+                    },
+                    None => RepeatScope::All,
+                };
             let sent = core
-                .call(async move { invitations.answer_event(account_id, &o, answer, scope, note).await })
+                .call(async move {
+                    invitations
+                        .answer_event(account_id, &o, answer, scope, note)
+                        .await
+                })
                 .await;
             let Some(view) = weak.upgrade() else { return };
             match sent {
@@ -2228,7 +2367,9 @@ impl CalendarView {
             .filter_map(|((account_id, _), c)| {
                 accounts
                     .iter()
-                    .find(|(a, offers, withheld)| a.id == *account_id && offers.calendar && !withheld.calendar)
+                    .find(|(a, offers, withheld)| {
+                        a.id == *account_id && offers.calendar && !withheld.calendar
+                    })
                     .map(|(a, _, _)| (*account_id, a.email.clone(), c.clone()))
             })
             .collect::<Vec<_>>();
@@ -2257,7 +2398,10 @@ impl CalendarView {
         if can {
             crate::ui::name_with_shortcut(&self.new_event, &gettext("New Event (N)"));
         } else {
-            crate::ui::name(&self.new_event, &gettext("None of your calendars take new events"));
+            crate::ui::name(
+                &self.new_event,
+                &gettext("None of your calendars take new events"),
+            );
         }
         let types = draft::menu_types(&offered, |id| self.offers_of(id));
         let split = types.len() > 1;
@@ -2278,6 +2422,15 @@ impl CalendarView {
         }
     }
 
+    /// Who serves `account_id`, when the calendar knows the account.
+    fn provider_of(&self, account_id: AccountId) -> Option<Provider> {
+        self.accounts
+            .borrow()
+            .iter()
+            .find(|(a, _, _)| a.id == account_id)
+            .map(|(a, _, _)| a.provider)
+    }
+
     /// What `account_id`'s provider keeps, or what an account still
     /// starting is assumed to: no types beyond events.
     fn offers_of(&self, account_id: AccountId) -> Offers {
@@ -2291,9 +2444,19 @@ impl CalendarView {
     /// The draft for a new event from `start` to `end` on the default
     /// calendar, or `None` when no calendar takes new events.
     fn fresh_draft(&self, start: EpochMillis, end: EpochMillis) -> Option<Draft> {
-        let last = (self.settings)().last_calendar_account;
-        let (account, calendar) = draft::default_calendar(&self.offered(), last.as_deref())?;
-        Some(Draft::new(account, &calendar, start, end, draft::local_zone()))
+        let settings = (self.settings)();
+        let (account, calendar) = draft::preferred_calendar(
+            &self.offered(),
+            settings.preferred_account(crate::settings::AccountUse::Calendar),
+            settings.last_calendar_account.as_deref(),
+        )?;
+        Some(Draft::new(
+            account,
+            &calendar,
+            start,
+            end,
+            draft::local_zone(),
+        ))
     }
 
     /// The occurrence whose block has the keyboard focus, wherever it is
@@ -2324,10 +2487,14 @@ impl CalendarView {
         let span = range.span(&chrono::Local);
         let morning = layout::instant_at(range.first, 9.0, &chrono::Local);
         let focused = self.focused().map(|o| (o.start, o.end));
-        let cursor = self.pages.borrow().get(1).and_then(|page| match &*page.view.borrow() {
-            PageView::Grid(grid) => grid.grid.cursor(),
-            PageView::Month(_) => None,
-        });
+        let cursor = self
+            .pages
+            .borrow()
+            .get(1)
+            .and_then(|page| match &*page.view.borrow() {
+                PageView::Grid(grid) => grid.grid.cursor(),
+                PageView::Month(_) => None,
+            });
         drag::new_slot(focused, cursor, mailrs_sync::now_millis(), span, morning)
     }
 
@@ -2345,13 +2512,25 @@ impl CalendarView {
     pub fn new_event_as(self: &Rc<Self>, choice: draft::TypeChoice) {
         let (start, end) = self.slot();
         let offered = self.offered();
-        let last = (self.settings)().last_calendar_account;
-        let Some(default) = draft::default_calendar(&offered, last.as_deref()) else { return };
-        let Some((account, calendar)) = draft::calendar_for(choice, &offered, |id| self.offers_of(id), &default) else {
+        let settings = (self.settings)();
+        let Some(default) = draft::preferred_calendar(
+            &offered,
+            settings.preferred_account(crate::settings::AccountUse::Calendar),
+            settings.last_calendar_account.as_deref(),
+        ) else {
+            return;
+        };
+        let Some((account, calendar)) =
+            draft::calendar_for(choice, &offered, |id| self.offers_of(id), &default)
+        else {
             return;
         };
         let mut draft = Draft::new(account, &calendar, start, end, draft::local_zone());
-        draft.new_as(choice, chrono::Local::now().date_naive(), self.offers_of(account).declines);
+        draft.new_as(
+            choice,
+            chrono::Local::now().date_naive(),
+            self.offers_of(account).declines,
+        );
         self.edit(draft);
     }
 
@@ -2361,7 +2540,9 @@ impl CalendarView {
     pub fn quick_create(self: &Rc<Self>) {
         match self.effective_kind() {
             ViewKind::Month => {
-                let day = self.focused_day().unwrap_or_else(|| chrono::Local::now().date_naive());
+                let day = self
+                    .focused_day()
+                    .unwrap_or_else(|| chrono::Local::now().date_naive());
                 self.quick_create_on_day(day);
             }
             _ => {
@@ -2416,7 +2597,12 @@ impl CalendarView {
                 );
                 adjustment.set_value(value);
                 let (y, height) = quick::clamp_span(top - value, height, adjustment.page_size());
-                let shown = gdk::Rectangle::new(rect.x(), y.round() as i32, rect.width(), height.round().max(1.0) as i32);
+                let shown = gdk::Rectangle::new(
+                    rect.x(),
+                    y.round() as i32,
+                    rect.width(),
+                    height.round().max(1.0) as i32,
+                );
                 let middle = f64::from(rect.x()) + f64::from(rect.width()) / 2.0;
                 let side = quick::side(middle, f64::from(grid.grid.width()));
                 Some((grid.scroller.clone().upcast(), shown, side))
@@ -2447,9 +2633,14 @@ impl CalendarView {
             .position(|(a, _, c)| *a == draft.account_id && c.id == draft.calendar)
             .unwrap_or(0);
         let today = chrono::Local::now().date_naive();
-        let types: Vec<_> =
-            choices.iter().map(|(account, _, calendar)| draft::type_switch(&self.offers_of(*account), calendar)).collect();
-        let declines: Vec<bool> = choices.iter().map(|(account, _, _)| self.offers_of(*account).declines).collect();
+        let types: Vec<_> = choices
+            .iter()
+            .map(|(account, _, calendar)| draft::type_switch(&self.offers_of(*account), calendar))
+            .collect();
+        let declines: Vec<bool> = choices
+            .iter()
+            .map(|(account, _, _)| self.offers_of(*account).declines)
+            .collect();
         // The time line and the ghost card follow the type: focus time
         // runs two hours, out of office whole days, which the all-day row
         // shows rather than the grid.
@@ -2459,7 +2650,10 @@ impl CalendarView {
             let mut shaped = shaped.clone();
             shaped.new_as(choice, today, true);
             if let Some(view) = marked.upgrade() {
-                view.show_ghost((choice != draft::TypeChoice::OutOfOffice).then_some((shaped.start, shaped.end)));
+                view.show_ghost(
+                    (choice != draft::TypeChoice::OutOfOffice)
+                        .then_some((shaped.start, shaped.end)),
+                );
             }
             words::span_words(shaped.start, shaped.end, shaped.all_day, &chrono::Local)
         };
@@ -2468,7 +2662,10 @@ impl CalendarView {
         let (save_picked, more_picked) = (Rc::clone(&picked), picked);
         // A calendar picked in the popover starts the draft again on it,
         // so its zone and reminders follow, as the editor's choice does.
-        let on = move |choices: &[(AccountId, String, Calendar)], index: usize, title: String, choice| {
+        let on = move |choices: &[(AccountId, String, Calendar)],
+                       index: usize,
+                       title: String,
+                       choice| {
             let mut draft = match choices.get(index) {
                 Some((account, _, calendar)) if index != current => {
                     Draft::new(*account, calendar, start, end, draft::local_zone())
@@ -2488,7 +2685,9 @@ impl CalendarView {
             choices,
             types,
             current,
-            move |title, index, choice| save_view.save_draft(on(&save_picked, index, title, choice)),
+            move |title, index, choice| {
+                save_view.save_draft(on(&save_picked, index, title, choice))
+            },
             move |title, index, choice| more_view.edit(on_more(&more_picked, index, title, choice)),
         );
     }
@@ -2508,10 +2707,17 @@ impl CalendarView {
                 .filter(|(_, offers, _)| offers.moves_events)
                 .map(|(account, _, _)| account.id)
                 .collect(),
-            offers: self.accounts.borrow().iter().map(|(account, offers, _)| (account.id, *offers)).collect(),
+            offers: self
+                .accounts
+                .borrow()
+                .iter()
+                .map(|(account, offers, _)| (account.id, *offers))
+                .collect(),
         };
         let this = Rc::clone(self);
-        editor::open(&self.page, draft, choices, contacts, move |draft| this.save_draft(draft));
+        editor::open(&self.page, draft, choices, contacts, move |draft| {
+            this.save_draft(draft)
+        });
     }
 
     /// What the editor's "Attach File…" works through: the account's
@@ -2524,12 +2730,18 @@ impl CalendarView {
         editor::Attaching {
             offered: Box::new(move |account| {
                 offered_view.upgrade().is_some_and(|view| {
-                    view.accounts.borrow().iter().any(|(a, offers, _)| a.id == account && offers.event_files)
+                    view.accounts
+                        .borrow()
+                        .iter()
+                        .any(|(a, offers, _)| a.id == account && offers.event_files)
                 })
             }),
             withheld: Box::new(move |account| {
                 withheld_view.upgrade().is_some_and(|view| {
-                    view.accounts.borrow().iter().any(|(a, _, withheld)| a.id == account && withheld.drive)
+                    view.accounts
+                        .borrow()
+                        .iter()
+                        .any(|(a, _, withheld)| a.id == account && withheld.drive)
                 })
             }),
             ask: Box::new(move |account| {
@@ -2539,7 +2751,9 @@ impl CalendarView {
             }),
             upload: Box::new(move |account, file, sent| {
                 let copy = core.calendar_copy();
-                core.runtime().spawn(async move { attachments::uploaded(copy.upload(account, file, sent).await) })
+                core.runtime().spawn(async move {
+                    attachments::uploaded(copy.upload(account, file, sent).await)
+                })
             }),
         }
     }
@@ -2563,9 +2777,9 @@ impl CalendarView {
                 // event had.
                 kept_time: Some(draft_change(&draft.without_move())),
                 shown: draft.base.clone().unwrap_or_default(),
-                when: draft
-                    .moved()
-                    .then(|| words::span_words(draft.start, draft.end, draft.all_day, &draft::local_zone())),
+                when: draft.moved().then(|| {
+                    words::span_words(draft.start, draft.end, draft.all_day, &draft::local_zone())
+                }),
                 undo: Undo::Skip,
                 said: String::new(),
                 failed: gettext("Could not save the event: {reason}"),
@@ -2582,7 +2796,12 @@ impl CalendarView {
     /// Remembers the account a new event went on, so the next one
     /// defaults to it.
     fn remember_account(&self, account_id: AccountId) {
-        if let Some((account, _, _)) = self.accounts.borrow().iter().find(|(a, _, _)| a.id == account_id) {
+        if let Some((account, _, _)) = self
+            .accounts
+            .borrow()
+            .iter()
+            .find(|(a, _, _)| a.id == account_id)
+        {
             (self.hooks.change)(Change::LastCalendarAccount(account.email.clone()));
         }
     }
@@ -2595,9 +2814,16 @@ impl CalendarView {
     /// when the account allows it.
     fn list_changed(self: &Rc<Self>, change: ListChange) {
         match change {
-            ListChange::Shown { account, calendar, shown } => self.set_shown(account, calendar, shown),
+            ListChange::Shown {
+                account,
+                calendar,
+                shown,
+            } => self.set_shown(account, calendar, shown),
             ListChange::Folded { address, folded } => {
-                (self.hooks.change)(Change::CalendarAccountFolded { email: address, folded })
+                (self.hooks.change)(Change::CalendarAccountFolded {
+                    email: address,
+                    folded,
+                })
             }
             other => self.manage(other),
         }
@@ -2605,7 +2831,8 @@ impl CalendarView {
 
     /// Shows or hides one calendar, then reads the ranges again.
     fn set_shown(self: &Rc<Self>, account_id: AccountId, calendar: String, shown: bool) {
-        self.calendar_sidebar.note_shown(account_id, &calendar, shown);
+        self.calendar_sidebar
+            .note_shown(account_id, &calendar, shown);
         if let Some(entry) = self
             .calendars
             .borrow_mut()
@@ -2669,7 +2896,9 @@ impl CalendarView {
             .map(|one| (one.account_id, one.unlisted.into_iter().collect()))
             .collect();
         let accounts = sidebar::take_off_the_list(
-            sidebar::sidebar_accounts(&rows, |id| self.core.missed(id, mailrs_sync::Missing::Calendar)),
+            sidebar::sidebar_accounts(&rows, |id| {
+                self.core.missed(id, mailrs_sync::Missing::Calendar)
+            }),
             &unlisted,
         );
         self.hidden.replace(
@@ -2684,7 +2913,8 @@ impl CalendarView {
             Showing::Agenda => None,
             _ => sidebar::in_view(self.effective_kind(), day),
         };
-        self.calendar_sidebar.show(day, band, today, &busy_days, &accounts);
+        self.calendar_sidebar
+            .show(day, band, today, &busy_days, &accounts);
     }
 }
 
@@ -2752,7 +2982,11 @@ fn draft_change(draft: &Draft) -> EventChange {
         rest_seen: draft::reaches_guests(&before, &rest),
         rule_changed: draft.rule_changed(),
     };
-    EventChange::Edit { occurrence, edited, how }
+    EventChange::Edit {
+        occurrence,
+        edited,
+        how,
+    }
 }
 
 /// The word under a day's heading that says where the person works:
@@ -2804,7 +3038,8 @@ fn weekday_row() -> gtk::Box {
         .css_classes(["day-heading"])
         .build();
     let monday = NaiveDate::from_ymd_opt(2024, 1, 1).expect("2024-01-01 is a Monday");
-    for day in mailrs_domain::calendar::week::week_columns(crate::locale_time::week_start_weekday()) {
+    for day in mailrs_domain::calendar::week::week_columns(crate::locale_time::week_start_weekday())
+    {
         let label = gtk::Label::builder()
             .label(
                 (monday + Days::new(u64::from(day.num_days_from_monday())))

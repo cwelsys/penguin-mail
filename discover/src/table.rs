@@ -83,13 +83,23 @@ impl Entry {
 
 /// The table's JMAP facts for the provider whose display name is `name`.
 pub fn jmap_named(name: &str) -> Option<crate::JmapProvider> {
-    Table::built_in().entries.iter().find(|e| e.name == name && e.jmap.is_some())?.jmap_provider()
+    Table::built_in()
+        .entries
+        .iter()
+        .find(|e| e.name == name && e.jmap.is_some())?
+        .jmap_provider()
 }
 
 /// The table's JMAP session URL for the provider whose display name is
 /// `name`.
 pub fn jmap_session_named(name: &str) -> Option<String> {
-    Table::built_in().entries.iter().find(|e| e.name == name)?.jmap.as_ref().map(|j| j.session.clone())
+    Table::built_in()
+        .entries
+        .iter()
+        .find(|e| e.name == name)?
+        .jmap
+        .as_ref()
+        .map(|j| j.session.clone())
 }
 
 #[derive(Debug, Deserialize)]
@@ -487,7 +497,10 @@ mod tests {
             .by_domain("me.com")
             .unwrap()
             .found(Source::Table, false);
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().user_name, UserName::LocalPartFirst);
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().user_name,
+            UserName::LocalPartFirst
+        );
         assert_eq!(found.candidates[0].smtp.user_name, UserName::Address);
     }
 
@@ -498,8 +511,14 @@ mod tests {
         let table = table();
         let icloud = table.by_mx(&["mx01.mail.icloud.com".to_string()]).unwrap();
         let found = icloud.found(Source::Mx, true);
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, "imap.mail.me.com");
-        assert_eq!(found.candidates[0].imap.as_ref().unwrap().user_name, UserName::Address);
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().host,
+            "imap.mail.me.com"
+        );
+        assert_eq!(
+            found.candidates[0].imap.as_ref().unwrap().user_name,
+            UserName::Address
+        );
         assert_eq!(found.candidates[0].smtp.host, "smtp.mail.me.com");
         assert_eq!(found.candidates[0].smtp.user_name, UserName::Address);
     }
@@ -576,7 +595,10 @@ mod tests {
             );
             assert_eq!(found.candidates[0].source, Source::Mx);
             let own = zoho.found(Source::Table, false);
-            assert_eq!(own.candidates[0].imap.as_ref().unwrap().host, format!("imap.zoho.{center}"));
+            assert_eq!(
+                own.candidates[0].imap.as_ref().unwrap().host,
+                format!("imap.zoho.{center}")
+            );
         }
     }
 
@@ -590,7 +612,11 @@ mod tests {
                 .by_domain(domain)
                 .unwrap_or_else(|| panic!("{domain} is in the table"))
                 .found(Source::Table, false);
-            assert_eq!(found.candidates[0].imap.as_ref().unwrap().host, host, "{domain}");
+            assert_eq!(
+                found.candidates[0].imap.as_ref().unwrap().host,
+                host,
+                "{domain}"
+            );
         }
     }
 
@@ -600,20 +626,76 @@ mod tests {
     #[test]
     fn a_dav_context_url_is_the_place_that_asks_for_the_login() {
         for (imap, caldav, carddav) in [
-            ("imap.fastmail.com", "https://caldav.fastmail.com/dav/calendars", "https://carddav.fastmail.com/dav/addressbooks"),
-            ("imap.gmx.net", "https://caldav.gmx.net/begenda/dav/users", "https://carddav.gmx.net/CardDavProxy/carddav"),
-            ("imap.gmx.com", "https://caldav.gmx.com/begenda/dav/users", "https://carddav.gmx.com/CardDavProxy/carddav"),
-            ("imap.web.de", "https://caldav.web.de/begenda/dav/users", "https://carddav.web.de/CardDavProxy/carddav"),
-            ("imap.mail.com", "https://caldav.mail.com/begenda/dav/users", "https://carddav.mail.com/CardDavProxy/carddav"),
-            ("imap.zoho.com", "https://calendar.zoho.com/.well-known/caldav", "https://contacts.zoho.com/carddav"),
-            ("imap.zoho.eu", "https://calendar.zoho.eu/.well-known/caldav", "https://contacts.zoho.eu/carddav"),
-            ("imap.zoho.in", "https://calendar.zoho.in/.well-known/caldav", "https://contacts.zoho.in/carddav"),
-            ("imap.zoho.com.au", "https://calendar.zoho.com.au/.well-known/caldav", "https://contacts.zoho.com.au/carddav"),
-            ("imap.zoho.jp", "https://calendar.zoho.jp/.well-known/caldav", "https://contacts.zoho.jp/carddav"),
-            ("imap.zohocloud.ca", "https://calendar.zohocloud.ca/.well-known/caldav", "https://contacts.zohocloud.ca/carddav"),
-            ("imap.zoho.sa", "https://calendar.zoho.sa/.well-known/caldav", "https://contacts.zoho.sa/carddav"),
-            ("imap.zoho.uk", "https://calendar.zoho.uk/.well-known/caldav", "https://contacts.zoho.uk/carddav"),
-            ("imap.zoho.com.cn", "https://calendar.zoho.com.cn/.well-known/caldav", "https://contacts.zoho.com.cn/carddav"),
+            (
+                "imap.fastmail.com",
+                "https://caldav.fastmail.com/dav/calendars",
+                "https://carddav.fastmail.com/dav/addressbooks",
+            ),
+            (
+                "imap.gmx.net",
+                "https://caldav.gmx.net/begenda/dav/users",
+                "https://carddav.gmx.net/CardDavProxy/carddav",
+            ),
+            (
+                "imap.gmx.com",
+                "https://caldav.gmx.com/begenda/dav/users",
+                "https://carddav.gmx.com/CardDavProxy/carddav",
+            ),
+            (
+                "imap.web.de",
+                "https://caldav.web.de/begenda/dav/users",
+                "https://carddav.web.de/CardDavProxy/carddav",
+            ),
+            (
+                "imap.mail.com",
+                "https://caldav.mail.com/begenda/dav/users",
+                "https://carddav.mail.com/CardDavProxy/carddav",
+            ),
+            (
+                "imap.zoho.com",
+                "https://calendar.zoho.com/.well-known/caldav",
+                "https://contacts.zoho.com/carddav",
+            ),
+            (
+                "imap.zoho.eu",
+                "https://calendar.zoho.eu/.well-known/caldav",
+                "https://contacts.zoho.eu/carddav",
+            ),
+            (
+                "imap.zoho.in",
+                "https://calendar.zoho.in/.well-known/caldav",
+                "https://contacts.zoho.in/carddav",
+            ),
+            (
+                "imap.zoho.com.au",
+                "https://calendar.zoho.com.au/.well-known/caldav",
+                "https://contacts.zoho.com.au/carddav",
+            ),
+            (
+                "imap.zoho.jp",
+                "https://calendar.zoho.jp/.well-known/caldav",
+                "https://contacts.zoho.jp/carddav",
+            ),
+            (
+                "imap.zohocloud.ca",
+                "https://calendar.zohocloud.ca/.well-known/caldav",
+                "https://contacts.zohocloud.ca/carddav",
+            ),
+            (
+                "imap.zoho.sa",
+                "https://calendar.zoho.sa/.well-known/caldav",
+                "https://contacts.zoho.sa/carddav",
+            ),
+            (
+                "imap.zoho.uk",
+                "https://calendar.zoho.uk/.well-known/caldav",
+                "https://contacts.zoho.uk/carddav",
+            ),
+            (
+                "imap.zoho.com.cn",
+                "https://calendar.zoho.com.cn/.well-known/caldav",
+                "https://contacts.zoho.com.cn/carddav",
+            ),
         ] {
             let found = services_of(imap);
             assert_eq!(found.caldav.as_deref(), Some(caldav), "{imap}");
@@ -645,9 +727,22 @@ mod tests {
     fn the_imap_host_picks_the_family_and_the_data_center() {
         let net = services_of("imap.gmx.net");
         let com = services_of("imap.gmx.com");
-        assert!(net.caldav.as_deref().is_some_and(|url| url.starts_with("https://caldav.gmx.net/")));
-        assert!(com.caldav.as_deref().is_some_and(|url| url.starts_with("https://caldav.gmx.com/")));
-        assert!(services_of("imap.zoho.com.au").caldav.as_deref().is_some_and(|url| url.starts_with("https://calendar.zoho.com.au/")));
+        assert!(
+            net.caldav
+                .as_deref()
+                .is_some_and(|url| url.starts_with("https://caldav.gmx.net/"))
+        );
+        assert!(
+            com.caldav
+                .as_deref()
+                .is_some_and(|url| url.starts_with("https://caldav.gmx.com/"))
+        );
+        assert!(
+            services_of("imap.zoho.com.au")
+                .caldav
+                .as_deref()
+                .is_some_and(|url| url.starts_with("https://calendar.zoho.com.au/"))
+        );
         // A listed domain counts too, and a name the table lacks counts for nothing.
         assert_eq!(
             services_of("fastmail.com"),

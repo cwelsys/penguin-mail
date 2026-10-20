@@ -10,14 +10,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::{Duration, Instant};
 
-use mailrs_domain::MessageMeta;
-use mailrs_domain::query::{Query, parse, resolve_names};
+use mailrs_domain::query::{Query, Term, parse, resolve_names};
+use mailrs_domain::{MailSet, MessageMeta, Role};
 use mailrs_store::messages::Change;
 use mailrs_store::{accounts, labels, messages};
 
 use super::AccountSync;
 use super::fetch::Placing;
-use crate::{BackendError, RemoteRef, SearchQuery, SyncError, Want};
+use crate::{AnyMail, BackendError, RemoteRef, SearchQuery, SyncError, Want};
 
 /// How long a fetched thread is kept for opening. Only memory depends on
 /// it: whether a kept thread may still be stored is the history cursor's
@@ -64,6 +64,13 @@ impl AccountSync {
         limit: usize,
     ) -> Result<Vec<RemoteRef>, SyncError> {
         let found = match query {
+            // IMAP does not sync Junk or Trash until they are followed,
+            // so their listings must ask the server even for recent mail.
+            SearchQuery::Tree(Query::Term(Term::In(MailSet::Role(Role::Junk | Role::Trash))))
+                if matches!(&self.services.mail, AnyMail::Imap(_)) =>
+            {
+                self.mail.search(query, limit).await?
+            }
             // A server that reads no Gmail syntax lists folders and smart
             // mailboxes from the store's copy: sync already holds that
             // mail, and a server search would cost a round trip per
@@ -106,7 +113,10 @@ impl AccountSync {
                 for hit in found {
                     let thread_id =
                         messages::thread_id_of(c, account_id, &hit.id)?.unwrap_or(hit.thread_id);
-                    refs.push(RemoteRef { id: hit.id, thread_id });
+                    refs.push(RemoteRef {
+                        id: hit.id,
+                        thread_id,
+                    });
                 }
                 Ok(refs)
             })
@@ -179,7 +189,11 @@ impl AccountSync {
     /// The stored messages `tree` matches, newest first, at most `limit`,
     /// by store id and thread. Junk and Trash stay out unless the tree
     /// names them, as in a Gmail search.
-    async fn stored_matches(&self, tree: &Query, limit: usize) -> Result<Vec<RemoteRef>, SyncError> {
+    async fn stored_matches(
+        &self,
+        tree: &Query,
+        limit: usize,
+    ) -> Result<Vec<RemoteRef>, SyncError> {
         let (account_id, tree) = (self.account_id, tree.clone());
         let now = chrono::Local::now();
         let matched = self
@@ -301,6 +315,56 @@ impl AccountSync {
         metas.extend(fetched.metas);
         metas.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.id.cmp(&b.id)));
         Ok(metas)
+    }
+
+    /// One metadata page of an explicit server mailbox. It uses the same
+    /// missing-metadata and local-threading path as a search, but announces
+    /// no mail change: the listing itself shows these rows, and announcing
+    /// them would reload the listing that is still being built. The normal
+    /// window pruning still applies to the stored metadata.
+    pub(crate) async fn browse_mailbox(
+        &self,
+        mailbox: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<crate::Backfill, SyncError> {
+        let _moving = self.mail.hold_moves().await;
+        let mut page = self.mail.mailbox_page(mailbox, cursor, limit).await?;
+        let account_id = self.account_id;
+        let ids: Vec<_> = page.refs.iter().map(|r| r.id.clone()).collect();
+        let held: HashSet<String> = self
+            .db
+            .read(move |c| messages::by_ids(c, account_id, &ids))
+            .await?
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        let wants = page
+            .refs
+            .iter()
+            .filter(|r| !held.contains(&r.id))
+            .cloned()
+            .map(Want::from)
+            .collect();
+        let mut fetched = self.fetch(wants).await?;
+        if !fetched.metas.is_empty() {
+            let mailbox = mailbox.to_string();
+            let renamed = self
+                .db
+                .write(move |c| {
+                    let renamed = fetched.remap_renumbered(c, account_id, &mailbox)?;
+                    fetched.store_missing(c, account_id)?;
+                    Ok(renamed)
+                })
+                .await?;
+            for hit in &mut page.refs {
+                if let Some(id) = renamed.get(&hit.id) {
+                    hit.id = id.clone();
+                    hit.thread_id = id.clone();
+                }
+            }
+        }
+        Ok(page)
     }
 
     /// Opens a thread: stores the copy a search fetched whole, when it is

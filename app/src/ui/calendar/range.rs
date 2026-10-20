@@ -69,7 +69,9 @@ impl Range {
         match self.kind {
             ViewKind::Day => Range::around(self.kind, self.first + Days::new(1)),
             ViewKind::Week => Range::around(self.kind, self.first + Days::new(7)),
-            ViewKind::Month | ViewKind::Agenda => Range::around(self.kind, self.month() + Months::new(1)),
+            ViewKind::Month | ViewKind::Agenda => {
+                Range::around(self.kind, self.month() + Months::new(1))
+            }
         }
     }
 
@@ -78,7 +80,9 @@ impl Range {
         match self.kind {
             ViewKind::Day => Range::around(self.kind, self.first - Days::new(1)),
             ViewKind::Week => Range::around(self.kind, self.first - Days::new(7)),
-            ViewKind::Month | ViewKind::Agenda => Range::around(self.kind, self.month() - Months::new(1)),
+            ViewKind::Month | ViewKind::Agenda => {
+                Range::around(self.kind, self.month() - Months::new(1))
+            }
         }
     }
 
@@ -178,7 +182,10 @@ pub fn agenda_later(last: NaiveDate, today: NaiveDate) -> Option<(NaiveDate, Nai
     if last >= furthest {
         return None;
     }
-    Some((last + Days::new(1), (last + Days::new(AGENDA_STEP)).min(furthest)))
+    Some((
+        last + Days::new(1),
+        (last + Days::new(AGENDA_STEP)).min(furthest),
+    ))
 }
 
 /// The next earlier day the narrow agenda loads once the reader scrolls
@@ -197,7 +204,10 @@ pub fn earliest_agenda_day(today: NaiveDate) -> NaiveDate {
 /// The first day, on or before `day`, of the week
 /// [`crate::locale_time::week_start_weekday`] starts.
 fn week_start_of(day: NaiveDate) -> NaiveDate {
-    mailrs_domain::calendar::week::week_start_on_or_before(day, crate::locale_time::week_start_weekday())
+    mailrs_domain::calendar::week::week_start_on_or_before(
+        day,
+        crate::locale_time::week_start_weekday(),
+    )
 }
 
 /// The week tag a range's title carries, such as "W39": the number of
@@ -205,7 +215,8 @@ fn week_start_of(day: NaiveDate) -> NaiveDate {
 /// ([`mailrs_domain::calendar::week::week_number`]), so the Week view and
 /// the Day view of any day inside it agree.
 fn week_tag(date: NaiveDate) -> String {
-    let week = mailrs_domain::calendar::week::week_number(date, crate::locale_time::week_start_weekday());
+    let week =
+        mailrs_domain::calendar::week::week_number(date, crate::locale_time::week_start_weekday());
     fill(&gettext("W{week}"), &[("week", &week.to_string())])
 }
 
@@ -249,10 +260,14 @@ mod tests {
     #[test]
     fn the_week_starts_on_setting_overrides_the_locale() {
         crate::locale_time::set_first_weekday_for_test(chrono::Weekday::Sun);
-        crate::locale_time::set_week_start_setting(mailrs_domain::calendar::week::WeekStart::Monday);
+        crate::locale_time::set_week_start_setting(
+            mailrs_domain::calendar::week::WeekStart::Monday,
+        );
         let week = Range::around(ViewKind::Week, d(2026, 9, 23));
         assert_eq!((week.first, week.days), (d(2026, 9, 21), 7));
-        crate::locale_time::set_week_start_setting(mailrs_domain::calendar::week::WeekStart::Automatic);
+        crate::locale_time::set_week_start_setting(
+            mailrs_domain::calendar::week::WeekStart::Automatic,
+        );
     }
 
     #[test]
@@ -297,7 +312,10 @@ mod tests {
         let (_, _, week) = Range::around(ViewKind::Week, d(2026, 9, 30)).title();
         let (_, _, day) = Range::around(ViewKind::Day, d(2026, 9, 30)).title();
         let (_, _, sunday) = Range::around(ViewKind::Day, d(2026, 9, 27)).title();
-        assert_eq!((week.as_str(), day.as_str(), sunday.as_str()), ("W40", "W40", "W40"));
+        assert_eq!(
+            (week.as_str(), day.as_str(), sunday.as_str()),
+            ("W40", "W40", "W40")
+        );
     }
 
     #[test]

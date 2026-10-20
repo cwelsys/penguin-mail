@@ -28,13 +28,18 @@ pub struct Login {
 
 impl Login {
     pub fn new(user: impl Into<String>, password: impl Into<String>) -> Login {
-        Login { user: user.into(), password: password.into() }
+        Login {
+            user: user.into(),
+            password: password.into(),
+        }
     }
 }
 
 impl std::fmt::Debug for Login {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Login").field("user", &self.user).finish_non_exhaustive()
+        f.debug_struct("Login")
+            .field("user", &self.user)
+            .finish_non_exhaustive()
     }
 }
 
@@ -89,7 +94,8 @@ pub trait Pop3Api: Send + Sync + 'static {
     /// The whole message, its dots undone, up to [`MOST_MESSAGE_BYTES`].
     /// `octets` is the size `LIST` gave, which sizes the buffer; a longer
     /// answer still reads, up to the cap.
-    fn retr(&self, id: u32, octets: u64) -> impl Future<Output = Result<Vec<u8>, Pop3Error>> + Send;
+    fn retr(&self, id: u32, octets: u64)
+    -> impl Future<Output = Result<Vec<u8>, Pop3Error>> + Send;
     fn top(&self, id: u32, lines: u32) -> impl Future<Output = Result<Vec<u8>, Pop3Error>> + Send;
     /// Marks message `id` for deletion at a clean `QUIT`.
     fn dele(&self, id: u32) -> impl Future<Output = Result<(), Pop3Error>> + Send;
@@ -122,18 +128,28 @@ pub struct Pop3Tls {
 
 impl Pop3Tls {
     pub fn new(server: &Server) -> Pop3Tls {
-        Pop3Tls { host: server.host.clone(), port: server.port, security: server.security, limit: COMMAND_LIMIT }
+        Pop3Tls {
+            host: server.host.clone(),
+            port: server.port,
+            security: server.security,
+            limit: COMMAND_LIMIT,
+        }
     }
 }
 
 impl Connect for Pop3Tls {
     async fn open(&self) -> Result<(Stream, bool), Pop3Error> {
         let tcp = within(self.limit, async {
-            TcpStream::connect((self.host.as_str(), self.port)).await.map_err(network)
+            TcpStream::connect((self.host.as_str(), self.port))
+                .await
+                .map_err(network)
         })
         .await?;
         match self.security {
-            Security::Tls => Ok((Box::new(within(self.limit, crate::tls::handshake(&self.host, tcp)).await?), false)),
+            Security::Tls => Ok((
+                Box::new(within(self.limit, crate::tls::handshake(&self.host, tcp)).await?),
+                false,
+            )),
             Security::StartTls => Ok((Box::new(tcp), true)),
         }
     }
@@ -141,7 +157,9 @@ impl Connect for Pop3Tls {
     async fn upgrade(&self, plain: Stream) -> Result<Stream, Pop3Error> {
         // A server that takes the connection and never answers the
         // ClientHello would otherwise hold the session lock for good.
-        Ok(Box::new(within(self.limit, crate::tls::handshake(&self.host, plain)).await?))
+        Ok(Box::new(
+            within(self.limit, crate::tls::handshake(&self.host, plain)).await?,
+        ))
     }
 }
 
@@ -169,12 +187,17 @@ struct Session {
 
 impl Session {
     fn new(stream: Stream) -> Session {
-        Session { reader: BufReader::new(stream) }
+        Session {
+            reader: BufReader::new(stream),
+        }
     }
 
     async fn send(&mut self, command: &str) -> Result<(), Pop3Error> {
         let stream = self.reader.get_mut();
-        stream.write_all(command.as_bytes()).await.map_err(network)?;
+        stream
+            .write_all(command.as_bytes())
+            .await
+            .map_err(network)?;
         stream.flush().await.map_err(network)
     }
 
@@ -190,7 +213,9 @@ impl Session {
             return Err(closed());
         }
         if !line.ends_with(b"\n") {
-            return Err(Pop3Error::Protocol("a status line longer than POP3 allows".into()));
+            return Err(Pop3Error::Protocol(
+                "a status line longer than POP3 allows".into(),
+            ));
         }
         Ok(trimmed(&line).to_vec())
     }
@@ -218,7 +243,11 @@ impl Session {
             // Room for the line end and the terminator past the cap.
             let room = cap.saturating_sub(body.len() as u64) + 3;
             let read = within(STALL_LIMIT, async {
-                (&mut self.reader).take(room).read_until(b'\n', &mut line).await.map_err(network)
+                (&mut self.reader)
+                    .take(room)
+                    .read_until(b'\n', &mut line)
+                    .await
+                    .map_err(network)
             })
             .await?;
             if read == 0 {
@@ -248,7 +277,10 @@ impl Session {
     async fn listing(&mut self, command: &str) -> Result<Vec<String>, Pop3Error> {
         self.command(command).await?;
         let body = self.multiline(MOST_MESSAGE_BYTES, 0).await?;
-        Ok(String::from_utf8_lossy(&body).lines().map(str::to_string).collect())
+        Ok(String::from_utf8_lossy(&body)
+            .lines()
+            .map(str::to_string)
+            .collect())
     }
 
     /// `CAPA`, or `None` from a server that answers it with `-ERR`.
@@ -265,7 +297,9 @@ impl Session {
     async fn sign_in(&mut self, caps: &Capabilities, login: &Login) -> Result<(), Pop3Error> {
         // A line break in either would end the command and start another.
         if login.user.contains(['\r', '\n']) || login.password.contains(['\r', '\n']) {
-            return Err(Pop3Error::Auth { text: "the user name or password holds a line break".into() });
+            return Err(Pop3Error::Auth {
+                text: "the user name or password holds a line break".into(),
+            });
         }
         let refused = |err: Pop3Error| match err {
             Pop3Error::Refused(text) => Pop3Error::Auth { text },
@@ -281,10 +315,19 @@ impl Session {
             }
             let plain = format!("\0{}\0{}", login.user, login.password);
             let encoded = base64::engine::general_purpose::STANDARD.encode(plain);
-            return self.command(&format!("{encoded}\r\n")).await.map(drop).map_err(refused);
+            return self
+                .command(&format!("{encoded}\r\n"))
+                .await
+                .map(drop)
+                .map_err(refused);
         }
-        self.command(&format!("USER {}\r\n", login.user)).await.map_err(refused)?;
-        self.command(&format!("PASS {}\r\n", login.password)).await.map(drop).map_err(refused)
+        self.command(&format!("USER {}\r\n", login.user))
+            .await
+            .map_err(refused)?;
+        self.command(&format!("PASS {}\r\n", login.password))
+            .await
+            .map(drop)
+            .map_err(refused)
     }
 
     /// Whether `UIDL` works, for a server whose `CAPA` did not say.
@@ -329,7 +372,11 @@ impl Pop3Client {
 
 impl<C: Connect> Pop3Client<C> {
     pub fn with_connect(connect: C, login: Login) -> Pop3Client<C> {
-        Pop3Client { connect, login, session: tokio::sync::Mutex::new(None) }
+        Pop3Client {
+            connect,
+            login,
+            session: tokio::sync::Mutex::new(None),
+        }
     }
 
     async fn open_session(&self) -> Result<(Session, Capabilities), Pop3Error> {
@@ -435,7 +482,9 @@ impl<C: Connect> Pop3Api for Pop3Client<C> {
 
     async fn quit(&self) -> Result<(), Pop3Error> {
         let mut held = self.session.lock().await;
-        let Some(mut session) = held.take() else { return Err(no_session()) };
+        let Some(mut session) = held.take() else {
+            return Err(no_session());
+        };
         session.command("QUIT\r\n").await.map(drop)
     }
 }
@@ -481,20 +530,33 @@ mod tests {
             write.write_all(b"+OK POP3 ready\r\n").await.unwrap();
             let mut heard = Vec::new();
             for (expect, answer) in script {
-                let Ok(Some(line)) = lines.next_line().await else { break };
+                let Ok(Some(line)) = lines.next_line().await else {
+                    break;
+                };
                 assert_eq!(line, expect);
                 heard.push(line);
                 write.write_all(answer.as_bytes()).await.unwrap();
             }
             heard
         });
-        let connect = Scripted { stream: Mutex::new(Some(ours)), stls };
-        (Pop3Client::with_connect(connect, Login::new("me", "pw")), server)
+        let connect = Scripted {
+            stream: Mutex::new(Some(ours)),
+            stls,
+        };
+        (
+            Pop3Client::with_connect(connect, Login::new("me", "pw")),
+            server,
+        )
     }
 
     #[tokio::test]
     async fn a_tls_handshake_the_server_never_answers_gives_up() {
-        let tls = Pop3Tls { host: "localhost".into(), port: 995, security: Security::StartTls, limit: Duration::from_millis(100) };
+        let tls = Pop3Tls {
+            host: "localhost".into(),
+            port: 995,
+            security: Security::StartTls,
+            limit: Duration::from_millis(100),
+        };
         let (ours, _silent) = tokio::io::duplex(1024);
         let upgraded = tokio::time::timeout(Duration::from_secs(10), tls.upgrade(Box::new(ours)))
             .await
@@ -514,7 +576,10 @@ mod tests {
                 ("STAT", "+OK 2 150\r\n"),
                 ("UIDL", "+OK\r\n1 a1\r\n2 a2\r\n.\r\n"),
                 ("LIST", "+OK\r\n1 120\r\n2 30\r\n.\r\n"),
-                ("RETR 1", "+OK 120 octets\r\nSubject: test\r\n\r\n..dot line\r\n.\r\n"),
+                (
+                    "RETR 1",
+                    "+OK 120 octets\r\nSubject: test\r\n\r\n..dot line\r\n.\r\n",
+                ),
                 ("TOP 2 0", "+OK\r\nSubject: two\r\n\r\n.\r\n"),
                 ("DELE 1", "+OK marked\r\n"),
                 ("QUIT", "+OK bye\r\n"),
@@ -522,21 +587,45 @@ mod tests {
         );
         let caps = client.connect().await.unwrap();
         assert!(caps.uidl && caps.sasl_plain && caps.top && !caps.stls);
-        assert_eq!(client.stat().await.unwrap(), Stat { count: 2, octets: 150 });
+        assert_eq!(
+            client.stat().await.unwrap(),
+            Stat {
+                count: 2,
+                octets: 150
+            }
+        );
         assert_eq!(
             client.uidl().await.unwrap().messages,
-            [Uidl { id: 1, uidl: "a1".into() }, Uidl { id: 2, uidl: "a2".into() }]
+            [
+                Uidl {
+                    id: 1,
+                    uidl: "a1".into()
+                },
+                Uidl {
+                    id: 2,
+                    uidl: "a2".into()
+                }
+            ]
         );
         assert_eq!(
             client.list().await.unwrap(),
-            [ListItem { id: 1, octets: 120 }, ListItem { id: 2, octets: 30 }]
+            [
+                ListItem { id: 1, octets: 120 },
+                ListItem { id: 2, octets: 30 }
+            ]
         );
-        assert_eq!(client.retr(1, 31).await.unwrap(), b"Subject: test\r\n\r\n.dot line\r\n");
+        assert_eq!(
+            client.retr(1, 31).await.unwrap(),
+            b"Subject: test\r\n\r\n.dot line\r\n"
+        );
         assert_eq!(client.top(2, 0).await.unwrap(), b"Subject: two\r\n\r\n");
         client.dele(1).await.unwrap();
         client.quit().await.unwrap();
         assert_eq!(server.await.unwrap().len(), 10);
-        assert!(matches!(client.stat().await, Err(Pop3Error::Protocol(_))), "no session after QUIT");
+        assert!(
+            matches!(client.stat().await, Err(Pop3Error::Protocol(_))),
+            "no session after QUIT"
+        );
     }
 
     #[tokio::test]
@@ -553,7 +642,10 @@ mod tests {
         );
         let caps = client.connect().await.unwrap();
         assert!(caps.uidl && !caps.sasl_plain);
-        assert_eq!(server.await.unwrap(), ["CAPA", "STLS", "CAPA", "USER me", "PASS pw"]);
+        assert_eq!(
+            server.await.unwrap(),
+            ["CAPA", "STLS", "CAPA", "USER me", "PASS pw"]
+        );
     }
 
     #[tokio::test]
@@ -601,7 +693,12 @@ mod tests {
                 ("PASS pw", "-ERR invalid login\r\n"),
             ],
         );
-        assert_eq!(client.connect().await, Err(Pop3Error::Auth { text: "invalid login".into() }));
+        assert_eq!(
+            client.connect().await,
+            Err(Pop3Error::Auth {
+                text: "invalid login".into()
+            })
+        );
     }
 
     #[tokio::test]
@@ -617,7 +714,10 @@ mod tests {
             ],
         );
         client.connect().await.unwrap();
-        assert_eq!(client.retr(3, 0).await, Err(Pop3Error::Refused("no such message".into())));
+        assert_eq!(
+            client.retr(3, 0).await,
+            Err(Pop3Error::Refused("no such message".into()))
+        );
         client.dele(2).await.unwrap();
     }
 
@@ -657,7 +757,16 @@ mod tests {
         assert_eq!(
             client.uidl().await.unwrap(),
             UidlListing {
-                messages: vec![Uidl { id: 1, uidl: "a1".into() }, Uidl { id: 4, uidl: "a4".into() }],
+                messages: vec![
+                    Uidl {
+                        id: 1,
+                        uidl: "a1".into()
+                    },
+                    Uidl {
+                        id: 4,
+                        uidl: "a4".into()
+                    }
+                ],
                 unreadable: 2,
             }
         );
@@ -666,7 +775,10 @@ mod tests {
     #[tokio::test]
     async fn an_answer_over_the_cap_is_too_large_and_ends_the_session() {
         let (ours, mut theirs) = tokio::io::duplex(1024);
-        theirs.write_all(b"line one\r\nline two\r\n.\r\n").await.unwrap();
+        theirs
+            .write_all(b"line one\r\nline two\r\n.\r\n")
+            .await
+            .unwrap();
         let mut session = Session::new(Box::new(ours));
         assert_eq!(session.multiline(12, 0).await, Err(Pop3Error::TooLarge));
     }
@@ -677,17 +789,25 @@ mod tests {
         let mut session = Session::new(Box::new(ours));
         let caps = Capabilities::default();
         let login = Login::new("me", "pw\r\nDELE 1");
-        assert!(matches!(session.sign_in(&caps, &login).await, Err(Pop3Error::Auth { .. })));
+        assert!(matches!(
+            session.sign_in(&caps, &login).await,
+            Err(Pop3Error::Auth { .. })
+        ));
         drop(session);
         let mut heard = Vec::new();
-        tokio::io::AsyncReadExt::read_to_end(&mut { theirs }, &mut heard).await.unwrap();
+        tokio::io::AsyncReadExt::read_to_end(&mut { theirs }, &mut heard)
+            .await
+            .unwrap();
         assert!(heard.is_empty(), "nothing went out");
     }
 
     #[tokio::test]
     async fn a_call_before_connect_has_no_session() {
         let (client, _server) = scripted(false, vec![]);
-        assert!(matches!(client.retr(1, 0).await, Err(Pop3Error::Protocol(_))));
+        assert!(matches!(
+            client.retr(1, 0).await,
+            Err(Pop3Error::Protocol(_))
+        ));
     }
 
     #[test]

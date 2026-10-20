@@ -14,7 +14,9 @@ use mailrs_domain::{Account, Filter, FilterAction, FilterCriteria, MailSet, Vaca
 use mailrs_store::services::{self, FoundService, ServiceKind};
 use mailrs_store::{Db, accounts};
 use mailrs_sync::passwords::{MemoryPasswords, PasswordStore};
-use mailrs_sync::{AnyAutoReply, AnyRules, AutoReplyService, BackendError, RulesPlace, RulesService};
+use mailrs_sync::{
+    AnyAutoReply, AnyRules, AutoReplyService, BackendError, RulesPlace, RulesService,
+};
 use mailrs_testmail::{Certs, Dovecot, Profile};
 
 const USER: &str = "me@example.test";
@@ -36,7 +38,11 @@ async fn account_on(dovecot: &Dovecot, dir: &std::path::Path) -> (Db, Account) {
                 user_name: UserName::Address,
             };
             // Nothing sends mail in this test, so SMTP names the IMAP port.
-            mailrs_store::servers::save(c, id, &mailrs_sync::servers_for(&at(imaps), USER, &at(imaps), USER))?;
+            mailrs_store::servers::save(
+                c,
+                id,
+                &mailrs_sync::servers_for(&at(imaps), USER, &at(imaps), USER),
+            )?;
             services::save(
                 c,
                 id,

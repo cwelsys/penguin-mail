@@ -3,8 +3,8 @@
 
 use chrono::{Duration, Local};
 use mailrs_domain::{Address, EpochMillis};
-use mailrs_gmail::labels as gmail;
 use mailrs_gmail::GmailError;
+use mailrs_gmail::labels as gmail;
 use mailrs_store::outbox::{self, Queued};
 use mailrs_store::reminders;
 use mailrs_sync::{Posted, outbox_row};
@@ -321,11 +321,7 @@ async fn reminders_are_listed_moved_and_cancelled() {
             .unwrap()
             .is_empty()
     );
-    assert!(
-        h.labels_of("m1")
-            .await
-            .contains(&gmail::INBOX.to_string())
-    );
+    assert!(h.labels_of("m1").await.contains(&gmail::INBOX.to_string()));
 
     assert!(
         h.run("cancel_reminder", json!({"targets": [target("t1")]}))
@@ -367,10 +363,11 @@ async fn organize_takes_mail_out_of_the_trash_with_move_to_inbox() {
             .iter()
             .any(|w| w == "modify m2 +INBOX -TRASH")
     }));
-    assert!(
-        h.gmail
-            .with(|s| gmail::label_ids(&s.messages["m2"]).iter().any(|l| l == gmail::INBOX))
-    );
+    assert!(h.gmail.with(|s| {
+        gmail::label_ids(&s.messages["m2"])
+            .iter()
+            .any(|l| l == gmail::INBOX)
+    }));
     let labels = h.labels_of("m2").await;
     assert!(labels.contains(&gmail::INBOX.to_string()));
     assert!(!labels.contains(&gmail::TRASH.to_string()));
@@ -390,11 +387,7 @@ async fn undo_asks_then_takes_back_the_newest_change() {
         json!({"targets": [target("t1")], "action": "archive"}),
     )
     .await;
-    assert!(
-        !h.labels_of("m1")
-            .await
-            .contains(&gmail::INBOX.to_string())
-    );
+    assert!(!h.labels_of("m1").await.contains(&gmail::INBOX.to_string()));
     let done = h.ok("undo", json!({})).await;
     assert_eq!(done["undone"], "Archive");
     assert_eq!(done["done"], 1);
@@ -404,11 +397,7 @@ async fn undo_asks_then_takes_back_the_newest_change() {
         1,
         "the window redraws what came back"
     );
-    assert!(
-        h.labels_of("m1")
-            .await
-            .contains(&gmail::INBOX.to_string())
-    );
+    assert!(h.labels_of("m1").await.contains(&gmail::INBOX.to_string()));
 
     h.ok(
         "organize",
@@ -421,9 +410,7 @@ async fn undo_asks_then_takes_back_the_newest_change() {
         Err("The user declined.".into())
     );
     assert!(
-        !h.labels_of("m2")
-            .await
-            .contains(&gmail::INBOX.to_string()),
+        !h.labels_of("m2").await.contains(&gmail::INBOX.to_string()),
         "a declined undo leaves the archive done"
     );
 }
@@ -449,7 +436,10 @@ async fn list_mail_reads_a_smart_mailbox_by_name() {
 
 #[test]
 fn cancel_send_tells_the_model_what_the_server_had_already_sent() {
-    let cancelled = mailrs_sync::Cancelled { already_sent: 2, ..Default::default() };
+    let cancelled = mailrs_sync::Cancelled {
+        already_sent: 2,
+        ..Default::default()
+    };
     let result = super::super::queue::cancel_result(&cancelled, 0);
     assert_eq!(result["already_sent"], json!(2));
     assert_eq!(
@@ -468,8 +458,15 @@ fn cancel_send_counts_holds_the_server_kept_as_still_scheduled() {
     };
     let result = super::super::queue::cancel_result(&cancelled, 0);
     assert_eq!(
-        (&result["still_scheduled"], &result["canceled_elsewhere"], &result["unconfirmed"]),
+        (
+            &result["still_scheduled"],
+            &result["canceled_elsewhere"],
+            &result["unconfirmed"]
+        ),
         (&json!(1), &json!(1), &json!(1))
     );
-    assert!(result.get("note").is_none(), "nothing blames Gmail: {result}");
+    assert!(
+        result.get("note").is_none(),
+        "nothing blames Gmail: {result}"
+    );
 }

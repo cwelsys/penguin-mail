@@ -159,7 +159,10 @@ impl WebView {
             view.setAllowsLinkPreview(false);
             // Until the page draws, the colour behind it is the window's,
             // not white.
-            view.setValue_forKey(Some(&NSNumber::new_bool(false)), ns_string!("drawsBackground"));
+            view.setValue_forKey(
+                Some(&NSNumber::new_bool(false)),
+                ns_string!("drawsBackground"),
+            );
         }
         let clip = NSView::new(mtm);
         clip.setWantsLayer(true);

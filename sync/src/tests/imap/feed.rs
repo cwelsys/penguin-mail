@@ -19,7 +19,8 @@ async fn synced_on(imap: FakeImap) -> ImapHarness {
 /// New mail, flags set and cleared, and an expunge, all made by another
 /// client, reach the store.
 async fn changes_elsewhere_reach_the_store(h: ImapHarness) {
-    h.imap.deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(0));
+    h.imap
+        .deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(0));
     h.sync.incremental().await.unwrap();
     assert_eq!(h.ids().await, ["INBOX/1001/1", "INBOX/1001/2"]);
     assert!(h.drain().iter().any(|e| matches!(
@@ -56,24 +57,20 @@ async fn with_condstore_alone_changes_elsewhere_reach_the_store() {
 
 #[tokio::test]
 async fn with_neither_changes_elsewhere_reach_the_store() {
-    let h = synced_on(
-        offering(|c| {
-            c.qresync = false;
-            c.condstore = false;
-        }),
-    )
+    let h = synced_on(offering(|c| {
+        c.qresync = false;
+        c.condstore = false;
+    }))
     .await;
     changes_elsewhere_reach_the_store(h).await;
 }
 
 #[tokio::test]
 async fn with_neither_a_quiet_look_announces_nothing() {
-    let h = synced_on(
-        offering(|c| {
-            c.qresync = false;
-            c.condstore = false;
-        }),
-    )
+    let h = synced_on(offering(|c| {
+        c.qresync = false;
+        c.condstore = false;
+    }))
     .await;
     h.sync.incremental().await.unwrap();
     h.drain();
@@ -93,21 +90,32 @@ async fn with_neither_a_quiet_look_announces_nothing() {
 /// is not asked. A message marked so brings it back.
 #[tokio::test]
 async fn with_neither_a_look_asks_for_deleted_mail_only_when_some_is_marked() {
-    let h = synced_on(
-        offering(|c| {
-            c.qresync = false;
-            c.condstore = false;
-        }),
-    )
+    let h = synced_on(offering(|c| {
+        c.qresync = false;
+        c.condstore = false;
+    }))
     .await;
-    let asked = |h: &crate::tests::ImapHarness| h.imap.calls().iter().filter(|c| c.ends_with(" DELETED") && !c.ends_with("UNDELETED")).count();
+    let asked = |h: &crate::tests::ImapHarness| {
+        h.imap
+            .calls()
+            .iter()
+            .filter(|c| c.ends_with(" DELETED") && !c.ends_with("UNDELETED"))
+            .count()
+    };
     let before = asked(&h);
     h.sync.incremental().await.unwrap();
-    assert_eq!(asked(&h), before, "no message is marked, so no search for one");
+    assert_eq!(
+        asked(&h),
+        before,
+        "no message is marked, so no search for one"
+    );
     h.imap.set_flags("INBOX", 1, &["\\Deleted"]);
     h.sync.incremental().await.unwrap();
     assert!(asked(&h) > before, "{:?}", h.imap.calls());
-    assert!(h.ids().await.is_empty(), "the marked message leaves the list");
+    assert!(
+        h.ids().await.is_empty(),
+        "the marked message leaves the list"
+    );
 }
 
 /// A QRESYNC SELECT that answers past its byte budget drops the
@@ -160,7 +168,12 @@ async fn a_vanished_range_of_every_uid_deletes_what_the_mailbox_held_and_stays_s
     imap.with(|s| s.mailbox_mut("INBOX").uidnext = 2_000_000);
     imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
     imap.deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(1));
-    imap.deliver_flagged("Archive", &message("c", "Fresh", ""), &["\\Seen"], days_ago(1));
+    imap.deliver_flagged(
+        "Archive",
+        &message("c", "Fresh", ""),
+        &["\\Seen"],
+        days_ago(1),
+    );
     let h = imap_harness_on(imap, fake_settings()).await;
     h.bootstrap().await;
     h.sync.incremental().await.unwrap();
@@ -253,7 +266,10 @@ async fn with_neither_a_look_at_a_mailbox_of_120_000_goes_in_windows() {
         RemoteChange::Holds { uids, .. } => Some(uids.clone()),
         _ => None,
     });
-    assert_eq!(holds.map(|u| (u.len(), u.contains(7))), Some((119_999, false)));
+    assert_eq!(
+        holds.map(|u| (u.len(), u.contains(7))),
+        Some((119_999, false))
+    );
     assert!(windowed(&imap), "{:?}", imap.calls());
 }
 
@@ -370,7 +386,10 @@ async fn the_keywords_to_compare_come_a_window_at_a_time() {
     }));
     imap.set_flags("INBOX", 7, &["\\Seen", "$Work"]);
 
-    let page = adapter.keywords_in("INBOX", 1001, 1..=120_000).await.unwrap();
+    let page = adapter
+        .keywords_in("INBOX", 1001, 1..=120_000)
+        .await
+        .unwrap();
 
     assert_eq!(page.covered, Some(1..=50_000));
     assert_eq!(page.found.len(), 50_000);
@@ -379,8 +398,14 @@ async fn the_keywords_to_compare_come_a_window_at_a_time() {
     keywords.sort();
     assert_eq!(keywords, ["$seen", "$work"]);
     assert!(windowed(&imap), "{:?}", imap.calls());
-    let renumbered = adapter.keywords_in("INBOX", 999, 1..=120_000).await.unwrap();
-    assert_eq!(renumbered.covered, None, "a mailbox renumbered since answers nothing");
+    let renumbered = adapter
+        .keywords_in("INBOX", 999, 1..=120_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        renumbered.covered, None,
+        "a mailbox renumbered since answers nothing"
+    );
 }
 
 /// A change in a later window reaches the store: the engine asks for
@@ -420,14 +445,21 @@ async fn a_server_that_leaves_uidnext_out_is_asked_only_for_mail_above_what_it_h
     let h = imap_harness_on(imap, fake_settings()).await;
     h.bootstrap().await;
     h.sync.incremental().await.unwrap();
-    h.imap.deliver_flagged("INBOX", &message("c", "Rain", ""), &[], days_ago(0));
+    h.imap
+        .deliver_flagged("INBOX", &message("c", "Rain", ""), &[], days_ago(0));
 
     h.sync.incremental().await.unwrap();
 
-    assert_eq!(h.ids().await, ["INBOX/1001/1", "INBOX/1001/2", "INBOX/1001/3"]);
+    assert_eq!(
+        h.ids().await,
+        ["INBOX/1001/1", "INBOX/1001/2", "INBOX/1001/3"]
+    );
     let calls = h.imap.calls();
     assert!(!calls.iter().any(|c| c.contains(":*")), "{calls:?}");
-    assert!(calls.contains(&"search INBOX UID 3:3 UNDELETED".to_string()), "{calls:?}");
+    assert!(
+        calls.contains(&"search INBOX UID 3:3 UNDELETED".to_string()),
+        "{calls:?}"
+    );
 }
 
 /// What one poll holds, end to end, for an account whose Inbox of 120,000
@@ -514,7 +546,8 @@ async fn a_failed_first_look_at_a_followed_mailbox_keeps_its_starting_point() {
 /// later, or for never, has taken the message away as far as its owner
 /// can see, so the store lets it go at the next look too.
 async fn a_message_marked_deleted_elsewhere_leaves_the_store(h: ImapHarness) {
-    h.imap.deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(0));
+    h.imap
+        .deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(0));
     h.sync.incremental().await.unwrap();
     assert_eq!(h.ids().await, ["INBOX/1001/1", "INBOX/1001/2"]);
 
@@ -551,12 +584,10 @@ async fn with_condstore_alone_a_message_marked_deleted_elsewhere_leaves_the_stor
 
 #[tokio::test]
 async fn with_neither_a_message_marked_deleted_elsewhere_leaves_the_store() {
-    let h = synced_on(
-        offering(|c| {
-            c.qresync = false;
-            c.condstore = false;
-        }),
-    )
+    let h = synced_on(offering(|c| {
+        c.qresync = false;
+        c.condstore = false;
+    }))
     .await;
     a_message_marked_deleted_elsewhere_leaves_the_store(h).await;
 }

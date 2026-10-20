@@ -18,8 +18,8 @@ pub mod structure;
 mod token_store;
 
 pub use calendar::{
-    CALENDAR_API_BASE, CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE,
-    google_event,
+    CALENDAR_API_BASE, CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE,
+    CALENDARS_SCOPE, google_event,
 };
 pub use client::{
     Authorized, BATCH_LIMIT, GMAIL_API_BASE, GmailClient, authorize, cost, one_click_unsubscribe,
@@ -30,12 +30,13 @@ pub use drive::DriveStorage;
 pub use error::{GmailError, OneClickError};
 pub use limiter::{AccountQuota, Priority, QuotaLimiter, QuotaPool, Waiting};
 pub use model::{
-    Draft, LabelColor, MessagePage, MessageRef, Profile, RemoteLabel, SendAs, is_reserved_label_name,
+    Draft, LabelColor, MessagePage, MessageRef, Profile, RemoteLabel, SendAs,
+    is_reserved_label_name,
 };
 pub use oauth::{
-    AccessToken, DELETE_SCOPE, DRIVE_FILE_SCOPE, GMAIL_SCOPE, Granted, LoopbackListener, OAuthClient, Pkce,
-    SETTINGS_SCOPE, SIGN_IN_SCOPES, Tokens, built_in_client,
-    client_from, parse_redirect, random_token,
+    AccessToken, DELETE_SCOPE, DRIVE_FILE_SCOPE, GMAIL_SCOPE, Granted, LoopbackListener,
+    OAuthClient, Pkce, SETTINGS_SCOPE, SIGN_IN_SCOPES, Tokens, built_in_client, client_from,
+    parse_redirect, random_token,
 };
 pub use people::{CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE, ConnectionsPage, ContactFields, Person};
 pub use token_store::{KeyringTokenStore, MemoryTokenStore, TokenStore};

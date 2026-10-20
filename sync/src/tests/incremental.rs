@@ -19,7 +19,10 @@ async fn new_inbox_mail_is_stored_and_announced() {
     h.fake
         .deliver(meta("new", "tnew", now, &["INBOX", "UNREAD"]));
     h.sync.incremental().await.unwrap();
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["tnew", "told"]);
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["tnew", "told"]
+    );
     assert_eq!(h.history_id().await, Some(101));
     assert!(h.drain().contains(&ChangeEvent::NewMail {
         account_id: 1,
@@ -67,7 +70,9 @@ async fn old_mail_moved_into_the_inbox_is_fetched() {
     h.sync.incremental().await.unwrap();
     assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["told"]);
     assert!(
-        !h.drain().iter().any(|e| matches!(e, ChangeEvent::NewMail { .. })),
+        !h.drain()
+            .iter()
+            .any(|e| matches!(e, ChangeEvent::NewMail { .. })),
         "a feed that does not restate announces no old mail"
     );
 }
@@ -86,7 +91,8 @@ fn restating(fake: Arc<FakeGmail>) -> AccountServices {
 async fn a_restating_feed_stores_mail_it_names_first() {
     let h = harness_with(restating).await;
     h.bootstrap_all().await;
-    h.fake.seed(meta("old", "told", now_millis() - 90 * DAY, &[]));
+    h.fake
+        .seed(meta("old", "told", now_millis() - 90 * DAY, &[]));
     h.fake.remote_relabel("old", &["Label_1"], &[]);
     h.sync.incremental().await.unwrap();
     assert_eq!(h.labels_of("old").await, ["Label_1"]);
@@ -246,7 +252,10 @@ async fn archived_behind_the_cursor() -> super::Harness {
 #[tokio::test]
 async fn history_alone_leaves_a_missed_archive_in_the_inbox() {
     let h = archived_behind_the_cursor().await;
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["tkept", "tstale"]);
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["tkept", "tstale"]
+    );
 }
 
 #[tokio::test]
@@ -275,7 +284,10 @@ async fn reconciling_the_inbox_brings_back_mail_it_missed() {
         crate::fake::edit_labels(filed, |ids| ids.push("INBOX".into()));
     });
     h.sync.reconcile_inbox().await.unwrap();
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["tkept", "tfiled"]);
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["tkept", "tfiled"]
+    );
 }
 
 #[tokio::test]

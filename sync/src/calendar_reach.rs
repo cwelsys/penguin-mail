@@ -11,13 +11,19 @@ use mailrs_domain::EpochMillis;
 /// of `wanted`'s month in UTC, so a week and the week before it ask for
 /// one range, not two, and the end is where the copy's reach began, so the
 /// ranges join without a gap or a repeat.
-pub fn missing_range(reach: Option<EpochMillis>, wanted: EpochMillis) -> Option<(EpochMillis, EpochMillis)> {
+pub fn missing_range(
+    reach: Option<EpochMillis>,
+    wanted: EpochMillis,
+) -> Option<(EpochMillis, EpochMillis)> {
     let reach = reach?;
     if wanted >= reach {
         return None;
     }
     let month_start = DateTime::<Utc>::from_timestamp_millis(wanted)
-        .and_then(|at| Utc.with_ymd_and_hms(at.year(), at.month(), 1, 0, 0, 0).single())
+        .and_then(|at| {
+            Utc.with_ymd_and_hms(at.year(), at.month(), 1, 0, 0, 0)
+                .single()
+        })
         .map_or(0, |first| first.timestamp_millis());
     Some((month_start.max(0), reach))
 }
@@ -27,14 +33,21 @@ mod tests {
     use super::*;
 
     fn at(year: i32, month: u32, day: u32) -> EpochMillis {
-        Utc.with_ymd_and_hms(year, month, day, 12, 0, 0).unwrap().timestamp_millis()
+        Utc.with_ymd_and_hms(year, month, day, 12, 0, 0)
+            .unwrap()
+            .timestamp_millis()
     }
 
     #[test]
     fn a_week_before_the_reach_asks_for_its_month_up_to_the_reach() {
         let reach = at(2025, 9, 23);
         let (from, to) = missing_range(Some(reach), at(2024, 9, 10)).unwrap();
-        assert_eq!(from, Utc.with_ymd_and_hms(2024, 9, 1, 0, 0, 0).unwrap().timestamp_millis());
+        assert_eq!(
+            from,
+            Utc.with_ymd_and_hms(2024, 9, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        );
         assert_eq!(to, reach);
     }
 
@@ -59,7 +72,12 @@ mod tests {
         // One month further back asks for that month alone.
         let (from, to) = missing_range(Some(first_from), at(2025, 2, 20)).unwrap();
         assert_eq!(to, first_from);
-        assert_eq!(from, Utc.with_ymd_and_hms(2025, 2, 1, 0, 0, 0).unwrap().timestamp_millis());
+        assert_eq!(
+            from,
+            Utc.with_ymd_and_hms(2025, 2, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        );
     }
 
     #[test]

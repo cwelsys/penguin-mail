@@ -12,7 +12,8 @@ const DAY: i64 = 24 * 60 * 60 * 1000;
 #[tokio::test]
 async fn bootstrap_records_the_cursor_labels_and_first_page() {
     let h = harness().await;
-    h.fake.keep_labels(&["INBOX", "UNREAD", "STARRED", "Label_1"]);
+    h.fake
+        .keep_labels(&["INBOX", "UNREAD", "STARRED", "Label_1"]);
     let now = now_millis();
     for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
         h.fake.seed(meta(
@@ -61,7 +62,10 @@ async fn backfill_finishes_the_window_then_stops() {
     }
     h.sync.bootstrap().await.unwrap();
     assert!(!h.sync.backfill_step().await.unwrap());
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["ta", "tb", "tc"]);
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["ta", "tb", "tc"]
+    );
     assert!(h.cursor().await.backfill_done);
     assert!(!h.sync.backfill_step().await.unwrap());
 }
@@ -125,7 +129,10 @@ async fn fill_store_leaves_a_finished_first_sync() {
     h.fake.seed(meta("old", "told", now - 40 * DAY, &[]));
     crate::fake::fill_store(&h.sync).await.unwrap();
 
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["ta", "tb", "tc"]);
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["ta", "tb", "tc"]
+    );
     assert!(
         h.thread("tspam").await.is_none(),
         "Gmail hides spam from the window"

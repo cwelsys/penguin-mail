@@ -109,27 +109,42 @@ fn rule_statement(
         tests.push(format!("address :all :contains \"from\" {}", quote(from)));
     }
     if let Some(to) = &c.to {
-        tests.push(format!("address :all :contains [\"to\", \"cc\"] {}", quote(to)));
+        tests.push(format!(
+            "address :all :contains [\"to\", \"cc\"] {}",
+            quote(to)
+        ));
     }
     if let Some(subject) = &c.subject {
         tests.push(format!("header :contains \"subject\" {}", quote(subject)));
     }
     if let Some(words) = &c.query {
         need("body")?;
-        tests.push(format!("body :text :contains {}", quote(&mailrs_domain::query::plain(words))));
+        tests.push(format!(
+            "body :text :contains {}",
+            quote(&mailrs_domain::query::plain(words))
+        ));
     }
     if let Some(words) = &c.negated_query {
         need("body")?;
-        tests.push(format!("not body :text :contains {}", quote(&mailrs_domain::query::plain(words))));
+        tests.push(format!(
+            "not body :text :contains {}",
+            quote(&mailrs_domain::query::plain(words))
+        ));
     }
     if let Some(size) = c.size {
         // Gmail's "smaller" is Sieve's `:under`; anything else reads as larger.
-        let way = if c.size_comparison.as_deref() == Some("smaller") { ":under" } else { ":over" };
+        let way = if c.size_comparison.as_deref() == Some("smaller") {
+            ":under"
+        } else {
+            ":over"
+        };
         tests.push(format!("size {way} {size}"));
     }
     if c.has_attachment {
         need("mime")?;
-        tests.push("header :mime :anychild :contains \"Content-Disposition\" \"attachment\"".to_string());
+        tests.push(
+            "header :mime :anychild :contains \"Content-Disposition\" \"attachment\"".to_string(),
+        );
     }
     let condition = match tests.len() {
         0 => return Err(WriteError::Unsayable(Unsayable::NothingToMatch)),
@@ -153,9 +168,18 @@ fn rule_statement(
     let places: Vec<&MailSet> = a
         .add
         .iter()
-        .filter(|set| matches!(set, MailSet::Mailbox(_) | MailSet::Role(Role::Trash | Role::Junk | Role::Archive)))
+        .filter(|set| {
+            matches!(
+                set,
+                MailSet::Mailbox(_) | MailSet::Role(Role::Trash | Role::Junk | Role::Archive)
+            )
+        })
         .collect();
-    if a.add.iter().chain(&a.remove).any(|set| matches!(set, MailSet::Role(Role::Important) | MailSet::Category(_))) {
+    if a.add
+        .iter()
+        .chain(&a.remove)
+        .any(|set| matches!(set, MailSet::Role(Role::Important) | MailSet::Category(_)))
+    {
         return Err(WriteError::Unsayable(Unsayable::Importance));
     }
     if a.remove.contains(&MailSet::Role(Role::Junk)) {
@@ -198,26 +222,49 @@ fn rule_statement(
     if actions.is_empty() {
         return Err(WriteError::Unsayable(Unsayable::NothingToDo));
     }
-    Ok(format!("if {condition} {{\n    {}\n}}", actions.join("\n    ")))
+    Ok(format!(
+        "if {condition} {{\n    {}\n}}",
+        actions.join("\n    ")
+    ))
 }
 
 fn day(at: mailrs_domain::EpochMillis) -> String {
-    Local.timestamp_millis_opt(at).single().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()
+    Local
+        .timestamp_millis_opt(at)
+        .single()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
 }
 
-fn vacation_statement(v: &Vacation, address: &str, ext: &Extensions, needs: &mut BTreeSet<&'static str>) -> Result<String, WriteError> {
+fn vacation_statement(
+    v: &Vacation,
+    address: &str,
+    ext: &Extensions,
+    needs: &mut BTreeSet<&'static str>,
+) -> Result<String, WriteError> {
     if !ext.has("vacation") {
         return Err(WriteError::Needs("vacation"));
     }
     needs.insert("vacation");
-    let reply = format!("vacation :days 1 :subject {} :addresses [{}] {};", quote(&v.subject), quote(address), quote(&v.body));
+    let reply = format!(
+        "vacation :days 1 :subject {} :addresses [{}] {};",
+        quote(&v.subject),
+        quote(address),
+        quote(&v.body)
+    );
     let mut tests = Vec::new();
     if let Some(start) = v.start {
-        tests.push(format!("currentdate :value \"ge\" \"date\" {}", quote(&day(start))));
+        tests.push(format!(
+            "currentdate :value \"ge\" \"date\" {}",
+            quote(&day(start))
+        ));
     }
     if let Some(end) = v.end {
         // The end is the moment replies stop: the first day not answered.
-        tests.push(format!("currentdate :value \"lt\" \"date\" {}", quote(&day(end))));
+        tests.push(format!(
+            "currentdate :value \"lt\" \"date\" {}",
+            quote(&day(end))
+        ));
     }
     if tests.is_empty() {
         return Ok(reply);
@@ -228,18 +275,30 @@ fn vacation_statement(v: &Vacation, address: &str, ext: &Extensions, needs: &mut
         }
         needs.insert(name);
     }
-    let condition = if tests.len() == 1 { tests.remove(0) } else { format!("allof ({})", tests.join(", ")) };
+    let condition = if tests.len() == 1 {
+        tests.remove(0)
+    } else {
+        format!("allof ({})", tests.join(", "))
+    };
     Ok(format!("if {condition} {{\n    {reply}\n}}"))
 }
 
-pub fn write(script: &Script, address: &str, folder: &dyn Fn(&MailSet) -> Option<String>, ext: &Extensions) -> Result<String, WriteError> {
+pub fn write(
+    script: &Script,
+    address: &str,
+    folder: &dyn Fn(&MailSet) -> Option<String>,
+    ext: &Extensions,
+) -> Result<String, WriteError> {
     let mut needs: BTreeSet<&'static str> = BTreeSet::new();
     let mut blocks = Vec::new();
     if let Some(v) = &script.vacation {
         let json = serde_json::to_string(v).unwrap_or_default();
         if v.enabled {
             let statement = vacation_statement(v, address, ext, &mut needs)?;
-            blocks.push(format!("{VACATION}{} {json}\n{statement}", hash(&statement)));
+            blocks.push(format!(
+                "{VACATION}{} {json}\n{statement}",
+                hash(&statement)
+            ));
         } else {
             blocks.push(format!("{VACATION}{OFF} {json}"));
         }
@@ -340,12 +399,18 @@ fn pieces(text: &str) -> Vec<Piece> {
             next.starts_with("elsif") || next.starts_with("else")
         });
         if ended && depth <= 0 && !continues {
-            out.push(Piece { comments: std::mem::take(&mut comments), statement: std::mem::take(&mut statement) });
+            out.push(Piece {
+                comments: std::mem::take(&mut comments),
+                statement: std::mem::take(&mut statement),
+            });
             depth = 0;
         }
     }
     if !statement.trim().is_empty() || !comments.is_empty() {
-        out.push(Piece { comments, statement });
+        out.push(Piece {
+            comments,
+            statement,
+        });
     }
     out
 }
@@ -369,35 +434,66 @@ pub fn read(text: &str) -> Script {
             kept.extend(required(statement));
             continue;
         }
-        if let Some(name) = statement.strip_prefix("include :personal ").and_then(|r| r.trim_end_matches(';').trim().strip_prefix('"')).and_then(|r| r.strip_suffix('"')) {
+        if let Some(name) = statement
+            .strip_prefix("include :personal ")
+            .and_then(|r| r.trim_end_matches(';').trim().strip_prefix('"'))
+            .and_then(|r| r.strip_suffix('"'))
+        {
             script.include = Some(name.to_string());
             continue;
         }
         // An "off" reply or rule has no statement, so its comment can sit
         // in the same piece as the next block's.
         for comment in &piece.comments {
-            let off = comment.strip_prefix(VACATION).and_then(|r| r.strip_prefix(OFF)).and_then(|j| serde_json::from_str::<Vacation>(j.trim()).ok());
+            let off = comment
+                .strip_prefix(VACATION)
+                .and_then(|r| r.strip_prefix(OFF))
+                .and_then(|j| serde_json::from_str::<Vacation>(j.trim()).ok());
             if off.is_some() {
                 script.vacation = off;
             }
-            let off_rule = comment.strip_prefix(RULE).and_then(|r| r.strip_prefix(OFF)).and_then(|j| serde_json::from_str::<Filter>(j.trim()).ok());
+            let off_rule = comment
+                .strip_prefix(RULE)
+                .and_then(|r| r.strip_prefix(OFF))
+                .and_then(|j| serde_json::from_str::<Filter>(j.trim()).ok());
             if let Some(rule) = off_rule {
-                script.rules.push(Filter { read_only: false, off: true, ..rule });
+                script.rules.push(Filter {
+                    read_only: false,
+                    off: true,
+                    ..rule
+                });
             }
         }
         let off_prefixes = [format!("{VACATION}{OFF} "), format!("{RULE}{OFF} ")];
         let is_off = |c: &str| off_prefixes.iter().any(|p| c.starts_with(p.as_str()));
-        let mine = piece.comments.iter().rev().find(|c| (c.starts_with(RULE) || c.starts_with(VACATION)) && !is_off(c));
+        let mine = piece
+            .comments
+            .iter()
+            .rev()
+            .find(|c| (c.starts_with(RULE) || c.starts_with(VACATION)) && !is_off(c));
         let ours = mine.and_then(|comment| {
-            let (kind, rest) = comment.strip_prefix(RULE).map(|r| ("rule", r)).or_else(|| comment.strip_prefix(VACATION).map(|r| ("vacation", r)))?;
+            let (kind, rest) = comment
+                .strip_prefix(RULE)
+                .map(|r| ("rule", r))
+                .or_else(|| comment.strip_prefix(VACATION).map(|r| ("vacation", r)))?;
             let (mark, json) = rest.split_once(' ')?;
             if mark != hash(statement) {
                 return None;
             }
             match kind {
-                "vacation" => serde_json::from_str::<Vacation>(json).ok().map(|v| (None, Some(v))),
+                "vacation" => serde_json::from_str::<Vacation>(json)
+                    .ok()
+                    .map(|v| (None, Some(v))),
                 // A rule read back from our own script is never read-only.
-                _ => serde_json::from_str::<Filter>(json).ok().map(|f| (Some(Filter { read_only: false, ..f }), None)),
+                _ => serde_json::from_str::<Filter>(json).ok().map(|f| {
+                    (
+                        Some(Filter {
+                            read_only: false,
+                            ..f
+                        }),
+                        None,
+                    )
+                }),
             }
         });
         match ours {
@@ -408,10 +504,17 @@ pub fn read(text: &str) -> Script {
                 let own_comments: Vec<&String> = piece
                     .comments
                     .iter()
-                    .filter(|c| !c.starts_with("# Penguin Mail keeps") && !c.starts_with("# automatic reply") && !c.starts_with("# are, and show"))
+                    .filter(|c| {
+                        !c.starts_with("# Penguin Mail keeps")
+                            && !c.starts_with("# automatic reply")
+                            && !c.starts_with("# are, and show")
+                    })
                     .filter(|c| !c.starts_with(RULE) && !c.starts_with(VACATION))
                     .collect();
-                let mut block = own_comments.iter().map(|c| format!("{c}\n")).collect::<String>();
+                let mut block = own_comments
+                    .iter()
+                    .map(|c| format!("{c}\n"))
+                    .collect::<String>();
                 block.push_str(statement);
                 script.foreign.push(block);
             }
@@ -419,7 +522,11 @@ pub fn read(text: &str) -> Script {
     }
     // What the foreign text needs stays required; what only our blocks
     // need comes back from the writer.
-    script.kept_requires = if script.foreign.is_empty() { Vec::new() } else { kept.into_iter().collect() };
+    script.kept_requires = if script.foreign.is_empty() {
+        Vec::new()
+    } else {
+        kept.into_iter().collect()
+    };
     script
 }
 

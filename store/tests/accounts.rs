@@ -124,10 +124,16 @@ fn extending_the_window_starts_the_backfill_again_in_the_same_generation() {
     accounts::set_backfill(&conn, id, Some("p2"), false).unwrap();
     assert!(accounts::sync_cursor(&conn, id).unwrap().backfill_extends);
     accounts::set_backfill(&conn, id, None, true).unwrap();
-    assert!(!accounts::sync_cursor(&conn, id).unwrap().backfill_extends, "the last page ends it");
+    assert!(
+        !accounts::sync_cursor(&conn, id).unwrap().backfill_extends,
+        "the last page ends it"
+    );
     accounts::extend_backfill(&conn, id).unwrap();
     accounts::start_generation(&conn, id, "s2").unwrap();
-    assert!(!accounts::sync_cursor(&conn, id).unwrap().backfill_extends, "a new generation fetches everything");
+    assert!(
+        !accounts::sync_cursor(&conn, id).unwrap().backfill_extends,
+        "a new generation fetches everything"
+    );
 }
 
 #[test]
@@ -180,6 +186,37 @@ fn a_new_account_is_served_by_gmail() {
 }
 
 #[test]
+fn a_calendar_account_is_added_and_refused_a_taken_name() {
+    let conn = open_in_memory().unwrap();
+    let id = accounts::insert_caldav_account(&conn, "robin@cloud.example.org", 5)
+        .unwrap()
+        .expect("nobody else holds the name");
+    let listed = accounts::list_accounts(&conn).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].provider, Provider::CalDav);
+    assert_eq!(listed[0].provider_name(), "CalDAV");
+    assert_eq!(
+        accounts::insert_caldav_account(&conn, "robin@cloud.example.org", 6).unwrap(),
+        None,
+        "adding it again adds nothing, and the sign-in decides what it finds"
+    );
+    assert_eq!(accounts::list_accounts(&conn).unwrap()[0].id, id);
+    accounts::insert_imap_account(&conn, "me@example.org", "example.org", 1)
+        .unwrap()
+        .expect("a mail account");
+    assert_eq!(
+        accounts::insert_caldav_account(&conn, "me@example.org", 7).unwrap(),
+        None,
+        "a mail account holds the name"
+    );
+    assert_eq!(
+        accounts::insert_imap_account(&conn, "robin@cloud.example.org", "example.org", 8).unwrap(),
+        None,
+        "and a calendar account's name is not a mail account's to take"
+    );
+}
+
+#[test]
 fn an_imap_account_keeps_its_provider_and_its_name() {
     let conn = open_in_memory().unwrap();
     let id = accounts::insert_imap_account(&conn, "dana@fastmail.com", "Fastmail", 5)
@@ -212,10 +249,8 @@ fn a_gmail_account_is_never_taken_over_by_an_imap_one() {
 #[test]
 fn adding_an_imap_address_again_keeps_one_account_under_the_new_name() {
     let conn = open_in_memory().unwrap();
-    let first = accounts::insert_imap_account(&conn, "me@example.org", "example.org", 1)
-        .unwrap();
-    let again = accounts::insert_imap_account(&conn, "me@example.org", "Fastmail", 2)
-        .unwrap();
+    let first = accounts::insert_imap_account(&conn, "me@example.org", "example.org", 1).unwrap();
+    let again = accounts::insert_imap_account(&conn, "me@example.org", "Fastmail", 2).unwrap();
     assert_eq!(first, again);
     let all = accounts::list_accounts(&conn).unwrap();
     assert_eq!(all.len(), 1);
@@ -236,8 +271,17 @@ fn a_microsoft_account_keeps_its_provider_and_name() {
         accounts::insert_microsoft_account(&conn, "dana@outlook.com", "Microsoft 365", 5).unwrap(),
         Some(id)
     );
-    assert_eq!(accounts::account(&conn, id).unwrap().unwrap().provider_name(), "Microsoft 365");
+    assert_eq!(
+        accounts::account(&conn, id)
+            .unwrap()
+            .unwrap()
+            .provider_name(),
+        "Microsoft 365"
+    );
     // Another provider's address is left alone.
     accounts::insert_account(&conn, "dana@gmail.com", 0).unwrap();
-    assert_eq!(accounts::insert_microsoft_account(&conn, "dana@gmail.com", "Outlook", 0).unwrap(), None);
+    assert_eq!(
+        accounts::insert_microsoft_account(&conn, "dana@gmail.com", "Outlook", 0).unwrap(),
+        None
+    );
 }

@@ -21,7 +21,13 @@ pub enum Check {
 }
 
 impl Check {
-    pub const ALL: [Check; 5] = [Check::Table, Check::Mx, Check::Own, Check::Mozilla, Check::Common];
+    pub const ALL: [Check; 5] = [
+        Check::Table,
+        Check::Mx,
+        Check::Own,
+        Check::Mozilla,
+        Check::Common,
+    ];
 
     fn index(self) -> usize {
         self as usize
@@ -198,7 +204,10 @@ mod tests {
 
     #[test]
     fn the_rows_read_as_the_mockup_writes_them() {
-        let titles: Vec<String> = Check::ALL.into_iter().map(|c| c.title("reyes.studio")).collect();
+        let titles: Vec<String> = Check::ALL
+            .into_iter()
+            .map(|c| c.title("reyes.studio"))
+            .collect();
         assert_eq!(
             titles,
             [

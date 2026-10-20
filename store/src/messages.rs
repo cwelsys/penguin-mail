@@ -427,7 +427,9 @@ fn replace_memberships(
         .map(|id| mailbox_key(conn, account_id, id))
         .collect::<Result<_>>()?;
     let filed: BTreeSet<i64> = conn
-        .prepare_cached("SELECT mailbox FROM message_mailboxes WHERE account_id = ?1 AND message_id = ?2")?
+        .prepare_cached(
+            "SELECT mailbox FROM message_mailboxes WHERE account_id = ?1 AND message_id = ?2",
+        )?
         .query_map(params![account_id, message_id], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let mut unfile = conn.prepare_cached(
@@ -442,8 +444,10 @@ fn replace_memberships(
     for key in wanted.difference(&filed) {
         file.execute(params![account_id, message_id, key])?;
     }
-    conn.prepare_cached("DELETE FROM message_categories WHERE account_id = ?1 AND message_id = ?2")?
-        .execute(params![account_id, message_id])?;
+    conn.prepare_cached(
+        "DELETE FROM message_categories WHERE account_id = ?1 AND message_id = ?2",
+    )?
+    .execute(params![account_id, message_id])?;
     conn.prepare_cached(
         "DELETE FROM message_keywords WHERE account_id = ?1 AND message_id = ?2 AND local = 0",
     )?
@@ -700,6 +704,34 @@ pub fn memberships_of(
     Ok(held)
 }
 
+/// Which of `ids` are still unread and in the Inbox: what a new-mail
+/// notification waits on. Answered from the membership tables alone, so
+/// a check over thousands of ids after a change builds no metadata.
+pub fn unread_in_inbox(
+    conn: &Connection,
+    account_id: AccountId,
+    ids: &[String],
+) -> Result<HashSet<String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT l.message_id FROM message_mailboxes l \
+         CROSS JOIN mailboxes b ON b.key = l.mailbox \
+         WHERE l.account_id = ?1 AND b.role = ?3 \
+         AND l.message_id IN (SELECT value FROM json_each(?2)) \
+         AND NOT EXISTS (SELECT 1 FROM message_keywords k \
+         WHERE k.account_id = l.account_id AND k.message_id = l.message_id AND k.keyword = ?4)",
+    )?;
+    let rows = stmt.query_map(
+        params![
+            account_id,
+            json_list(ids),
+            Role::Inbox.as_str(),
+            keyword::SEEN
+        ],
+        |row| row.get::<_, String>(0),
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 fn message_row(row: &rusqlite::Row) -> rusqlite::Result<MessageRow> {
     Ok(MessageRow {
         id: row.get(0)?,
@@ -782,7 +814,11 @@ fn message_meta(
 /// The messages in a Sent mailbox whose Message-ID is `msgid`, given
 /// without angle brackets. A store keeps the header as the server gave
 /// it, so both spellings are looked up at once.
-pub fn sent_copies(conn: &Connection, account_id: AccountId, msgid: &str) -> Result<Vec<MessageMeta>> {
+pub fn sent_copies(
+    conn: &Connection,
+    account_id: AccountId,
+    msgid: &str,
+) -> Result<Vec<MessageMeta>> {
     let ids = conn
         .prepare_cached(
             "SELECT DISTINCT m.id FROM messages m \
@@ -790,7 +826,9 @@ pub fn sent_copies(conn: &Connection, account_id: AccountId, msgid: &str) -> Res
              JOIN mailboxes b ON b.key = l.mailbox AND b.role = 'sent' \
              WHERE m.account_id = ?1 AND m.rfc822_msgid IN (?2, ?3) LIMIT 8",
         )?
-        .query_map(params![account_id, msgid, format!("<{msgid}>")], |row| row.get(0))?
+        .query_map(params![account_id, msgid, format!("<{msgid}>")], |row| {
+            row.get(0)
+        })?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     by_ids(conn, account_id, &ids)
 }

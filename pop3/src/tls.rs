@@ -16,7 +16,10 @@ pub(crate) async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
     host: &str,
     stream: S,
 ) -> Result<TlsStream<S>, Pop3Error> {
-    let failed = |detail: String| Pop3Error::Tls { host: host.to_string(), detail };
+    let failed = |detail: String| Pop3Error::Tls {
+        host: host.to_string(),
+        detail,
+    };
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let config = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -24,7 +27,8 @@ pub(crate) async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
         .with_platform_verifier()
         .map_err(|err| failed(err.to_string()))?
         .with_no_client_auth();
-    let name = ServerName::try_from(host.to_string()).map_err(|_| failed(format!("{host} is not a host name")))?;
+    let name = ServerName::try_from(host.to_string())
+        .map_err(|_| failed(format!("{host} is not a host name")))?;
     TlsConnector::from(Arc::new(config))
         .connect(name, stream)
         .await

@@ -155,7 +155,10 @@ fn stretch_for_lanes(
     spans: &[(EpochMillis, EpochMillis)],
     min: EpochMillis,
 ) -> Vec<(EpochMillis, EpochMillis)> {
-    spans.iter().map(|&(start, end)| (start, end.max(start + min))).collect()
+    spans
+        .iter()
+        .map(|&(start, end)| (start, end.max(start + min)))
+        .collect()
 }
 
 /// Where one all-day card sits: `start_day` to `end_day` (exclusive) of
@@ -202,7 +205,8 @@ fn reach(top: f64, bottom: f64, lanes: usize, next: Option<f64>) -> f64 {
         return bottom;
     }
     let two_lines = top + f64::from(TWO_LINE_CARD + CARD_INSET) / f64::from(HOUR);
-    next.map_or(two_lines, |next| two_lines.min(next)).max(bottom)
+    next.map_or(two_lines, |next| two_lines.min(next))
+        .max(bottom)
 }
 
 /// Whether the label of `hour` shows while the grid is scrolled to `top`
@@ -243,7 +247,12 @@ fn all_day_span(o: &Occurrence, days: &[NaiveDate]) -> Option<(usize, usize)> {
 
 /// [`all_day_span`] for a span from `start` to `end`: UTC dates for an
 /// all-day one, local dates for a timed one that covers whole days.
-fn strip_columns(start: EpochMillis, end: EpochMillis, all_day: bool, days: &[NaiveDate]) -> Option<(usize, usize)> {
+fn strip_columns(
+    start: EpochMillis,
+    end: EpochMillis,
+    all_day: bool,
+    days: &[NaiveDate],
+) -> Option<(usize, usize)> {
     if all_day {
         return all_day_columns(start, end, days);
     }
@@ -258,13 +267,25 @@ pub fn in_strip(o: &Occurrence) -> bool {
 }
 
 /// [`all_day_span`] for an all-day span from `start` to `end`.
-fn all_day_columns(start: EpochMillis, end: EpochMillis, days: &[NaiveDate]) -> Option<(usize, usize)> {
-    date_columns(utc_date(start)?, utc_date(end)?.checked_sub_days(Days::new(1))?, days)
+fn all_day_columns(
+    start: EpochMillis,
+    end: EpochMillis,
+    days: &[NaiveDate],
+) -> Option<(usize, usize)> {
+    date_columns(
+        utc_date(start)?,
+        utc_date(end)?.checked_sub_days(Days::new(1))?,
+        days,
+    )
 }
 
 /// The columns from `start_date` through `end_date` among `days`, clipped
 /// to them.
-fn date_columns(start_date: NaiveDate, end_date: NaiveDate, days: &[NaiveDate]) -> Option<(usize, usize)> {
+fn date_columns(
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    days: &[NaiveDate],
+) -> Option<(usize, usize)> {
     let (&first, &last) = (days.first()?, days.last()?);
     if end_date < first || start_date > last {
         return None;
@@ -328,9 +349,13 @@ fn describe_draggable(card: &impl IsA<gtk::Widget>, o: &Occurrence) {
     let detail = if base.is_empty() {
         hint
     } else {
-        fill(&gettext("{base} {hint}"), &[("base", &base), ("hint", &hint)])
+        fill(
+            &gettext("{base} {hint}"),
+            &[("base", &base), ("hint", &hint)],
+        )
     };
-    card.as_ref().update_property(&[gtk::accessible::Property::Description(&detail)]);
+    card.as_ref()
+        .update_property(&[gtk::accessible::Property::Description(&detail)]);
 }
 
 /// The colour of the hour and day lines: the text colour at the strength
@@ -559,7 +584,9 @@ mod imp {
                     continue;
                 }
                 let (x, y, w, mut h) = placement_pixels(*placement, width as f32);
-                if let imp::Placement::Card { top, reach, bottom, .. } = *placement
+                if let imp::Placement::Card {
+                    top, reach, bottom, ..
+                } = *placement
                     && reach > bottom
                 {
                     let room = (reach - top) as f32 * HOUR - CARD_INSET;
@@ -592,7 +619,10 @@ mod imp {
                 for (start, end) in working_hours.shaded_hour_ranges(day.weekday()) {
                     let y = start as f32 * super::HOUR;
                     let range_height = (end - start) as f32 * super::HOUR;
-                    snapshot.append_color(&shade, &graphene::Rect::new(x, y, column_width, range_height));
+                    snapshot.append_color(
+                        &shade,
+                        &graphene::Rect::new(x, y, column_width, range_height),
+                    );
                 }
             }
 
@@ -687,7 +717,11 @@ mod imp {
         /// The column holding `start`'s local day, and `start` and `end`
         /// as wall-clock hours from that day's midnight. `None` when
         /// `start` falls on a day the grid does not show.
-        pub(super) fn span_placement(&self, start: EpochMillis, end: EpochMillis) -> Option<(usize, f64, f64)> {
+        pub(super) fn span_placement(
+            &self,
+            start: EpochMillis,
+            end: EpochMillis,
+        ) -> Option<(usize, f64, f64)> {
             let days = self.days.borrow();
             let day = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(start)?
                 .with_timezone(&chrono::Local)
@@ -804,9 +838,15 @@ mod imp {
 /// the dragged card's allocation and the ghost's can share it.
 fn placement_pixels(placement: imp::Placement, width: f32) -> (f32, f32, f32, f32) {
     match placement {
-        imp::Placement::Card { column, columns, lane, lanes, top, bottom, .. } => {
-            rect(column, columns, lane, lanes, top, bottom, width)
-        }
+        imp::Placement::Card {
+            column,
+            columns,
+            lane,
+            lanes,
+            top,
+            bottom,
+            ..
+        } => rect(column, columns, lane, lanes, top, bottom, width),
         // Right-aligned 10 pixels short of the gutter's edge and centred
         // on its hairline, as the mockup sets them.
         imp::Placement::Hour(hour) => (0.0, hour as f32 * HOUR - 8.0, GUTTER - 10.0, 16.0),
@@ -876,7 +916,8 @@ impl TimeGrid {
         let weak = grid.downgrade();
         drag.connect_drag_update(move |gesture, dx, dy| {
             let Some(grid) = weak.upgrade() else { return };
-            let threshold = gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
+            let threshold =
+                gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
             if grid.update(dx, dy, threshold) {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
             }
@@ -916,7 +957,9 @@ impl TimeGrid {
         let nudge_keys = gtk::EventControllerKey::new();
         let weak = grid.downgrade();
         nudge_keys.connect_key_pressed(move |_, keyval, _, state| {
-            weak.upgrade().map_or(glib::Propagation::Proceed, |grid| grid.nudge_focused(keyval, state))
+            weak.upgrade().map_or(glib::Propagation::Proceed, |grid| {
+                grid.nudge_focused(keyval, state)
+            })
         });
         grid.add_controller(nudge_keys);
         grid
@@ -969,9 +1012,17 @@ impl TimeGrid {
             // another may run on.
             let starts: Vec<(usize, f64)> = placed
                 .iter()
-                .map(|p| (p.lane, layout::wall_offset(pieces[p.index].1, midnight, zone)))
+                .map(|p| {
+                    (
+                        p.lane,
+                        layout::wall_offset(pieces[p.index].1, midnight, zone),
+                    )
+                })
                 .chain(more.iter().map(|group| {
-                    (layout::MOST_LANES - 1, layout::wall_offset(group.from, midnight, zone))
+                    (
+                        layout::MOST_LANES - 1,
+                        layout::wall_offset(group.from, midnight, zone),
+                    )
                 }))
                 .collect();
 
@@ -985,7 +1036,8 @@ impl TimeGrid {
                 let bottom = layout::wall_offset(end, midnight, zone);
                 let named_day = (days.len() > 1).then_some(day);
                 let on_edit = edit_closure(self, o.clone());
-                let event_block = EventBlock::new(o, colour, name, compact, named_day, zone, on_edit);
+                let event_block =
+                    EventBlock::new(o, colour, name, compact, named_day, zone, on_edit);
                 let next = starts
                     .iter()
                     .filter(|&&(lane, start)| lane == p.lane && start > top)
@@ -1155,7 +1207,9 @@ impl TimeGrid {
     fn note_cursor(&self, x: f64, y: f64) {
         if self
             .pick(x, y, gtk::PickFlags::DEFAULT)
-            .is_some_and(|picked| picked.upcast_ref::<gtk::Widget>() != self.upcast_ref::<gtk::Widget>())
+            .is_some_and(|picked| {
+                picked.upcast_ref::<gtk::Widget>() != self.upcast_ref::<gtk::Widget>()
+            })
         {
             return;
         }
@@ -1345,7 +1399,11 @@ impl TimeGrid {
     fn column_at(&self, x: f64) -> usize {
         let days = self.imp().days.borrow().len().max(1);
         let column_width = (f64::from(self.width() as f32) - f64::from(GUTTER)) / days as f64;
-        let column = if column_width > 0.0 { ((x - f64::from(GUTTER)) / column_width).floor() } else { 0.0 };
+        let column = if column_width > 0.0 {
+            ((x - f64::from(GUTTER)) / column_width).floor()
+        } else {
+            0.0
+        };
         column.clamp(0.0, days as f64 - 1.0) as usize
     }
 
@@ -1361,17 +1419,27 @@ impl TimeGrid {
     /// `column`'s own span, for `Grab::settle` to keep a card inside it.
     fn day_span(&self, column: usize) -> (EpochMillis, EpochMillis) {
         const DAY: EpochMillis = 24 * 3_600_000;
-        self.imp().bounds.borrow().get(column).copied().unwrap_or((0, DAY))
+        self.imp()
+            .bounds
+            .borrow()
+            .get(column)
+            .copied()
+            .unwrap_or((0, DAY))
     }
 
     /// `widget`'s own rect from its last `show`, ignoring a drag: where a
     /// card belongs when nothing is holding it.
     fn placement_rect_of(&self, widget: &gtk::Widget) -> Option<graphene::Rect> {
         let width = self.width() as f32;
-        self.imp().children.borrow().iter().find(|(w, _)| w == widget).map(|(_, placement)| {
-            let (x, y, w, h) = placement_pixels(*placement, width);
-            graphene::Rect::new(x, y, w, h)
-        })
+        self.imp()
+            .children
+            .borrow()
+            .iter()
+            .find(|(w, _)| w == widget)
+            .map(|(_, placement)| {
+                let (x, y, w, h) = placement_pixels(*placement, width);
+                graphene::Rect::new(x, y, w, h)
+            })
     }
 
     /// `widget`'s own column, lane and the lanes it shares, from its last
@@ -1382,9 +1450,15 @@ impl TimeGrid {
             .borrow()
             .iter()
             .find_map(|(w, p)| match (w == widget, p) {
-                (true, imp::Placement::Card { columns, lane, lanes, .. }) => {
-                    Some((*columns, *lane, *lanes))
-                }
+                (
+                    true,
+                    imp::Placement::Card {
+                        columns,
+                        lane,
+                        lanes,
+                        ..
+                    },
+                ) => Some((*columns, *lane, *lanes)),
                 _ => None,
             })
             .unwrap_or((1, 0, 1))
@@ -1475,7 +1549,10 @@ impl TimeGrid {
                 let mut dragging = imp.dragging.borrow_mut();
                 let state = dragging.as_mut().expect("checked above");
                 state.started = true;
-                (state.card.clone(), state.grab.is_some_and(|g| g.handle != Handle::Body))
+                (
+                    state.card.clone(),
+                    state.grab.is_some_and(|g| g.handle != Handle::Body),
+                )
             };
             if let Some((widget, _)) = &card {
                 widget.add_css_class("dragging");
@@ -1491,7 +1568,13 @@ impl TimeGrid {
         let (press, card, grab, from, origin_column) = {
             let dragging = imp.dragging.borrow();
             let state = dragging.as_ref().expect("checked above");
-            (state.press, state.card.clone(), state.grab, state.from, state.column)
+            (
+                state.press,
+                state.card.clone(),
+                state.grab,
+                state.from,
+                state.column,
+            )
         };
         let (x, y) = (press.0 + dx, press.1 + dy);
         // An edge changes one end of the event on its own day; only the
@@ -1523,8 +1606,12 @@ impl TimeGrid {
                 let (start, end) = grab.follow(self.time_at(column, y));
                 let (columns, lane, lanes) = self.lane_of(widget);
                 let days = imp.days.borrow();
-                let Some(&day) = days.get(column) else { return true };
-                let Some(midnight) = day.and_hms_opt(0, 0, 0) else { return true };
+                let Some(&day) = days.get(column) else {
+                    return true;
+                };
+                let Some(midnight) = day.and_hms_opt(0, 0, 0) else {
+                    return true;
+                };
                 drop(days);
                 let top = layout::wall_offset(start, midnight, &chrono::Local);
                 let bottom = layout::wall_offset(end, midnight, &chrono::Local);
@@ -1547,7 +1634,10 @@ impl TimeGrid {
                 // column, only the day it started in, clamped to it, so
                 // the ghost and the span `end` reports later always
                 // agree.
-                let to = drag::clamp_to_day(self.time_at(origin_column, y), self.day_span(origin_column));
+                let to = drag::clamp_to_day(
+                    self.time_at(origin_column, y),
+                    self.day_span(origin_column),
+                );
                 self.show_ghost(Some(drag::selection(from, to)));
                 if let Some(state) = imp.dragging.borrow_mut().as_mut() {
                     state.samples.push_back((now, y));
@@ -1581,9 +1671,19 @@ impl TimeGrid {
     fn end(&self, dx: f64, dy: f64) {
         let imp = self.imp();
         let taken = imp.dragging.borrow().as_ref().map(|d| {
-            (d.started, d.card.clone(), d.grab, d.column, d.from, d.press, d.rect, d.samples.clone())
+            (
+                d.started,
+                d.card.clone(),
+                d.grab,
+                d.column,
+                d.from,
+                d.press,
+                d.rect,
+                d.samples.clone(),
+            )
         });
-        let Some((started, card, grab, origin_column, from, press, current_rect, samples)) = taken else {
+        let Some((started, card, grab, origin_column, from, press, current_rect, samples)) = taken
+        else {
             return;
         };
         let over_strip = imp.dragging.borrow().as_ref().and_then(|d| d.over_strip);
@@ -1599,7 +1699,15 @@ impl TimeGrid {
             // springs it back to its own place.
             self.land();
             if let Some(f) = imp.moved.borrow().as_ref() {
-                f(self, occurrence, drag::Landing { start, end, all_day: true });
+                f(
+                    self,
+                    occurrence,
+                    drag::Landing {
+                        start,
+                        end,
+                        all_day: true,
+                    },
+                );
             }
             return;
         }
@@ -1641,7 +1749,15 @@ impl TimeGrid {
                     }
                     grid.land();
                     if let Some(f) = grid.imp().moved.borrow().as_ref() {
-                        f(&grid, &occurrence, drag::Landing { start, end, all_day: false });
+                        f(
+                            &grid,
+                            &occurrence,
+                            drag::Landing {
+                                start,
+                                end,
+                                all_day: false,
+                            },
+                        );
                     }
                 });
             }
@@ -1649,7 +1765,10 @@ impl TimeGrid {
                 imp.dragging.replace(None);
                 // Same column and clamp as `update`, so the span this
                 // reports matches the ghost the person watched settle.
-                let to = drag::clamp_to_day(self.time_at(origin_column, y), self.day_span(origin_column));
+                let to = drag::clamp_to_day(
+                    self.time_at(origin_column, y),
+                    self.day_span(origin_column),
+                );
                 let selection = drag::selection(from, to);
                 if let Some(f) = imp.selected.borrow().as_ref() {
                     f(selection.0, selection.1);
@@ -1680,9 +1799,19 @@ impl TimeGrid {
     /// Runs the settle spring from `from` to `to`, `velocity_y` (pixels
     /// per second) carrying a flick's release into it; `done` runs once
     /// it lands, or at once when animations are off.
-    fn settle_to(&self, from: graphene::Rect, to: graphene::Rect, velocity_y: f64, done: impl Fn() + 'static) {
+    fn settle_to(
+        &self,
+        from: graphene::Rect,
+        to: graphene::Rect,
+        velocity_y: f64,
+        done: impl Fn() + 'static,
+    ) {
         let distance = f64::from(to.y() - from.y());
-        let initial = if distance.abs() > 0.5 { velocity_y / distance } else { 0.0 };
+        let initial = if distance.abs() > 0.5 {
+            velocity_y / distance
+        } else {
+            0.0
+        };
         let weak = self.downgrade();
         let target = adw::CallbackAnimationTarget::new(move |progress| {
             let Some(grid) = weak.upgrade() else { return };
@@ -1755,9 +1884,7 @@ impl TimeGrid {
             .is_some_and(|d| d.card.is_some());
         imp.settle.take();
         self.set_cursor_from_name(None);
-        if had_card
-            && let Some(f) = imp.carousel_interactive.borrow().as_ref()
-        {
+        if had_card && let Some(f) = imp.carousel_interactive.borrow().as_ref() {
             f(true);
         }
     }
@@ -1786,7 +1913,11 @@ impl TimeGrid {
             return glib::Propagation::Proceed;
         };
         // A run on another card is asked about before this one starts.
-        let other = imp.nudging.borrow().as_ref().is_some_and(|n| n.card != card);
+        let other = imp
+            .nudging
+            .borrow()
+            .as_ref()
+            .is_some_and(|n| n.card != card);
         if other {
             if let Some(source) = imp.nudge_timer.take() {
                 source.remove();
@@ -1794,7 +1925,11 @@ impl TimeGrid {
             self.ask_nudges();
         }
         let now = glib::monotonic_time() / 1_000;
-        let span = imp.nudging.borrow().as_ref().map_or((o.start, o.end), |n| n.run.to);
+        let span = imp
+            .nudging
+            .borrow()
+            .as_ref()
+            .map_or((o.start, o.end), |n| n.run.to);
         let to = match action {
             drag::GridKey::Move(steps) => drag::nudge(span.0, span.1, steps),
             drag::GridKey::Start(steps) => drag::stretch_start(span.0, span.1, steps),
@@ -1815,7 +1950,12 @@ impl TimeGrid {
                     };
                     let mut run = drag::Nudges::start((o.start, o.end), now);
                     run.press(to, now);
-                    *nudging = Some(Nudging { card: card.clone(), occurrence: o, run, placement });
+                    *nudging = Some(Nudging {
+                        card: card.clone(),
+                        occurrence: o,
+                        run,
+                        placement,
+                    });
                 }
             }
         }
@@ -1832,18 +1972,24 @@ impl TimeGrid {
     fn wait_for_nudges(&self, wait: i64) {
         let weak = self.downgrade();
         let millis = u64::try_from(wait).unwrap_or(0);
-        let source = glib::timeout_add_local_once(std::time::Duration::from_millis(millis), move || {
-            let Some(grid) = weak.upgrade() else { return };
-            // The source has fired and is gone; forget it without removing it.
-            grid.imp().nudge_timer.take();
-            let now = glib::monotonic_time() / 1_000;
-            let left = grid.imp().nudging.borrow().as_ref().map(|n| n.run.wait(now));
-            match left {
-                Some(0) => grid.ask_nudges(),
-                Some(left) => grid.wait_for_nudges(left),
-                None => {}
-            }
-        });
+        let source =
+            glib::timeout_add_local_once(std::time::Duration::from_millis(millis), move || {
+                let Some(grid) = weak.upgrade() else { return };
+                // The source has fired and is gone; forget it without removing it.
+                grid.imp().nudge_timer.take();
+                let now = glib::monotonic_time() / 1_000;
+                let left = grid
+                    .imp()
+                    .nudging
+                    .borrow()
+                    .as_ref()
+                    .map(|n| n.run.wait(now));
+                match left {
+                    Some(0) => grid.ask_nudges(),
+                    Some(left) => grid.wait_for_nudges(left),
+                    None => {}
+                }
+            });
         self.imp().nudge_timer.replace(Some(source));
     }
 
@@ -1860,7 +2006,15 @@ impl TimeGrid {
         imp.nudged.replace(Some((n.card.clone(), n.placement)));
         let (start, end) = n.run.to;
         if let Some(f) = imp.moved.borrow().as_ref() {
-            f(self, &n.occurrence, drag::Landing { start, end, all_day: false });
+            f(
+                self,
+                &n.occurrence,
+                drag::Landing {
+                    start,
+                    end,
+                    all_day: false,
+                },
+            );
         }
     }
 
@@ -1874,7 +2028,9 @@ impl TimeGrid {
             .borrow()
             .as_ref()
             .map(|n| (block::key_of(&n.occurrence), n.occurrence.start, n.run.to));
-        let Some((key, start, to)) = pending else { return };
+        let Some((key, start, to)) = pending else {
+            return;
+        };
         let card = self.block_at(&key, start);
         let placement = card.as_ref().and_then(|c| self.placement_of(c));
         match card.zip(placement) {
@@ -1896,11 +2052,22 @@ impl TimeGrid {
 
     /// `card`'s placement from the last `show`, or after a nudge.
     fn placement_of(&self, card: &gtk::Widget) -> Option<imp::Placement> {
-        self.imp().children.borrow().iter().find(|(w, _)| w == card).map(|(_, p)| *p)
+        self.imp()
+            .children
+            .borrow()
+            .iter()
+            .find(|(w, _)| w == card)
+            .map(|(_, p)| *p)
     }
 
     fn set_placement(&self, card: &gtk::Widget, placement: imp::Placement) {
-        if let Some((_, p)) = self.imp().children.borrow_mut().iter_mut().find(|(w, _)| w == card) {
+        if let Some((_, p)) = self
+            .imp()
+            .children
+            .borrow_mut()
+            .iter_mut()
+            .find(|(w, _)| w == card)
+        {
             *p = placement;
         }
         self.queue_allocate();
@@ -1909,9 +2076,27 @@ impl TimeGrid {
     /// Draws `card` at `start` to `end`, in its own lane. A span that
     /// leaves the days shown keeps the card where it last was.
     fn place_nudged(&self, card: &gtk::Widget, (start, end): (EpochMillis, EpochMillis)) {
-        let Some((column, top, bottom)) = self.imp().span_placement(start, end) else { return };
-        let Some(imp::Placement::Card { columns, lane, lanes, .. }) = self.placement_of(card) else { return };
-        let placement = imp::Placement::Card { column, columns, lane, lanes, top, bottom, reach: bottom };
+        let Some((column, top, bottom)) = self.imp().span_placement(start, end) else {
+            return;
+        };
+        let Some(imp::Placement::Card {
+            columns,
+            lane,
+            lanes,
+            ..
+        }) = self.placement_of(card)
+        else {
+            return;
+        };
+        let placement = imp::Placement::Card {
+            column,
+            columns,
+            lane,
+            lanes,
+            top,
+            bottom,
+            reach: bottom,
+        };
         self.set_placement(card, placement);
     }
 }
@@ -1951,7 +2136,10 @@ fn draw_order<W: Clone + PartialEq>(children: &[W], raised: Option<&W>) -> Vec<W
 /// Puts `cards` in place of the cards among `children`, ahead of the
 /// hour labels, which stay as they are. Returns the cards it took out,
 /// for the caller to unparent.
-fn swap_cards<W>(children: &mut Vec<(W, imp::Placement)>, cards: Vec<(W, imp::Placement)>) -> Vec<W> {
+fn swap_cards<W>(
+    children: &mut Vec<(W, imp::Placement)>,
+    cards: Vec<(W, imp::Placement)>,
+) -> Vec<W> {
     let (hours, old): (Vec<_>, Vec<_>) = std::mem::take(children)
         .into_iter()
         .partition(|(_, placement)| matches!(placement, imp::Placement::Hour(_)));
@@ -2008,7 +2196,10 @@ pub fn focused_occurrence(blocks: &[(EventKey, Occurrence, gtk::Widget)]) -> Opt
         .map(|(_, o, _)| o.clone())
 }
 
-fn find_block(blocks: &[(EventKey, Occurrence, gtk::Widget)], key: &EventKey) -> Option<gtk::Widget> {
+fn find_block(
+    blocks: &[(EventKey, Occurrence, gtk::Widget)],
+    key: &EventKey,
+) -> Option<gtk::Widget> {
     blocks
         .iter()
         .find(|(k, _, _)| k == key)
@@ -2060,7 +2251,8 @@ impl AllDayStrip {
         let weak = strip.downgrade();
         drag.connect_drag_update(move |gesture, dx, dy| {
             let Some(strip) = weak.upgrade() else { return };
-            let threshold = gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
+            let threshold =
+                gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
             if strip.update(dx, dy, threshold) {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
             }
@@ -2139,7 +2331,8 @@ impl AllDayStrip {
                 .can_target(false)
                 .build();
             ghost.set_parent(self);
-            imp.ghost.replace(Some((ghost.upcast(), (column, column + 1, 0))));
+            imp.ghost
+                .replace(Some((ghost.upcast(), (column, column + 1, 0))));
         }
         self.queue_resize();
     }
@@ -2148,16 +2341,31 @@ impl AllDayStrip {
     fn column_at(&self, x: f64) -> usize {
         let days = self.imp().days.get().max(1);
         let column_width = (f64::from(self.width() as f32) - f64::from(GUTTER)) / days as f64;
-        let column = if column_width > 0.0 { ((x - f64::from(GUTTER)) / column_width).floor() } else { 0.0 };
+        let column = if column_width > 0.0 {
+            ((x - f64::from(GUTTER)) / column_width).floor()
+        } else {
+            0.0
+        };
         column.clamp(0.0, days as f64 - 1.0) as usize
     }
 
     fn placement_of(&self, card: &gtk::Widget) -> Option<(usize, usize, usize)> {
-        self.imp().children.borrow().iter().find(|(w, _)| w == card).map(|(_, p)| *p)
+        self.imp()
+            .children
+            .borrow()
+            .iter()
+            .find(|(w, _)| w == card)
+            .map(|(_, p)| *p)
     }
 
     fn set_placement(&self, card: &gtk::Widget, placement: (usize, usize, usize)) {
-        if let Some((_, p)) = self.imp().children.borrow_mut().iter_mut().find(|(w, _)| w == card) {
+        if let Some((_, p)) = self
+            .imp()
+            .children
+            .borrow_mut()
+            .iter_mut()
+            .find(|(w, _)| w == card)
+        {
             *p = placement;
         }
         self.queue_allocate();
@@ -2182,7 +2390,9 @@ impl AllDayStrip {
         if self.imp().dragging.borrow().is_some() {
             return;
         }
-        let edge = self.grab_at(x, y).is_some_and(|(_, _, edge)| edge.is_some());
+        let edge = self
+            .grab_at(x, y)
+            .is_some_and(|(_, _, edge)| edge.is_some());
         self.set_cursor_from_name(edge.then_some("ew-resize"));
     }
 
@@ -2209,7 +2419,15 @@ impl AllDayStrip {
     fn update(&self, dx: f64, dy: f64, threshold: f64) -> bool {
         let imp = self.imp();
         let taken = imp.dragging.borrow().as_ref().map(|d| {
-            (d.started, d.card.clone(), d.occurrence.clone(), d.edge, d.placement, d.press, d.press_column)
+            (
+                d.started,
+                d.card.clone(),
+                d.occurrence.clone(),
+                d.edge,
+                d.placement,
+                d.press,
+                d.press_column,
+            )
         });
         let Some((started, card, o, edge, placement, press, press_column)) = taken else {
             return false;
@@ -2222,7 +2440,11 @@ impl AllDayStrip {
                 d.started = true;
             }
             card.add_css_class("dragging");
-            self.set_cursor_from_name(Some(if edge.is_some() { "ew-resize" } else { "grabbing" }));
+            self.set_cursor_from_name(Some(if edge.is_some() {
+                "ew-resize"
+            } else {
+                "grabbing"
+            }));
             if let Some(f) = imp.carousel_interactive.borrow().as_ref() {
                 f(false);
             }
@@ -2241,15 +2463,28 @@ impl AllDayStrip {
         let (landing, shown) = match into_hours {
             Some(at) => {
                 let (start, end) = drag::timed_at(at);
-                (Some(drag::Landing { start, end, all_day: false }), placement)
+                (
+                    Some(drag::Landing {
+                        start,
+                        end,
+                        all_day: false,
+                    }),
+                    placement,
+                )
             }
             None => {
                 let days = self.column_at(x) as i64 - press_column as i64;
                 // A timed entry that covers whole days sits here too, and
                 // moves as a timed one in its own zone.
                 let zone: Tz = o.event.zone.parse().unwrap_or(Tz::UTC);
-                let landing = drag::strip_landing(o.start, o.end, o.event.all_day, edge, days, zone);
-                let columns = strip_columns(landing.start, landing.end, landing.all_day, &imp.dates.borrow());
+                let landing =
+                    drag::strip_landing(o.start, o.end, o.event.all_day, edge, days, zone);
+                let columns = strip_columns(
+                    landing.start,
+                    landing.end,
+                    landing.all_day,
+                    &imp.dates.borrow(),
+                );
                 let shown = columns.map_or(placement, |(first, last)| (first, last, placement.2));
                 let moved = (landing.start, landing.end) != (o.start, o.end);
                 (moved.then_some(landing), shown)
@@ -2334,7 +2569,8 @@ impl AllDayStrip {
             let (colour, name) = calendar_of(o, calendars);
             let named_day = (days.len() > 1).then(|| days[start]);
             let on_edit = edit_closure_strip(self, o.clone());
-            let card = EventBlock::new(o, colour, name, true, named_day, &chrono::Local, on_edit).widget;
+            let card =
+                EventBlock::new(o, colour, name, true, named_day, &chrono::Local, on_edit).widget;
             connect_activated_strip(self, &card, o.clone());
             card.set_parent(self);
             blocks.push((block::key_of(o), o.clone(), card.clone().upcast()));
@@ -2722,7 +2958,10 @@ mod tests {
 
     #[test]
     fn a_dragged_card_draws_after_every_other_child() {
-        assert_eq!(draw_order(&["a", "b", "c", "d"], Some(&"b")), ["a", "c", "d", "b"]);
+        assert_eq!(
+            draw_order(&["a", "b", "c", "d"], Some(&"b")),
+            ["a", "c", "d", "b"]
+        );
     }
 
     #[test]

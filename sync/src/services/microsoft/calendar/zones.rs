@@ -182,7 +182,10 @@ const ALSO: &[(&str, &str)] = &[
 /// table, or an IANA name as it stands. `None` for any other name.
 pub(super) fn zone_named(name: &str) -> Option<Tz> {
     let name = name.trim();
-    if let Some((_, iana)) = ZONES.iter().find(|(windows, _)| windows.eq_ignore_ascii_case(name)) {
+    if let Some((_, iana)) = ZONES
+        .iter()
+        .find(|(windows, _)| windows.eq_ignore_ascii_case(name))
+    {
         return iana.parse().ok();
     }
     name.parse().ok()
@@ -234,18 +237,34 @@ mod tests {
         }
         for (iana, windows) in ALSO {
             assert!(iana.parse::<Tz>().is_ok(), "{iana}");
-            assert!(ZONES.iter().any(|(w, _)| w == windows) || *windows == "UTC", "{windows}");
+            assert!(
+                ZONES.iter().any(|(w, _)| w == windows) || *windows == "UTC",
+                "{windows}"
+            );
         }
     }
 
     #[test]
     fn a_windows_name_reads_as_its_iana_zone_and_back() {
-        assert_eq!(zone_named("GMT Standard Time"), Some(chrono_tz::Europe::London));
+        assert_eq!(
+            zone_named("GMT Standard Time"),
+            Some(chrono_tz::Europe::London)
+        );
         assert_eq!(zone_named("Europe/Lisbon"), Some(chrono_tz::Europe::Lisbon));
         assert_eq!(zone_named("Not A Zone"), None);
-        assert_eq!(windows_name(chrono_tz::Europe::Lisbon), Some("GMT Standard Time"));
-        assert_eq!(windows_name(chrono_tz::America::New_York), Some("Eastern Standard Time"));
-        assert_eq!(windows_name(chrono_tz::Africa::Accra), Some("UTC"), "a zone whose clock is UTC");
+        assert_eq!(
+            windows_name(chrono_tz::Europe::Lisbon),
+            Some("GMT Standard Time")
+        );
+        assert_eq!(
+            windows_name(chrono_tz::America::New_York),
+            Some("Eastern Standard Time")
+        );
+        assert_eq!(
+            windows_name(chrono_tz::Africa::Accra),
+            Some("UTC"),
+            "a zone whose clock is UTC"
+        );
     }
 
     /// A zone the table leaves out goes as a Windows zone with the same
@@ -253,12 +272,20 @@ mod tests {
     #[test]
     fn a_zone_the_table_lacks_goes_as_one_with_the_same_clock() {
         use chrono::{Datelike, Duration, TimeZone, Utc};
-        for zone in [chrono_tz::Europe::Sofia, chrono_tz::America::Detroit, chrono_tz::Europe::Vilnius] {
+        for zone in [
+            chrono_tz::Europe::Sofia,
+            chrono_tz::America::Detroit,
+            chrono_tz::Europe::Vilnius,
+        ] {
             let name = windows_name(zone).unwrap_or_else(|| panic!("{zone} has a Windows name"));
             let mapped = zone_named(name).unwrap();
             let mut at = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
             while at.year() < 2029 {
-                assert_eq!(at.with_timezone(&zone).naive_local(), at.with_timezone(&mapped).naive_local(), "{zone} as {name} at {at}");
+                assert_eq!(
+                    at.with_timezone(&zone).naive_local(),
+                    at.with_timezone(&mapped).naive_local(),
+                    "{zone} as {name} at {at}"
+                );
                 at += Duration::hours(6);
             }
         }
@@ -268,7 +295,10 @@ mod tests {
     fn lisbon_and_the_zone_it_maps_to_agree_across_the_october_clock_change() {
         use chrono::{TimeZone, Utc};
         let after = Utc.with_ymd_and_hms(2026, 10, 26, 9, 0, 0).unwrap();
-        let (lisbon, mapped) = (after.with_timezone(&chrono_tz::Europe::Lisbon), after.with_timezone(&zone_named("GMT Standard Time").unwrap()));
+        let (lisbon, mapped) = (
+            after.with_timezone(&chrono_tz::Europe::Lisbon),
+            after.with_timezone(&zone_named("GMT Standard Time").unwrap()),
+        );
         assert_eq!(lisbon.naive_local(), mapped.naive_local());
     }
 }

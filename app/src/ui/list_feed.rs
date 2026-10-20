@@ -242,7 +242,10 @@ impl<R> ListFeed<R> {
         };
         let mut kept = Vec::with_capacity(fresh.len());
         for row in fresh {
-            let below = held.last.as_ref().is_none_or(|last| order(&row) < order(last));
+            let below = held
+                .last
+                .as_ref()
+                .is_none_or(|last| order(&row) < order(last));
             if !below {
                 kept.push(row);
             } else if room > 0 {

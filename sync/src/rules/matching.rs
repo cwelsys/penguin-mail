@@ -6,7 +6,9 @@
 use mailrs_domain::{FilterCriteria, MessageMeta};
 
 fn has(haystack: &str, needle: &str) -> bool {
-    haystack.to_lowercase().contains(&needle.trim().to_lowercase())
+    haystack
+        .to_lowercase()
+        .contains(&needle.trim().to_lowercase())
 }
 
 /// The words a query term stands for once the search syntax is gone, or
@@ -76,8 +78,14 @@ mod tests {
 
     fn from_ann() -> MessageMeta {
         MessageMeta {
-            from: Some(Address { name: Some("Ann Lee".into()), email: "Ann@Example.com".into() }),
-            to: vec![Address { name: None, email: "me@example.com".into() }],
+            from: Some(Address {
+                name: Some("Ann Lee".into()),
+                email: "Ann@Example.com".into(),
+            }),
+            to: vec![Address {
+                name: None,
+                email: "me@example.com".into(),
+            }],
             subject: "Invoice for May".into(),
             has_attachments: true,
             size: 5_000,
@@ -103,27 +111,49 @@ mod tests {
 
     #[test]
     fn words_are_looked_for_in_the_body_and_their_absence_too() {
-        let has = FilterCriteria { query: Some("receipt".into()), ..FilterCriteria::default() };
+        let has = FilterCriteria {
+            query: Some("receipt".into()),
+            ..FilterCriteria::default()
+        };
         assert!(needs_body(&has));
-        assert!(matches(&has, &from_ann(), Some("Your receipt is attached.")));
+        assert!(matches(
+            &has,
+            &from_ann(),
+            Some("Your receipt is attached.")
+        ));
         assert!(!matches(&has, &from_ann(), Some("Hello.")));
-        let hasnt = FilterCriteria { negated_query: Some("receipt".into()), ..FilterCriteria::default() };
+        let hasnt = FilterCriteria {
+            negated_query: Some("receipt".into()),
+            ..FilterCriteria::default()
+        };
         assert!(!matches(&hasnt, &from_ann(), Some("Your RECEIPT.")));
     }
 
     #[test]
     fn to_matches_the_to_and_cc_addresses() {
-        let c = FilterCriteria { to: Some("me@example.com".into()), ..FilterCriteria::default() };
+        let c = FilterCriteria {
+            to: Some("me@example.com".into()),
+            ..FilterCriteria::default()
+        };
         assert!(matches(&c, &from_ann(), None));
     }
 
     #[test]
     fn a_rule_with_nothing_to_match_matches_nothing() {
         assert!(!matches(&FilterCriteria::default(), &from_ann(), None));
-        let only_chats = FilterCriteria { exclude_chats: true, ..FilterCriteria::default() };
+        let only_chats = FilterCriteria {
+            exclude_chats: true,
+            ..FilterCriteria::default()
+        };
         assert!(!matches(&only_chats, &from_ann(), None));
-        let empty_words = FilterCriteria { query: Some("()".into()), ..FilterCriteria::default() };
-        assert!(!matches(&empty_words, &from_ann(), None), "words of nothing are no criterion");
+        let empty_words = FilterCriteria {
+            query: Some("()".into()),
+            ..FilterCriteria::default()
+        };
+        assert!(
+            !matches(&empty_words, &from_ann(), None),
+            "words of nothing are no criterion"
+        );
     }
 
     #[test]
@@ -137,6 +167,9 @@ mod tests {
         assert!(!matches(&size(10_000, "larger"), &from_ann(), None));
         assert!(matches(&size(10_000, "smaller"), &from_ann(), None));
         assert!(!matches(&size(1_000, "smaller"), &from_ann(), None));
-        assert!(!matches(&size(1_000, "sideways"), &from_ann(), None), "an unknown direction holds nothing");
+        assert!(
+            !matches(&size(1_000, "sideways"), &from_ann(), None),
+            "an unknown direction holds nothing"
+        );
     }
 }

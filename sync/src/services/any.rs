@@ -16,14 +16,15 @@ use mailrs_domain::{EpochMillis, Filter, MailSet, RemoteMailbox, Role, Vacation}
 use mailrs_gmail::{ConnectionsPage, ContactFields, LabelColor, Person};
 use mailrs_mime::Parts;
 
-use super::clients::{AnyDav, AnyGmail, AnyGraph, AnyImap, AnyJmap, AnyPop3, AnySieve, AnySmtp};
 use super::beside::RulesBeside;
+use super::clients::{AnyDav, AnyGmail, AnyGraph, AnyImap, AnyJmap, AnyPop3, AnySieve, AnySmtp};
 use super::local::LocalRules;
 use super::{
-    AutoReplyService, Backfill, CalDav, CalendarService, CardDav, Changes, ContactsService, Found, Google,
-    Claimed, Held, IdentityService, Imap, Jmap, JmapSieve, KeywordsPage, Look, MailBackend, MailCapabilities, Microsoft, Pop3, RawMessage, ReceiptOut, Refused,
-    Relocated, RemoteRef, RulesPlace, RulesService, SearchQuery, SendAsAddress, Settled, SieveRules, Storage, SyncState, Unapplied,
-    Unheld, Want, Withheld,
+    AutoReplyService, Backfill, CalDav, CalendarService, CardDav, Changes, Claimed,
+    ContactsService, Found, Google, Held, IdentityService, Imap, Jmap, JmapSieve, KeywordsPage,
+    Look, MailBackend, MailCapabilities, Microsoft, NoMail, Pop3, RawMessage, ReceiptOut, Refused,
+    Relocated, RemoteRef, RulesPlace, RulesService, SearchQuery, SendAsAddress, Settled,
+    SieveRules, Storage, SyncState, Unapplied, Unheld, Want, Withheld,
 };
 use crate::api::{DraftRef, SavedDraft};
 use crate::{BackendError, MailOp};
@@ -70,7 +71,8 @@ macro_rules! forward_reply {
     };
 }
 
-/// As `forward_dav!`, for an enum that holds every mail adapter.
+/// As `forward_dav!`, for an enum that holds every mail adapter, and
+/// the one that stands in for an account with no mail.
 macro_rules! forward_all {
     ($enum:ident, $self:ident, $method:ident($($arg:expr),*)) => {
         match $self {
@@ -79,6 +81,7 @@ macro_rules! forward_all {
             $enum::Jmap(adapter) => adapter.$method($($arg),*).await,
             $enum::Microsoft(adapter) => adapter.$method($($arg),*).await,
             $enum::Pop3(adapter) => adapter.$method($($arg),*).await,
+            $enum::NoMail(adapter) => adapter.$method($($arg),*).await,
         }
     };
 }
@@ -92,6 +95,7 @@ macro_rules! forward_all_now {
             $enum::Jmap(adapter) => adapter.$method($($arg),*),
             $enum::Microsoft(adapter) => adapter.$method($($arg),*),
             $enum::Pop3(adapter) => adapter.$method($($arg),*),
+            $enum::NoMail(adapter) => adapter.$method($($arg),*),
         }
     };
 }
@@ -110,6 +114,8 @@ pub enum AnyMail {
     Jmap(JmapAdapter),
     Microsoft(MicrosoftAdapter),
     Pop3(Pop3Adapter),
+    /// A calendar account, which has none.
+    NoMail(NoMail),
 }
 
 /// An account's calendar.
@@ -117,7 +123,8 @@ pub enum AnyMail {
 pub enum AnyCalendar {
     Google(GoogleAdapter),
     Microsoft(MicrosoftAdapter),
-    /// A CalDAV server, whose replies go out through the account's mail.
+    /// A CalDAV server, whose replies go out through the account's mail
+    /// where it has mail.
     Dav(CalDav<AnyDav>),
     /// A JMAP server's own calendars.
     Jmap(JmapAdapter),
@@ -165,9 +172,17 @@ pub enum AnyIdentities {
     Jmap(JmapAdapter),
     Microsoft(MicrosoftAdapter),
     Pop3(Pop3Adapter),
+    /// A calendar account, which sends nothing.
+    NoMail(NoMail),
 }
 
 impl AnyMail {
+    /// Whether this is mail at all, and not what stands in for it in a
+    /// calendar account.
+    pub fn serves_mail(&self) -> bool {
+        !matches!(self, AnyMail::NoMail(_))
+    }
+
     /// The account's session offers Masked Email.
     pub fn masked_email(&self) -> bool {
         match self {
@@ -205,6 +220,7 @@ impl AnyMail {
             AnyMail::Jmap(_) => Withheld::NONE,
             AnyMail::Microsoft(adapter) => adapter.withheld(),
             AnyMail::Pop3(_) => Withheld::NONE,
+            AnyMail::NoMail(_) => Withheld::NONE,
         }
     }
 
@@ -275,6 +291,15 @@ impl MailBackend for AnyMail {
         forward_all!(AnyMail, self, search(query, limit))
     }
 
+    async fn mailbox_page(
+        &self,
+        mailbox: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Backfill, BackendError> {
+        forward_all!(AnyMail, self, mailbox_page(mailbox, cursor, limit))
+    }
+
     async fn find_sent(&self, message_id: &str) -> Result<Option<String>, BackendError> {
         forward_all!(AnyMail, self, find_sent(message_id))
     }
@@ -340,11 +365,21 @@ impl MailBackend for AnyMail {
         forward_all!(AnyMail, self, hold_of_copy(email_id))
     }
 
-    async fn unschedule(&self, handle: &str, message_id: &str, send_at: EpochMillis) -> Result<Unheld, BackendError> {
+    async fn unschedule(
+        &self,
+        handle: &str,
+        message_id: &str,
+        send_at: EpochMillis,
+    ) -> Result<Unheld, BackendError> {
         forward_all!(AnyMail, self, unschedule(handle, message_id, send_at))
     }
 
-    async fn settle(&self, handle: &str, message_id: &str, send_at: EpochMillis) -> Result<Settled, BackendError> {
+    async fn settle(
+        &self,
+        handle: &str,
+        message_id: &str,
+        send_at: EpochMillis,
+    ) -> Result<Settled, BackendError> {
         forward_all!(AnyMail, self, settle(handle, message_id, send_at))
     }
 
@@ -402,6 +437,10 @@ impl MailBackend for AnyMail {
         forward_all_now!(AnyMail, self, follow(mailbox))
     }
 
+    fn reset_follow(&self, mailbox: &str) {
+        forward_all_now!(AnyMail, self, reset_follow(mailbox))
+    }
+
     fn set_window_open(&self, open: bool) {
         forward_all_now!(AnyMail, self, set_window_open(open))
     }
@@ -455,7 +494,11 @@ impl CalendarService for AnyCalendar {
         page: Option<&str>,
         from: EpochMillis,
     ) -> Result<model::EventPage, BackendError> {
-        forward_dav!(AnyCalendar, self, event_changes(calendar, token, page, from))
+        forward_dav!(
+            AnyCalendar,
+            self,
+            event_changes(calendar, token, page, from)
+        )
     }
 
     async fn event_range(
@@ -521,7 +564,11 @@ impl CalendarService for AnyCalendar {
         answer: Answer,
         note: Option<&str>,
     ) -> Result<model::Event, BackendError> {
-        forward_dav!(AnyCalendar, self, answer_event(calendar, id, me, answer, note))
+        forward_dav!(
+            AnyCalendar,
+            self,
+            answer_event(calendar, id, me, answer, note)
+        )
     }
 
     async fn edit_list(
@@ -654,6 +701,17 @@ impl AnyCalendar {
         match self {
             AnyCalendar::Dav(adapter) => adapter.login_refused(),
             _ => None,
+        }
+    }
+
+    /// Whether an answer to an invitation reaches its organizer. Google
+    /// and Microsoft send it themselves, and a JMAP account always has
+    /// mail to carry it; a CalDAV server may leave it to the account's
+    /// mail, which a calendar account lacks.
+    pub fn tells_organizer(&self) -> bool {
+        match self {
+            AnyCalendar::Google(_) | AnyCalendar::Microsoft(_) | AnyCalendar::Jmap(_) => true,
+            AnyCalendar::Dav(adapter) => adapter.tells_organizer(),
         }
     }
 }

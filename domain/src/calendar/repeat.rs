@@ -124,9 +124,7 @@ fn last_day_of_month(day: NaiveDate) -> NaiveDate {
     } else {
         NaiveDate::from_ymd_opt(day.year(), day.month() + 1, 1)
     };
-    first_of_next
-        .and_then(|d| d.pred_opt())
-        .unwrap_or(day)
+    first_of_next.and_then(|d| d.pred_opt()).unwrap_or(day)
 }
 
 /// The Repeats row's choices for a series starting on `day`: the six
@@ -188,7 +186,9 @@ impl Repeat {
             Repeat::MonthlyByDay(-1, _) if in_last_week(new_day) => {
                 Repeat::MonthlyByDay(-1, new_day.weekday())
             }
-            Repeat::MonthlyByDay(_, _) => Repeat::MonthlyByDay(ordinal_of(new_day), new_day.weekday()),
+            Repeat::MonthlyByDay(_, _) => {
+                Repeat::MonthlyByDay(ordinal_of(new_day), new_day.weekday())
+            }
             other => other.clone(),
         }
     }
@@ -592,7 +592,11 @@ mod tests {
         // month's end, so no "last" choice.
         let choices = presets(wednesday());
         assert!(choices.contains(&Repeat::MonthlyByDay(4, Weekday::Wed)));
-        assert!(!choices.iter().any(|r| matches!(r, Repeat::MonthlyByDay(-1, _))));
+        assert!(
+            !choices
+                .iter()
+                .any(|r| matches!(r, Repeat::MonthlyByDay(-1, _)))
+        );
     }
 
     #[test]
@@ -643,7 +647,10 @@ mod tests {
         // 2026, the first Monday of its own month.
         let choice = Repeat::MonthlyByDay(4, Weekday::Wed);
         let new_day = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
-        assert_eq!(choice.carried(new_day), Repeat::MonthlyByDay(1, Weekday::Mon));
+        assert_eq!(
+            choice.carried(new_day),
+            Repeat::MonthlyByDay(1, Weekday::Mon)
+        );
     }
 
     #[test]
@@ -653,7 +660,10 @@ mod tests {
         // and the weekday follows the new date, not the old one.
         let choice = Repeat::MonthlyByDay(-1, Weekday::Wed);
         let new_day = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
-        assert_eq!(choice.carried(new_day), Repeat::MonthlyByDay(-1, Weekday::Fri));
+        assert_eq!(
+            choice.carried(new_day),
+            Repeat::MonthlyByDay(-1, Weekday::Fri)
+        );
     }
 
     #[test]
@@ -662,7 +672,10 @@ mod tests {
         // Wednesday of October: "last" no longer applies to this date.
         let choice = Repeat::MonthlyByDay(-1, Weekday::Wed);
         let new_day = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
-        assert_eq!(choice.carried(new_day), Repeat::MonthlyByDay(1, Weekday::Wed));
+        assert_eq!(
+            choice.carried(new_day),
+            Repeat::MonthlyByDay(1, Weekday::Wed)
+        );
     }
 
     #[test]

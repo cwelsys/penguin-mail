@@ -24,7 +24,11 @@ fn text_of(html: &str) -> String {
             _ => {}
         }
     }
-    let text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+    let text = text
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">");
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -52,8 +56,13 @@ fn own_address(session: &Session, stored: &str) -> Option<String> {
         .and_then(|id| session.accounts.get(id))
         .and_then(|account| account.account_capabilities.get(PRINCIPALS))
         .and_then(|principal| principal[mailrs_jmap::CALENDARS]["sendTo"]["imip"].as_str())
-        .and_then(|uri| uri.to_ascii_lowercase().strip_prefix("mailto:").map(str::to_string));
-    (local.eq_ignore_ascii_case(username) || imip.as_deref() == Some(stored.as_str())).then_some(stored)
+        .and_then(|uri| {
+            uri.to_ascii_lowercase()
+                .strip_prefix("mailto:")
+                .map(str::to_string)
+        });
+    (local.eq_ignore_ascii_case(username) || imip.as_deref() == Some(stored.as_str()))
+        .then_some(stored)
 }
 
 impl<J: JmapApi> Jmap<J> {
@@ -77,7 +86,12 @@ impl<J: JmapApi> IdentityService for Jmap<J> {
     async fn identities(&self) -> Result<Vec<SendAsAddress>, BackendError> {
         let session = self.api().session().await.map_err(backend)?;
         if !session.offers(SUBMISSION) {
-            return Ok(vec![SendAsAddress { email: self.settings().address.clone(), name: None, signature: String::new(), default: true }]);
+            return Ok(vec![SendAsAddress {
+                email: self.settings().address.clone(),
+                name: None,
+                signature: String::new(),
+                default: true,
+            }]);
         }
         let listed = self.server_identities().await?;
         Ok(listed

@@ -190,7 +190,9 @@ async fn james_mailboxes_made(session_url: &str, user: &str, password: &str) -> 
     let deadline = Instant::now() + READY_WITHIN;
     while Instant::now() < deadline {
         if let Some(list) = mailbox_list(&http, session_url, user, password, &["role"]).await
-            && ["inbox", "drafts", "sent", "trash"].iter().all(|role| list.iter().any(|m| m["role"] == *role))
+            && ["inbox", "drafts", "sent", "trash"]
+                .iter()
+                .all(|role| list.iter().any(|m| m["role"] == *role))
         {
             return true;
         }
@@ -199,16 +201,34 @@ async fn james_mailboxes_made(session_url: &str, user: &str, password: &str) -> 
     false
 }
 
-async fn every_mailbox_takes_mail(http: &reqwest::Client, session_url: &str, user: &str, password: &str) -> bool {
-    let Some(list) = mailbox_list(http, session_url, user, password, &["role", "myRights"]).await else {
+async fn every_mailbox_takes_mail(
+    http: &reqwest::Client,
+    session_url: &str,
+    user: &str,
+    password: &str,
+) -> bool {
+    let Some(list) = mailbox_list(http, session_url, user, password, &["role", "myRights"]).await
+    else {
         return false;
     };
-    list.iter().any(|m| m["role"] == "inbox") && list.iter().all(|m| m["myRights"]["mayAddItems"] == true)
+    list.iter().any(|m| m["role"] == "inbox")
+        && list.iter().all(|m| m["myRights"]["mayAddItems"] == true)
 }
 
 /// `user`'s mailboxes with `properties`, or None while the server can't say.
-async fn mailbox_list(http: &reqwest::Client, session_url: &str, user: &str, password: &str, properties: &[&str]) -> Option<Vec<Value>> {
-    let session: Value = match http.get(session_url).basic_auth(user, Some(password)).send().await {
+async fn mailbox_list(
+    http: &reqwest::Client,
+    session_url: &str,
+    user: &str,
+    password: &str,
+    properties: &[&str],
+) -> Option<Vec<Value>> {
+    let session: Value = match http
+        .get(session_url)
+        .basic_auth(user, Some(password))
+        .send()
+        .await
+    {
         Ok(response) if response.status().is_success() => response.json().await.ok()?,
         _ => return None,
     };
@@ -218,7 +238,13 @@ async fn mailbox_list(http: &reqwest::Client, session_url: &str, user: &str, pas
         "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
         "methodCalls": [["Mailbox/get", {"accountId": account, "ids": null, "properties": properties}, "0"]]
     });
-    let answer: Value = match http.post(endpoint(session_url, api, "")).basic_auth(user, Some(password)).json(&calls).send().await {
+    let answer: Value = match http
+        .post(endpoint(session_url, api, ""))
+        .basic_auth(user, Some(password))
+        .json(&calls)
+        .send()
+        .await
+    {
         Ok(response) if response.status().is_success() => response.json().await.ok()?,
         _ => return None,
     };
@@ -260,7 +286,9 @@ impl JmapServer {
 
     async fn cyrus(password: &str) -> Option<JmapServer> {
         let port = free_port();
-        let web = std::iter::repeat_with(free_port).find(|p| *p != port).unwrap_or_default();
+        let web = std::iter::repeat_with(free_port)
+            .find(|p| *p != port)
+            .unwrap_or_default();
         let base = format!("http://localhost:{port}");
         let options = vec![
             "-p".to_string(),
@@ -458,7 +486,11 @@ impl JmapServer {
             .json()
             .await
             .expect("the session's JSON");
-        let api = endpoint(&self.session_url, session["apiUrl"].as_str().expect("an apiUrl"), "");
+        let api = endpoint(
+            &self.session_url,
+            session["apiUrl"].as_str().expect("an apiUrl"),
+            "",
+        );
         http.post(api)
             .basic_auth(user, Some(password))
             .json(&json!({ "using": using, "methodCalls": calls }))
@@ -512,9 +544,19 @@ impl JmapServer {
             JmapKind::Stalwart => ("25", "EHLO"),
             JmapKind::James => panic!("James runs no Sieve over JMAP"),
         };
-        let script = DELIVER_SCRIPT.replace("{port}", port).replace("{greeting}", greeting);
+        let script = DELIVER_SCRIPT
+            .replace("{port}", port)
+            .replace("{greeting}", greeting);
         let mut child = Command::new("docker")
-            .args(["exec", "-i", self.id(), "perl", "-e", &script, &self.address])
+            .args([
+                "exec",
+                "-i",
+                self.id(),
+                "perl",
+                "-e",
+                &script,
+                &self.address,
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -522,10 +564,20 @@ impl JmapServer {
             .expect("docker runs");
         {
             use std::io::Write;
-            child.stdin.take().expect("a stdin").write_all(raw.as_bytes()).expect("the message goes in");
+            child
+                .stdin
+                .take()
+                .expect("a stdin")
+                .write_all(raw.as_bytes())
+                .expect("the message goes in");
         }
         let done = child.wait_with_output().expect("docker answers");
-        assert!(done.status.success(), "{:?} refused the delivery: {}", self.kind, String::from_utf8_lossy(&done.stderr));
+        assert!(
+            done.status.success(),
+            "{:?} refused the delivery: {}",
+            self.kind,
+            String::from_utf8_lossy(&done.stderr)
+        );
     }
 
     /// Imports `raw` into the Inbox as another client would, and answers
@@ -537,7 +589,11 @@ impl JmapServer {
             .as_str()
             .expect("a mail account")
             .to_string();
-        let upload = endpoint(&self.session_url, session["uploadUrl"].as_str().expect("an uploadUrl"), &account);
+        let upload = endpoint(
+            &self.session_url,
+            session["uploadUrl"].as_str().expect("an uploadUrl"),
+            &account,
+        );
         let uploaded: Value = http
             .post(upload)
             .basic_auth(&self.user, Some(password))
@@ -590,13 +646,21 @@ mod tests {
 
     #[test]
     fn a_relative_upload_url_resolves_against_the_session() {
-        let url = endpoint("http://localhost:4000/jmap/session", "/jmap/upload/{accountId}/", "a1");
+        let url = endpoint(
+            "http://localhost:4000/jmap/session",
+            "/jmap/upload/{accountId}/",
+            "a1",
+        );
         assert_eq!(url.as_str(), "http://localhost:4000/jmap/upload/a1/");
     }
 
     #[test]
     fn an_absolute_upload_url_stays_as_the_session_wrote_it() {
-        let url = endpoint("http://localhost:4000/jmap", "http://localhost:4000/jmap/upload/{accountId}/", "a1");
+        let url = endpoint(
+            "http://localhost:4000/jmap",
+            "http://localhost:4000/jmap/upload/{accountId}/",
+            "a1",
+        );
         assert_eq!(url.as_str(), "http://localhost:4000/jmap/upload/a1/");
     }
 }

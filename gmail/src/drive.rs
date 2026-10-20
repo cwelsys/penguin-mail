@@ -85,11 +85,16 @@ impl GmailClient {
         mime_type: &str,
         sent: Arc<AtomicU64>,
     ) -> Result<Attachment, GmailError> {
-        let size = tokio::fs::metadata(path).await.map_err(|err| file_error(path, &err))?.len();
+        let size = tokio::fs::metadata(path)
+            .await
+            .map_err(|err| file_error(path, &err))?
+            .len();
         let answer = if size <= MULTIPART_MOST {
-            self.upload_multipart(path, name, mime_type, size, &sent).await?
+            self.upload_multipart(path, name, mime_type, size, &sent)
+                .await?
         } else {
-            self.upload_resumable(path, name, mime_type, size, &sent).await?
+            self.upload_resumable(path, name, mime_type, size, &sent)
+                .await?
         };
         Ok(attachment(&answer, name, mime_type))
     }
@@ -98,7 +103,11 @@ impl GmailClient {
     /// uploaded, without Drive mailing them: the event's own invitation
     /// tells them about it.
     pub async fn share_file(&self, file_id: &str, email: &str) -> Result<(), GmailError> {
-        let url = format!("{}/files/{}/permissions", self.drive_base_url, crate::calendar::encode(file_id));
+        let url = format!(
+            "{}/files/{}/permissions",
+            self.drive_base_url,
+            crate::calendar::encode(file_id)
+        );
         let body = json!({"role": "reader", "type": "user", "emailAddress": email});
         let _: Value = self
             .call_at(&url, |url| {
@@ -116,14 +125,22 @@ impl GmailClient {
     pub async fn drive_storage(&self) -> Result<DriveStorage, GmailError> {
         let url = format!("{}/about", self.drive_base_url);
         let answer: Value = self
-            .call_at(&url, |url| self.http().get(url).query(&[("fields", "storageQuota")]))
+            .call_at(&url, |url| {
+                self.http().get(url).query(&[("fields", "storageQuota")])
+            })
             .await?;
         let quota = &answer["storageQuota"];
         let number = |key: &str| {
             let value = quota.get(key)?;
-            value.as_str().and_then(|s| s.parse().ok()).or_else(|| value.as_u64())
+            value
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .or_else(|| value.as_u64())
         };
-        Ok(DriveStorage { usage: number("usage").unwrap_or(0), limit: number("limit") })
+        Ok(DriveStorage {
+            usage: number("usage").unwrap_or(0),
+            limit: number("limit"),
+        })
     }
 
     async fn upload_multipart(
@@ -147,11 +164,16 @@ impl GmailClient {
         self.call_at(&url, |url| {
             let (head, tail) = (head.clone(), tail.clone());
             let file = file_stream(path.to_path_buf(), 0, size, Arc::clone(sent));
-            let body = stream::once(async move { Ok(head) }).chain(file).chain(stream::once(async move { Ok(tail) }));
+            let body = stream::once(async move { Ok(head) })
+                .chain(file)
+                .chain(stream::once(async move { Ok(tail) }));
             self.http()
                 .post(url)
                 .query(&[("uploadType", "multipart"), ("fields", FIELDS)])
-                .header(CONTENT_TYPE, format!("multipart/related; boundary={boundary}"))
+                .header(
+                    CONTENT_TYPE,
+                    format!("multipart/related; boundary={boundary}"),
+                )
                 .header(CONTENT_LENGTH, length)
                 .body(reqwest::Body::wrap_stream(body))
         })
@@ -185,7 +207,9 @@ impl GmailClient {
             .headers()
             .get(LOCATION)
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| GmailError::Decode("Drive opened an upload session without a Location".into()))?
+            .ok_or_else(|| {
+                GmailError::Decode("Drive opened an upload session without a Location".into())
+            })?
             .to_string();
         let mut open = OpenSession {
             http: self.http().clone(),
@@ -199,7 +223,10 @@ impl GmailClient {
         loop {
             let answer = if lost {
                 self.send_any(|| {
-                    self.http().put(&session).header(CONTENT_RANGE, format!("bytes */{size}")).header(CONTENT_LENGTH, 0)
+                    self.http()
+                        .put(&session)
+                        .header(CONTENT_RANGE, format!("bytes */{size}"))
+                        .header(CONTENT_LENGTH, 0)
                 })
                 .await
             } else {
@@ -209,14 +236,19 @@ impl GmailClient {
                     let body = file_stream(path.to_path_buf(), offset, length, Arc::clone(sent));
                     self.http()
                         .put(&session)
-                        .header(CONTENT_RANGE, format!("bytes {offset}-{}/{size}", offset + length - 1))
+                        .header(
+                            CONTENT_RANGE,
+                            format!("bytes {offset}-{}/{size}", offset + length - 1),
+                        )
                         .header(CONTENT_LENGTH, length)
                         .body(reqwest::Body::wrap_stream(body))
                 })
                 .await
             };
             let failed = match answer {
-                Ok(response) if matches!(response.status(), StatusCode::OK | StatusCode::CREATED) => {
+                Ok(response)
+                    if matches!(response.status(), StatusCode::OK | StatusCode::CREATED) =>
+                {
                     open.done = true;
                     sent.store(size, Ordering::SeqCst);
                     return crate::client::json_of(response).await;
@@ -230,7 +262,9 @@ impl GmailClient {
                     failures = 0;
                     continue;
                 }
-                Ok(response) if response.status().is_server_error() => error_from_response(response).await,
+                Ok(response) if response.status().is_server_error() => {
+                    error_from_response(response).await
+                }
                 Ok(response) => return Err(error_from_response(response).await),
                 Err(err @ GmailError::Network(_)) => err,
                 Err(err) => return Err(err),
@@ -262,7 +296,9 @@ impl Drop for OpenSession {
         if self.done {
             return;
         }
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
         let request = self.http.delete(&self.session).bearer_auth(&self.token);
         runtime.spawn(async move {
             // Drive answers 499 to the end of a session; there is nothing
@@ -284,9 +320,19 @@ fn held(response: &reqwest::Response) -> u64 {
 }
 
 fn attachment(answer: &Value, name: &str, mime_type: &str) -> Attachment {
-    let text = |key: &str| answer.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
-    let title = Some(text("name")).filter(|n| !n.is_empty()).unwrap_or_else(|| name.to_string());
-    let mime = Some(text("mimeType")).filter(|m| !m.is_empty()).unwrap_or_else(|| mime_type.to_string());
+    let text = |key: &str| {
+        answer
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let title = Some(text("name"))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| name.to_string());
+    let mime = Some(text("mimeType"))
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| mime_type.to_string());
     Attachment {
         title,
         file_url: text("webViewLink"),

@@ -3,8 +3,6 @@
 
 pub mod about;
 pub mod add_account;
-pub mod post_band;
-pub mod tile_grid;
 pub mod assistant;
 pub mod assistant_mcp_prefs;
 pub mod assistant_prefs;
@@ -14,29 +12,34 @@ pub mod autocomplete;
 pub mod calendar;
 pub mod card_place;
 pub mod combo_value;
-pub mod copied;
 pub mod composer;
 pub mod confirm;
 pub mod contact_card;
-pub mod dav_edit;
 pub mod contacts_prefs;
 pub mod conversation;
+pub mod copied;
+pub mod dav_edit;
+pub mod disclosure;
 pub mod find;
 pub mod hide_my_email;
 pub mod ics_file;
 pub mod invitation;
 pub mod key_import;
+pub mod link_preview;
 pub mod list_feed;
 pub mod moving;
 pub mod narrow_header;
 pub mod permission;
 pub mod pgp;
+pub mod post_band;
 pub mod preferences;
-pub mod sender_prefs;
 pub mod queued;
 pub mod roving;
 pub mod rules;
+#[cfg(feature = "packaging-appimage")]
+pub mod sandbox_setup;
 pub mod search_suggest;
+pub mod sender_prefs;
 pub mod sidebar;
 pub mod smart_editor;
 pub mod switch_jmap;
@@ -44,6 +47,7 @@ pub mod templates;
 pub mod texture;
 pub mod thread_list;
 pub mod thread_row;
+pub mod tile_grid;
 pub mod toolbar;
 pub mod translation;
 pub mod unsubscribe;
@@ -58,11 +62,55 @@ use std::rc::Rc;
 use adw::prelude::ComboRowExt;
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use mailrs_domain::translate::gettext;
 use mailrs_domain::Folder;
+use mailrs_domain::translate::gettext;
 pub use mailrs_sync::Mailbox;
 pub use mailrs_sync::mailbox::Standard;
+
 use mailrs_sync::mailbox::{folder_icon, folder_name};
+
+/// The modifier the app's shortcuts use: Command on macOS and Control
+/// elsewhere. GTK reads `<Primary>` as Control everywhere, so see
+/// [`primary_accelerator`].
+pub const PRIMARY: gtk::gdk::ModifierType = if cfg!(target_os = "macos") {
+    gtk::gdk::ModifierType::META_MASK
+} else {
+    gtk::gdk::ModifierType::CONTROL_MASK
+};
+
+/// Control where it is not [`PRIMARY`]: on macOS, where no shortcut here
+/// uses it. Empty elsewhere.
+pub const SPARE_CONTROL: gtk::gdk::ModifierType = if cfg!(target_os = "macos") {
+    gtk::gdk::ModifierType::CONTROL_MASK
+} else {
+    gtk::gdk::ModifierType::empty()
+};
+
+/// A shortcut trigger for `accelerator`, read by [`primary_accelerator`].
+pub fn primary_trigger(accelerator: &str) -> Option<gtk::ShortcutTrigger> {
+    gtk::ShortcutTrigger::parse_string(&primary_accelerator(accelerator))
+}
+
+/// `accelerator` with `<Primary>` as [`PRIMARY`]: `<Meta>`, GDK's name
+/// for Command, on macOS.
+pub fn primary_accelerator(accelerator: &str) -> String {
+    match cfg!(target_os = "macos") {
+        true => accelerator.replace("<Primary>", "<Meta>"),
+        false => accelerator.to_string(),
+    }
+}
+
+/// The toolbar container above `header`, including its search bar and spacing.
+pub(crate) fn top_bar(header: &adw::HeaderBar) -> Option<gtk::Widget> {
+    let mut parent = header.parent();
+    while let Some(widget) = parent {
+        if widget.has_css_class("top-bar") {
+            return Some(widget);
+        }
+        parent = widget.parent();
+    }
+    None
+}
 
 /// The narrowest width a header bar can take, and the part of it the
 /// window's own buttons at its end take. libadwaita moves those buttons
@@ -117,7 +165,10 @@ pub fn page_column(card: &impl IsA<gtk::Widget>, class: &str) -> adw::Breakpoint
     bin.add_css_class(class);
     if let Ok(condition) = adw::BreakpointCondition::parse(&format!("max-width: {PAGE_NARROW}px")) {
         let narrow = adw::Breakpoint::new(condition);
-        narrow.add_setters(&[(&clamp, "margin-start", PAGE_NARROW_SIDE), (&clamp, "margin-end", PAGE_NARROW_SIDE)]);
+        narrow.add_setters(&[
+            (&clamp, "margin-start", PAGE_NARROW_SIDE),
+            (&clamp, "margin-end", PAGE_NARROW_SIDE),
+        ]);
         bin.add_breakpoint(narrow);
     }
     bin
@@ -454,7 +505,10 @@ pub fn label_color_name(index: usize) -> String {
 /// each time it opens, such as Go to Date. It leaves `parent` once it
 /// closes, or every use would leave one more popover on the widget for
 /// the life of the window.
-pub fn passing_popover(parent: &impl IsA<gtk::Widget>, child: &impl IsA<gtk::Widget>) -> gtk::Popover {
+pub fn passing_popover(
+    parent: &impl IsA<gtk::Widget>,
+    child: &impl IsA<gtk::Widget>,
+) -> gtk::Popover {
     let popover = gtk::Popover::builder().child(child).autohide(true).build();
     popover.set_parent(parent);
     // `closed` runs while GTK is still hiding the popover, so it leaves
@@ -474,6 +528,12 @@ pub(crate) mod checks {
     use super::*;
 
     pub fn run() {
+        let trigger = primary_trigger("<Primary>b")
+            .expect("the mailbox shortcut parses")
+            .downcast::<gtk::KeyvalTrigger>()
+            .expect("the mailbox shortcut is a key chord");
+        assert_eq!(trigger.keyval(), gtk::gdk::Key::b);
+        assert_eq!(trigger.modifiers(), PRIMARY);
         a_passing_popover_leaves_its_parent_once_closed();
     }
 
@@ -487,7 +547,10 @@ pub(crate) mod checks {
         spin(Duration::from_millis(200));
         popover.popdown();
         spin(Duration::from_millis(200));
-        assert!(popover.parent().is_none(), "the closed popover stayed on the button");
+        assert!(
+            popover.parent().is_none(),
+            "the closed popover stayed on the button"
+        );
         window.destroy();
     }
 

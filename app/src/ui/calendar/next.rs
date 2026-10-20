@@ -93,15 +93,24 @@ where
         &[("title", &title), ("start", &clock_words(o.start, zone))],
     );
     let when = match next {
-        NextUp::Now(o) => fill(&gettext("Now · until {end}"), &[("end", &clock_words(o.end, zone))]),
+        NextUp::Now(o) => fill(
+            &gettext("Now · until {end}"),
+            &[("end", &clock_words(o.end, zone))],
+        ),
         NextUp::Soon(o) => {
             // Rounded up, so the card never says "in 0 min" before the
             // start.
             let minutes = (o.start - now + 59_999) / 60_000;
             let (hours, minutes) = (minutes / 60, minutes % 60);
             match (hours, minutes) {
-                (0, m) => fill(&gettext("Next · in {minutes} min"), &[("minutes", &m.to_string())]),
-                (h, 0) => fill(&gettext("Next · in {hours} h"), &[("hours", &h.to_string())]),
+                (0, m) => fill(
+                    &gettext("Next · in {minutes} min"),
+                    &[("minutes", &m.to_string())],
+                ),
+                (h, 0) => fill(
+                    &gettext("Next · in {hours} h"),
+                    &[("hours", &h.to_string())],
+                ),
                 (h, m) => fill(
                     &gettext("Next · in {hours} h {minutes} min"),
                     &[("hours", &h.to_string()), ("minutes", &m.to_string())],
@@ -114,7 +123,10 @@ where
 
 /// What the card says out loud: both lines.
 pub fn spoken(words: &Words) -> String {
-    fill(&gettext("{when}: {what}"), &[("when", &words.when), ("what", &words.what)])
+    fill(
+        &gettext("{when}: {what}"),
+        &[("when", &words.when), ("what", &words.what)],
+    )
 }
 
 /// The event's own colour, else its calendar's.
@@ -122,7 +134,11 @@ pub fn colour(o: &Occurrence, calendars: &HashMap<(AccountId, String), String>) 
     o.event
         .color
         .clone()
-        .or_else(|| calendars.get(&(o.account_id, o.event.calendar.clone())).cloned())
+        .or_else(|| {
+            calendars
+                .get(&(o.account_id, o.event.calendar.clone()))
+                .cloned()
+        })
         .unwrap_or_default()
 }
 
@@ -174,7 +190,10 @@ mod tests {
 
     #[test]
     fn an_event_further_off_shows_no_card() {
-        assert_eq!(next_up(&[at("Lunch", NOW + 181 * M, 60)], NOW, DAY_ENDS), None);
+        assert_eq!(
+            next_up(&[at("Lunch", NOW + 181 * M, 60)], NOW, DAY_ENDS),
+            None
+        );
     }
 
     #[test]
@@ -187,7 +206,8 @@ mod tests {
 
     #[test]
     fn the_minute_rounds_up() {
-        let found = next_up(&[at("Call", NOW + 19 * M + 1_000, 30)], NOW, DAY_ENDS).expect("an event");
+        let found =
+            next_up(&[at("Call", NOW + 19 * M + 1_000, 30)], NOW, DAY_ENDS).expect("an event");
         assert_eq!(words(&found, NOW, &utc()).when, "Next · in 20 min");
     }
 
@@ -203,7 +223,11 @@ mod tests {
     #[test]
     fn the_next_event_wins_over_one_under_way_ten_minutes_before() {
         let workshop = at("Workshop", NOW - 60 * M, 120);
-        let soon = next_up(&[workshop.clone(), at("Dentist", NOW + 10 * M, 60)], NOW, DAY_ENDS);
+        let soon = next_up(
+            &[workshop.clone(), at("Dentist", NOW + 10 * M, 60)],
+            NOW,
+            DAY_ENDS,
+        );
         assert_eq!(title(&soon), Some("Dentist"));
         let later = next_up(&[workshop, at("Dentist", NOW + 40 * M, 60)], NOW, DAY_ENDS);
         assert_eq!(title(&later), Some("Workshop"));
@@ -218,14 +242,18 @@ mod tests {
         let mut all_day = at("Offsite", DAY_ENDS - 24 * 60 * M, 24 * 60);
         Arc::make_mut(&mut all_day.event).all_day = true;
         let tomorrow = at("Early", DAY_ENDS + 30 * M, 30);
-        assert_eq!(next_up(&[declined, all_day, tomorrow], late, DAY_ENDS), None);
+        assert_eq!(
+            next_up(&[declined, all_day, tomorrow], late, DAY_ENDS),
+            None
+        );
     }
 
     #[test]
     fn a_timed_working_location_is_not_the_next_event() {
         use mailrs_domain::calendar::{Kind, Workplace};
         let mut office = at("Office", NOW + 20 * M, 240);
-        Arc::make_mut(&mut office.event).kind = Kind::WorkingLocation(Workplace::Office(String::new()));
+        Arc::make_mut(&mut office.event).kind =
+            Kind::WorkingLocation(Workplace::Office(String::new()));
         assert_eq!(next_up(&[office], NOW, DAY_ENDS), None);
     }
 

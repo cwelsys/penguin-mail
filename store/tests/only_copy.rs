@@ -15,9 +15,15 @@ const RAW: &[u8] = b"Subject: hi\r\n\r\nbody";
 /// with its bytes.
 fn pop3_mail() -> (Connection, AccountId) {
     let conn = open_in_memory().unwrap();
-    let id = accounts::insert_pop3_account(&conn, "dana@example.org", "example.org", RemoveSetting::Never, 0)
-        .unwrap()
-        .expect("a new account");
+    let id = accounts::insert_pop3_account(
+        &conn,
+        "dana@example.org",
+        "example.org",
+        RemoveSetting::Never,
+        0,
+    )
+    .unwrap()
+    .expect("a new account");
     store(&conn, &[meta(id, "pop3/u1", "t1", 100, &[])]);
     local_messages::put(&conn, id, "pop3/u1", RAW).unwrap();
     (conn, id)
@@ -51,7 +57,9 @@ fn a_sweep_keeps_a_pop3_accounts_mail() {
 #[test]
 fn a_message_the_server_no_longer_has_stays_in_a_pop3_account() {
     let (conn, id) = pop3_mail();
-    let gone = Change::Gone { message_id: "pop3/u1".into() };
+    let gone = Change::Gone {
+        message_id: "pop3/u1".into(),
+    };
     let touched = messages::apply(&conn, id, &[gone]).unwrap();
     assert!(touched.threads.is_empty());
     assert!(kept(&conn, id));
@@ -60,7 +68,9 @@ fn a_message_the_server_no_longer_has_stays_in_a_pop3_account() {
 #[test]
 fn a_thread_the_server_no_longer_has_stays_in_a_pop3_account() {
     let (conn, id) = pop3_mail();
-    let gone = Change::ThreadGone { thread_id: "t1".into() };
+    let gone = Change::ThreadGone {
+        thread_id: "t1".into(),
+    };
     messages::apply(&conn, id, &[gone]).unwrap();
     assert!(kept(&conn, id));
     assert!(threads::get_thread(&conn, id, "t1").unwrap().is_some());
@@ -69,7 +79,9 @@ fn a_thread_the_server_no_longer_has_stays_in_a_pop3_account() {
 #[test]
 fn a_person_erasing_pop3_mail_takes_its_bytes() {
     let (conn, id) = pop3_mail();
-    let erase = Change::Erase { message_id: "pop3/u1".into() };
+    let erase = Change::Erase {
+        message_id: "pop3/u1".into(),
+    };
     let touched = messages::apply(&conn, id, &[erase]).unwrap();
     assert_eq!(touched.threads.into_iter().collect::<Vec<_>>(), ["t1"]);
     assert!(!kept(&conn, id));
@@ -86,18 +98,31 @@ fn removing_a_pop3_account_takes_its_mail() {
 #[test]
 fn a_server_accounts_message_the_server_no_longer_has_leaves_the_store() {
     let (conn, id) = db();
-    store(&conn, &[meta(id, "a", "t1", 100, &[]), meta(id, "b", "t1", 200, &[])]);
-    let gone = Change::Gone { message_id: "a".into() };
+    store(
+        &conn,
+        &[meta(id, "a", "t1", 100, &[]), meta(id, "b", "t1", 200, &[])],
+    );
+    let gone = Change::Gone {
+        message_id: "a".into(),
+    };
     messages::apply(&conn, id, &[gone]).unwrap();
     assert_eq!(messages::thread_id_of(&conn, id, "a").unwrap(), None);
-    assert_eq!(threads::get_thread(&conn, id, "t1").unwrap().unwrap().message_count, 1);
+    assert_eq!(
+        threads::get_thread(&conn, id, "t1")
+            .unwrap()
+            .unwrap()
+            .message_count,
+        1
+    );
 }
 
 #[test]
 fn a_server_accounts_thread_the_server_no_longer_has_leaves_the_store() {
     let (conn, id) = db();
     store(&conn, &[meta(id, "a", "t1", 100, &[])]);
-    let gone = Change::ThreadGone { thread_id: "t1".into() };
+    let gone = Change::ThreadGone {
+        thread_id: "t1".into(),
+    };
     messages::apply(&conn, id, &[gone]).unwrap();
     assert!(threads::get_thread(&conn, id, "t1").unwrap().is_none());
     assert_eq!(messages::thread_id_of(&conn, id, "a").unwrap(), None);
@@ -116,11 +141,21 @@ fn a_server_accounts_old_mail_leaves_with_the_window() {
 #[test]
 fn a_folder_the_listing_no_longer_names_stays_in_a_pop3_account() {
     let conn = open_in_memory().unwrap();
-    let id = accounts::insert_pop3_account(&conn, "dana@example.org", "example.org", RemoveSetting::Never, 0)
-        .unwrap()
-        .expect("a new account");
+    let id = accounts::insert_pop3_account(
+        &conn,
+        "dana@example.org",
+        "example.org",
+        RemoveSetting::Never,
+        0,
+    )
+    .unwrap()
+    .expect("a new account");
     store(&conn, &[meta(id, "pop3/u1", "t1", 100, &["Projects"])]);
-    assert_eq!(mailboxes::gone(&conn, id, "Projects").unwrap(), None, "kept, so nothing changed");
+    assert_eq!(
+        mailboxes::gone(&conn, id, "Projects").unwrap(),
+        None,
+        "kept, so nothing changed"
+    );
     assert_eq!(labels_of(&conn, id, "pop3/u1"), ["Projects"]);
 }
 
@@ -128,16 +163,25 @@ fn a_folder_the_listing_no_longer_names_stays_in_a_pop3_account() {
 fn a_folder_a_server_no_longer_lists_leaves_with_its_filings() {
     let (conn, id) = db();
     store(&conn, &[meta(id, "a", "t1", 100, &["Projects"])]);
-    assert_eq!(mailboxes::gone(&conn, id, "Projects").unwrap(), Some(vec!["t1".to_string()]));
+    assert_eq!(
+        mailboxes::gone(&conn, id, "Projects").unwrap(),
+        Some(vec!["t1".to_string()])
+    );
     assert!(labels_of(&conn, id, "a").is_empty());
 }
 
 #[test]
 fn an_empty_folder_a_relisting_leaves_out_stays_in_a_pop3_account() {
     let conn = open_in_memory().unwrap();
-    let id = accounts::insert_pop3_account(&conn, "dana@example.org", "example.org", RemoveSetting::Never, 0)
-        .unwrap()
-        .expect("a new account");
+    let id = accounts::insert_pop3_account(
+        &conn,
+        "dana@example.org",
+        "example.org",
+        RemoveSetting::Never,
+        0,
+    )
+    .unwrap()
+    .expect("a new account");
     let folder = mailrs_domain::RemoteMailbox {
         id: "Projects".into(),
         name: "Projects".into(),

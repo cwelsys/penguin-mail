@@ -65,7 +65,9 @@ impl Finder {
     /// Selects the first match of `query` and counts them all.
     pub fn search(&self, query: &str, case_sensitive: bool) {
         *self.query.borrow_mut() = (query.to_string(), case_sensitive);
-        let Some(page) = self.page.upgrade() else { return };
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
         page.run(UNSELECT);
         self.count(query, case_sensitive);
         self.find(false);
@@ -80,7 +82,9 @@ impl Finder {
             }
             return;
         }
-        let Some(page) = self.page.upgrade() else { return };
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
         let (Ok(query), Ok(sensitive)) = (
             serde_json::to_string(query),
             serde_json::to_string(&case_sensitive),
@@ -114,7 +118,9 @@ impl Finder {
     }
 
     fn find(&self, backwards: bool) {
-        let Some(page) = self.page.upgrade() else { return };
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
@@ -142,13 +148,11 @@ impl Finder {
             }
         });
         unsafe {
-            page.0
-                .view
-                .findString_withConfiguration_completionHandler(
-                    &NSString::from_str(&query),
-                    Some(&config),
-                    &done,
-                );
+            page.0.view.findString_withConfiguration_completionHandler(
+                &NSString::from_str(&query),
+                Some(&config),
+                &done,
+            );
         }
     }
 

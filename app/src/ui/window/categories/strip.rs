@@ -8,8 +8,8 @@
 use std::cell::{Cell, RefCell};
 
 use adw::prelude::*;
-use gtk::subclass::prelude::*;
 use gtk::glib;
+use gtk::subclass::prelude::*;
 
 use super::chip::{GAP, Names, lines, names_for, spread};
 

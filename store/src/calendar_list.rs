@@ -34,9 +34,16 @@ pub struct QueuedEdit {
 /// provider has not made yet drops every edit waiting for it instead,
 /// since nothing of it has left this computer. Answers whether anything
 /// is left to send.
-pub fn enqueue_edit(conn: &Connection, account_id: AccountId, calendar: &str, edit: &ListEdit) -> Result<bool> {
+pub fn enqueue_edit(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    edit: &ListEdit,
+) -> Result<bool> {
     if edit.removes() {
-        let unsent = queued_edits(conn, account_id)?.iter().any(|q| q.calendar == calendar && q.edit.adds());
+        let unsent = queued_edits(conn, account_id)?
+            .iter()
+            .any(|q| q.calendar == calendar && q.edit.adds());
         if unsent {
             conn.execute(
                 "DELETE FROM calendar_list_changes WHERE account_id = ?1 AND calendar = ?2",
@@ -47,7 +54,11 @@ pub fn enqueue_edit(conn: &Connection, account_id: AccountId, calendar: &str, ed
     }
     conn.execute(
         "INSERT INTO calendar_list_changes (account_id, calendar, edit) VALUES (?1, ?2, ?3)",
-        params![account_id, calendar, serde_json::to_string(edit).unwrap_or_default()],
+        params![
+            account_id,
+            calendar,
+            serde_json::to_string(edit).unwrap_or_default()
+        ],
     )?;
     Ok(true)
 }
@@ -63,7 +74,11 @@ pub fn queued_edits(conn: &Connection, account_id: AccountId) -> Result<Vec<Queu
         "SELECT seq, calendar, edit FROM calendar_list_changes WHERE account_id = ?1 ORDER BY seq",
     )?;
     let rows = stmt.query_map(params![account_id], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     let mut queued = Vec::new();
     for row in rows {
@@ -71,7 +86,12 @@ pub fn queued_edits(conn: &Connection, account_id: AccountId) -> Result<Vec<Queu
         // A row this version cannot read would sit at the head of the
         // queue for good; leaving it out lets the rest go.
         if let Ok(edit) = serde_json::from_str(&edit) {
-            queued.push(QueuedEdit { seq, account_id, calendar, edit });
+            queued.push(QueuedEdit {
+                seq,
+                account_id,
+                calendar,
+                edit,
+            });
         }
     }
     Ok(queued)
@@ -79,7 +99,10 @@ pub fn queued_edits(conn: &Connection, account_id: AccountId) -> Result<Vec<Queu
 
 /// Takes one edit out of the queue, sent or turned down.
 pub fn finish_edit(conn: &Connection, seq: i64) -> Result<()> {
-    conn.execute("DELETE FROM calendar_list_changes WHERE seq = ?1", params![seq])?;
+    conn.execute(
+        "DELETE FROM calendar_list_changes WHERE seq = ?1",
+        params![seq],
+    )?;
     Ok(())
 }
 
@@ -105,11 +128,19 @@ pub fn add_calendar(conn: &Connection, account_id: AccountId, calendar: &Calenda
 
 /// Takes a calendar off the copy, with its events.
 pub fn remove_calendar(conn: &Connection, account_id: AccountId, calendar: &str) -> Result<()> {
-    conn.execute("DELETE FROM calendars WHERE account_id = ?1 AND id = ?2", params![account_id, calendar])?;
+    conn.execute(
+        "DELETE FROM calendars WHERE account_id = ?1 AND id = ?2",
+        params![account_id, calendar],
+    )?;
     Ok(())
 }
 
-pub fn set_name(conn: &Connection, account_id: AccountId, calendar: &str, name: &str) -> Result<()> {
+pub fn set_name(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    name: &str,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET name = ?3 WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, name],
@@ -119,7 +150,12 @@ pub fn set_name(conn: &Connection, account_id: AccountId, calendar: &str, name: 
 
 /// The provider's colour for a calendar, `#rrggbb`, which replaces a
 /// colour of the person's own: it now shows on every device.
-pub fn set_provider_color(conn: &Connection, account_id: AccountId, calendar: &str, color: &str) -> Result<()> {
+pub fn set_provider_color(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    color: &str,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET color = ?3, own_color = NULL WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, color],
@@ -131,7 +167,11 @@ pub fn set_provider_color(conn: &Connection, account_id: AccountId, calendar: &s
 /// colour, access, zone and reminders) into the copy, and leaves the
 /// person's choices alone: whether it shows, whether it is listed, and a
 /// colour of their own.
-pub fn refresh_calendar(conn: &Connection, account_id: AccountId, calendar: &Calendar) -> Result<()> {
+pub fn refresh_calendar(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &Calendar,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET name = ?3, color = ?4, access = ?5, zone = ?6, is_primary = ?7, \
          reminders = ?8, provider_hidden = ?9 WHERE account_id = ?1 AND id = ?2",
@@ -152,7 +192,12 @@ pub fn refresh_calendar(conn: &Connection, account_id: AccountId, calendar: &Cal
 
 /// Records the provider's hidden flag as it now stands, after the queue
 /// sent a change to it.
-pub fn set_provider_hidden(conn: &Connection, account_id: AccountId, calendar: &str, hidden: bool) -> Result<()> {
+pub fn set_provider_hidden(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    hidden: bool,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET provider_hidden = ?3 WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, hidden],
@@ -165,7 +210,12 @@ pub fn set_provider_hidden(conn: &Connection, account_id: AccountId, calendar: &
 /// shown, and the changes still queued. A calendar made here goes out
 /// under an id of this computer's own, and the provider answers with its
 /// own.
-pub fn rename_calendar_id(conn: &Connection, account_id: AccountId, from: &str, to: &str) -> Result<()> {
+pub fn rename_calendar_id(
+    conn: &Connection,
+    account_id: AccountId,
+    from: &str,
+    to: &str,
+) -> Result<()> {
     if from == to {
         return Ok(());
     }
@@ -175,17 +225,30 @@ pub fn rename_calendar_id(conn: &Connection, account_id: AccountId, from: &str, 
     conn.pragma_update(None, "defer_foreign_keys", true)?;
     // A read that already brought the calendar in under the provider's
     // id holds nothing of the person's own yet; the row made here wins.
-    conn.execute("DELETE FROM calendars WHERE account_id = ?1 AND id = ?2", params![account_id, to])?;
+    conn.execute(
+        "DELETE FROM calendars WHERE account_id = ?1 AND id = ?2",
+        params![account_id, to],
+    )?;
     let at = params![account_id, from, to];
-    for table in ["calendars SET id", "events SET calendar", "event_guests SET calendar"] {
+    for table in [
+        "calendars SET id",
+        "events SET calendar",
+        "event_guests SET calendar",
+    ] {
         let column = table.rsplit(' ').next().unwrap_or("calendar");
-        conn.execute(&format!("UPDATE {table} = ?3 WHERE account_id = ?1 AND {column} = ?2"), at)?;
+        conn.execute(
+            &format!("UPDATE {table} = ?3 WHERE account_id = ?1 AND {column} = ?2"),
+            at,
+        )?;
     }
     conn.execute(
         "UPDATE event_reminders_shown SET calendar = ?3 WHERE account_id = ?1 AND calendar = ?2",
         at,
     )?;
-    conn.execute("UPDATE calendar_changes SET calendar = ?3 WHERE account_id = ?1 AND calendar = ?2", at)?;
+    conn.execute(
+        "UPDATE calendar_changes SET calendar = ?3 WHERE account_id = ?1 AND calendar = ?2",
+        at,
+    )?;
     // A queued event carries its calendar in its body too, and a move
     // names its destination only there.
     for column in ["body", "prior_body", "restores"] {
@@ -197,7 +260,10 @@ pub fn rename_calendar_id(conn: &Connection, account_id: AccountId, from: &str, 
             at,
         )?;
     }
-    conn.execute("UPDATE calendar_list_changes SET calendar = ?3 WHERE account_id = ?1 AND calendar = ?2", at)?;
+    conn.execute(
+        "UPDATE calendar_list_changes SET calendar = ?3 WHERE account_id = ?1 AND calendar = ?2",
+        at,
+    )?;
     Ok(())
 }
 
@@ -206,13 +272,21 @@ pub fn rename_calendar_id(conn: &Connection, account_id: AccountId, from: &str, 
 /// provider hid or showed again since the last read, on another device,
 /// leaves or joins the sidebar's list here too; one whose flag the
 /// provider has not changed keeps the person's own choice.
-pub fn save_calendar_list(conn: &Connection, account_id: AccountId, list: &[Calendar]) -> Result<()> {
+pub fn save_calendar_list(
+    conn: &Connection,
+    account_id: AccountId,
+    list: &[Calendar],
+) -> Result<()> {
     let queued = queued_edits(conn, account_id)?;
     let waiting = |calendar: &str, wanted: fn(&ListEdit) -> bool| {
-        queued.iter().any(|q| q.calendar == calendar && wanted(&q.edit))
+        queued
+            .iter()
+            .any(|q| q.calendar == calendar && wanted(&q.edit))
     };
-    let held: HashMap<String, Calendar> =
-        calendars(conn, account_id)?.into_iter().map(|c| (c.id.clone(), c)).collect();
+    let held: HashMap<String, Calendar> = calendars(conn, account_id)?
+        .into_iter()
+        .map(|c| (c.id.clone(), c))
+        .collect();
     let mut kept: Vec<Calendar> = Vec::with_capacity(list.len());
     for calendar in list {
         if waiting(&calendar.id, ListEdit::removes) {
@@ -230,14 +304,19 @@ pub fn save_calendar_list(conn: &Connection, account_id: AccountId, list: &[Cale
         kept.push(calendar);
     }
     let read: HashSet<String> = kept.iter().map(|c| c.id.clone()).collect();
-    for q in queued.iter().filter(|q| q.edit.adds() && !read.contains(&q.calendar)) {
+    for q in queued
+        .iter()
+        .filter(|q| q.edit.adds() && !read.contains(&q.calendar))
+    {
         if let Some(mine) = held.get(&q.calendar) {
             kept.push(mine.clone());
         }
     }
     save_calendars(conn, account_id, &kept)?;
     for calendar in list {
-        if waiting(&calendar.id, |e| matches!(e, ListEdit::Hide { .. }) || e.removes()) {
+        if waiting(&calendar.id, |e| {
+            matches!(e, ListEdit::Hide { .. }) || e.removes()
+        }) {
             continue;
         }
         let before: Option<Option<bool>> = conn
@@ -289,12 +368,16 @@ pub fn queue_local_hides(conn: &Connection, account_id: AccountId) -> Result<usi
         let mut stmt = conn.prepare(
             "SELECT id FROM calendars WHERE account_id = ?1 AND NOT listed AND provider_hidden = 0",
         )?;
-        stmt.query_map(params![account_id], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?
+        stmt.query_map(params![account_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?
     };
     let queued = queued_edits(conn, account_id)?;
     let mut count = 0;
     for id in ids {
-        if queued.iter().any(|q| q.calendar == id && matches!(q.edit, ListEdit::Hide { .. })) {
+        if queued
+            .iter()
+            .any(|q| q.calendar == id && matches!(q.edit, ListEdit::Hide { .. }))
+        {
             continue;
         }
         enqueue_edit(conn, account_id, &id, &ListEdit::Hide { hidden: true })?;
@@ -340,37 +423,78 @@ mod tests {
     fn store() -> (Connection, AccountId) {
         let conn = crate::open_in_memory().unwrap();
         let id = accounts::insert_account(&conn, "me@example.com", 0).unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         (conn, id)
     }
 
     fn ids(conn: &Connection, id: AccountId) -> Vec<String> {
-        calendars(conn, id).unwrap().into_iter().map(|c| c.id).collect()
+        calendars(conn, id)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect()
     }
 
     fn one(conn: &Connection, id: AccountId, calendar: &str) -> Calendar {
-        calendars(conn, id).unwrap().into_iter().find(|c| c.id == calendar).unwrap()
+        calendars(conn, id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == calendar)
+            .unwrap()
     }
 
     #[test]
     fn edits_wait_in_the_order_they_were_made() {
         let (conn, id) = store();
-        enqueue_edit(&conn, id, "team", &ListEdit::Rename { name: "Office".into() }).unwrap();
+        enqueue_edit(
+            &conn,
+            id,
+            "team",
+            &ListEdit::Rename {
+                name: "Office".into(),
+            },
+        )
+        .unwrap();
         enqueue_edit(&conn, id, "team", &ListEdit::Hide { hidden: true }).unwrap();
         let queued = queued_edits(&conn, id).unwrap();
         assert_eq!(queued.len(), 2);
-        assert_eq!(queued[0].edit, ListEdit::Rename { name: "Office".into() });
+        assert_eq!(
+            queued[0].edit,
+            ListEdit::Rename {
+                name: "Office".into()
+            }
+        );
         assert_eq!(next_edit(&conn, id).unwrap().unwrap().seq, queued[0].seq);
         finish_edit(&conn, queued[0].seq).unwrap();
-        assert_eq!(next_edit(&conn, id).unwrap().unwrap().edit, ListEdit::Hide { hidden: true });
+        assert_eq!(
+            next_edit(&conn, id).unwrap().unwrap().edit,
+            ListEdit::Hide { hidden: true }
+        );
     }
 
     #[test]
     fn deleting_a_calendar_not_yet_made_drops_its_edits_unsent() {
         let (conn, id) = store();
-        let made = ListEdit::Create { name: "Climbing".into(), color: "#16a766".into(), zone: String::new() };
+        let made = ListEdit::Create {
+            name: "Climbing".into(),
+            color: "#16a766".into(),
+            zone: String::new(),
+        };
         assert!(enqueue_edit(&conn, id, "new:a", &made).unwrap());
-        enqueue_edit(&conn, id, "new:a", &ListEdit::Rename { name: "Bouldering".into() }).unwrap();
+        enqueue_edit(
+            &conn,
+            id,
+            "new:a",
+            &ListEdit::Rename {
+                name: "Bouldering".into(),
+            },
+        )
+        .unwrap();
         assert!(!enqueue_edit(&conn, id, "new:a", &ListEdit::Delete).unwrap());
         assert!(queued_edits(&conn, id).unwrap().is_empty());
     }
@@ -378,8 +502,22 @@ mod tests {
     #[test]
     fn unsubscribing_before_the_provider_has_it_drops_its_edits_unsent() {
         let (conn, id) = store();
-        enqueue_edit(&conn, id, "en.uk#holiday@group.v.calendar.google.com", &ListEdit::Add).unwrap();
-        assert!(!enqueue_edit(&conn, id, "en.uk#holiday@group.v.calendar.google.com", &ListEdit::Unsubscribe).unwrap());
+        enqueue_edit(
+            &conn,
+            id,
+            "en.uk#holiday@group.v.calendar.google.com",
+            &ListEdit::Add,
+        )
+        .unwrap();
+        assert!(
+            !enqueue_edit(
+                &conn,
+                id,
+                "en.uk#holiday@group.v.calendar.google.com",
+                &ListEdit::Unsubscribe
+            )
+            .unwrap()
+        );
         assert!(queued_edits(&conn, id).unwrap().is_empty());
     }
 
@@ -388,7 +526,12 @@ mod tests {
         let (conn, id) = store();
         remove_calendar(&conn, id, "team").unwrap();
         enqueue_edit(&conn, id, "team", &ListEdit::Unsubscribe).unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert_eq!(ids(&conn, id), vec!["primary".to_string()]);
     }
 
@@ -400,12 +543,23 @@ mod tests {
         let (conn, id) = store();
         set_listed(&conn, id, "team", false).unwrap();
         assert_eq!(queue_local_hides(&conn, id).unwrap(), 1);
-        assert_eq!(queued_edits(&conn, id).unwrap()[0].edit, ListEdit::Hide { hidden: true });
-        assert_eq!(queue_local_hides(&conn, id).unwrap(), 0, "a hide already waiting is not queued twice");
+        assert_eq!(
+            queued_edits(&conn, id).unwrap()[0].edit,
+            ListEdit::Hide { hidden: true }
+        );
+        assert_eq!(
+            queue_local_hides(&conn, id).unwrap(),
+            0,
+            "a hide already waiting is not queued twice"
+        );
         let seq = queued_edits(&conn, id).unwrap()[0].seq;
         finish_edit(&conn, seq).unwrap();
         set_provider_hidden(&conn, id, "team", true).unwrap();
-        assert_eq!(queue_local_hides(&conn, id).unwrap(), 0, "Google's flag agrees now");
+        assert_eq!(
+            queue_local_hides(&conn, id).unwrap(),
+            0,
+            "Google's flag agrees now"
+        );
     }
 
     #[test]
@@ -421,15 +575,33 @@ mod tests {
     #[test]
     fn a_read_keeps_a_calendar_made_here_until_the_provider_has_it() {
         let (conn, id) = store();
-        add_calendar(&conn, id, &Calendar { id: "new:a".into(), name: "Climbing".into(), ..calendar("new:a", false) })
-            .unwrap();
-        enqueue_edit(&conn, id, "new:a", &ListEdit::Create {
-            name: "Climbing".into(),
-            color: "#16a766".into(),
-            zone: String::new(),
-        })
+        add_calendar(
+            &conn,
+            id,
+            &Calendar {
+                id: "new:a".into(),
+                name: "Climbing".into(),
+                ..calendar("new:a", false)
+            },
+        )
         .unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        enqueue_edit(
+            &conn,
+            id,
+            "new:a",
+            &ListEdit::Create {
+                name: "Climbing".into(),
+                color: "#16a766".into(),
+                zone: String::new(),
+            },
+        )
+        .unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert!(ids(&conn, id).contains(&"new:a".to_string()));
     }
 
@@ -437,12 +609,36 @@ mod tests {
     fn a_read_keeps_a_name_and_colour_still_waiting() {
         let (conn, id) = store();
         set_name(&conn, id, "team", "Office").unwrap();
-        enqueue_edit(&conn, id, "team", &ListEdit::Rename { name: "Office".into() }).unwrap();
+        enqueue_edit(
+            &conn,
+            id,
+            "team",
+            &ListEdit::Rename {
+                name: "Office".into(),
+            },
+        )
+        .unwrap();
         set_provider_color(&conn, id, "team", "#16a766").unwrap();
-        enqueue_edit(&conn, id, "team", &ListEdit::Recolor { color: "#16a766".into() }).unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        enqueue_edit(
+            &conn,
+            id,
+            "team",
+            &ListEdit::Recolor {
+                color: "#16a766".into(),
+            },
+        )
+        .unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         let team = one(&conn, id, "team");
-        assert_eq!((team.name.as_str(), team.color.as_str()), ("Office", "#16a766"));
+        assert_eq!(
+            (team.name.as_str(), team.color.as_str()),
+            ("Office", "#16a766")
+        );
     }
 
     #[test]
@@ -450,14 +646,22 @@ mod tests {
         let (conn, id) = store();
         remove_calendar(&conn, id, "team").unwrap();
         enqueue_edit(&conn, id, "team", &ListEdit::Delete).unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert_eq!(ids(&conn, id), vec!["primary".to_string()]);
     }
 
     #[test]
     fn a_calendar_hidden_on_another_device_leaves_the_list() {
         let (conn, id) = store();
-        let hidden = Calendar { hidden: true, ..calendar("team", false) };
+        let hidden = Calendar {
+            hidden: true,
+            ..calendar("team", false)
+        };
         save_calendar_list(&conn, id, &[calendar("primary", true), hidden]).unwrap();
         assert_eq!(listed(&conn, id, "team").unwrap(), Some(false));
         assert!(!one(&conn, id, "team").shown);
@@ -466,9 +670,17 @@ mod tests {
     #[test]
     fn a_calendar_shown_again_on_another_device_comes_back() {
         let (conn, id) = store();
-        let hidden = Calendar { hidden: true, ..calendar("team", false) };
+        let hidden = Calendar {
+            hidden: true,
+            ..calendar("team", false)
+        };
         save_calendar_list(&conn, id, &[calendar("primary", true), hidden]).unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert_eq!(listed(&conn, id, "team").unwrap(), Some(true));
     }
 
@@ -478,7 +690,12 @@ mod tests {
     fn a_calendar_hidden_only_here_stays_hidden_while_the_provider_flag_is_unchanged() {
         let (conn, id) = store();
         set_listed(&conn, id, "team", false).unwrap();
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert_eq!(listed(&conn, id, "team").unwrap(), Some(false));
     }
 
@@ -489,10 +706,18 @@ mod tests {
         enqueue_edit(&conn, id, "team", &ListEdit::Hide { hidden: true }).unwrap();
         // The first read after the migration knows no earlier flag, and
         // Google has not taken the hide yet.
-        save_calendar_list(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendar_list(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert_eq!(listed(&conn, id, "team").unwrap(), Some(false));
         set_provider_hidden(&conn, id, "team", true).unwrap();
-        let hidden = Calendar { hidden: true, ..calendar("team", false) };
+        let hidden = Calendar {
+            hidden: true,
+            ..calendar("team", false)
+        };
         save_calendar_list(&conn, id, &[calendar("primary", true), hidden]).unwrap();
         assert_eq!(listed(&conn, id, "team").unwrap(), Some(false));
     }
@@ -512,7 +737,15 @@ mod tests {
         };
         save_events(&conn, id, std::slice::from_ref(&lesson), 0).unwrap();
         enqueue(&conn, id, ChangeKind::Create, &lesson).unwrap();
-        enqueue_edit(&conn, id, "new:a", &ListEdit::Rename { name: "Bouldering".into() }).unwrap();
+        enqueue_edit(
+            &conn,
+            id,
+            "new:a",
+            &ListEdit::Rename {
+                name: "Bouldering".into(),
+            },
+        )
+        .unwrap();
 
         // `Db::write` runs every write in a transaction, which the
         // deferred key check needs.
@@ -521,24 +754,54 @@ mod tests {
         tx.commit().unwrap();
 
         assert!(!ids(&conn, id).contains(&"new:a".to_string()));
-        assert_eq!(one(&conn, id, "abc@group.calendar.google.com").color, "#16a766");
-        assert!(event(&conn, id, "abc@group.calendar.google.com", "lesson").unwrap().is_some());
+        assert_eq!(
+            one(&conn, id, "abc@group.calendar.google.com").color,
+            "#16a766"
+        );
+        assert!(
+            event(&conn, id, "abc@group.calendar.google.com", "lesson")
+                .unwrap()
+                .is_some()
+        );
         let queued = crate::calendar::queued(&conn, id).unwrap();
         assert_eq!(queued[0].calendar, "abc@group.calendar.google.com");
-        assert_eq!(queued[0].body.as_ref().unwrap().calendar, "abc@group.calendar.google.com");
-        assert_eq!(queued_edits(&conn, id).unwrap()[0].calendar, "abc@group.calendar.google.com");
+        assert_eq!(
+            queued[0].body.as_ref().unwrap().calendar,
+            "abc@group.calendar.google.com"
+        );
+        assert_eq!(
+            queued_edits(&conn, id).unwrap()[0].calendar,
+            "abc@group.calendar.google.com"
+        );
     }
 
     #[test]
     fn the_providers_answer_fills_in_a_calendar_made_here() {
         let (conn, id) = store();
-        add_calendar(&conn, id, &Calendar { name: "example.com".into(), access: Access::Reader, ..calendar("feed", false) })
-            .unwrap();
+        add_calendar(
+            &conn,
+            id,
+            &Calendar {
+                name: "example.com".into(),
+                access: Access::Reader,
+                ..calendar("feed", false)
+            },
+        )
+        .unwrap();
         set_listed(&conn, id, "feed", false).unwrap();
-        let answered = Calendar { name: "Fixtures".into(), color: "#9e69af".into(), access: Access::Reader, ..calendar("feed", false) };
+        let answered = Calendar {
+            name: "Fixtures".into(),
+            color: "#9e69af".into(),
+            access: Access::Reader,
+            ..calendar("feed", false)
+        };
         refresh_calendar(&conn, id, &answered).unwrap();
         assert_eq!(one(&conn, id, "feed").name, "Fixtures");
-        assert_eq!(listed(&conn, id, "feed").unwrap(), Some(false), "the person's choice stays");
+        assert_eq!(
+            listed(&conn, id, "feed").unwrap(),
+            Some(false),
+            "the person's choice stays"
+        );
     }
 
     #[test]
@@ -552,15 +815,30 @@ mod tests {
             end: 2,
             ..Event::default()
         };
-        save_events(&conn, id, &[one("retro", None), one("standup", None), one("standup_1", Some("standup"))], 0)
-            .unwrap();
+        save_events(
+            &conn,
+            id,
+            &[
+                one("retro", None),
+                one("standup", None),
+                one("standup_1", Some("standup")),
+            ],
+            0,
+        )
+        .unwrap();
         assert_eq!(event_count(&conn, id, "team").unwrap(), 2);
     }
 
     #[test]
     fn removing_a_calendar_takes_its_events() {
         let (conn, id) = store();
-        let retro = Event { calendar: "team".into(), id: "retro".into(), start: 1, end: 2, ..Event::default() };
+        let retro = Event {
+            calendar: "team".into(),
+            id: "retro".into(),
+            start: 1,
+            end: 2,
+            ..Event::default()
+        };
         save_events(&conn, id, &[retro], 0).unwrap();
         remove_calendar(&conn, id, "team").unwrap();
         assert!(event(&conn, id, "team", "retro").unwrap().is_none());

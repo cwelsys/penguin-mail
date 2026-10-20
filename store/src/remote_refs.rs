@@ -389,14 +389,9 @@ mod tests {
         locate(&conn, account_id, "INBOX/7/3", &at("INBOX", 8, 2)).unwrap();
         locate(&conn, account_id, "Sent/3/1", &at("Sent", 3, 1)).unwrap();
 
-        let mut held = renumbered_by_message_id(
-            &conn,
-            account_id,
-            "INBOX",
-            8,
-            &names(&["<a@x>", "<c@x>"]),
-        )
-        .unwrap();
+        let mut held =
+            renumbered_by_message_id(&conn, account_id, "INBOX", 8, &names(&["<a@x>", "<c@x>"]))
+                .unwrap();
         held.sort();
 
         assert_eq!(held, [("<a@x>".to_string(), 10, "INBOX/7/1".to_string())]);
@@ -469,9 +464,16 @@ mod tests {
         locate(&conn, account_id, "Sent/7/1", &at("Sent", 7, 1)).unwrap();
 
         let mut seen = Vec::new();
-        keywords_in(&conn, account_id, "INBOX", 7, 1..=50_000, |uid, id, keywords| {
-            seen.push((uid, id.to_string(), keywords.to_vec()));
-        })
+        keywords_in(
+            &conn,
+            account_id,
+            "INBOX",
+            7,
+            1..=50_000,
+            |uid, id, keywords| {
+                seen.push((uid, id.to_string(), keywords.to_vec()));
+            },
+        )
         .unwrap();
 
         assert_eq!(

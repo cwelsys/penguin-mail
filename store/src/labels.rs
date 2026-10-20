@@ -125,6 +125,10 @@ mod tests {
         let order = positions(&conn, me).unwrap();
         assert_eq!(order.get("Personal"), Some(&0));
         assert_eq!(order.get("Job"), Some(&1));
-        assert_eq!(order.get("Travel"), None, "a label never moved has no position");
+        assert_eq!(
+            order.get("Travel"),
+            None,
+            "a label never moved has no position"
+        );
     }
 }

@@ -51,7 +51,12 @@ where
 /// that lasts a single day, or the first and last day for one that spans
 /// several. An all-day span is dated from its own UTC date, never
 /// converted to local time, which would move it a day west of UTC.
-pub fn span_words<Z: TimeZone>(start: EpochMillis, end: EpochMillis, all_day: bool, zone: &Z) -> String
+pub fn span_words<Z: TimeZone>(
+    start: EpochMillis,
+    end: EpochMillis,
+    all_day: bool,
+    zone: &Z,
+) -> String
 where
     Z::Offset: std::fmt::Display,
 {
@@ -82,13 +87,23 @@ where
 /// Where a move puts an event, for the question before it is written:
 /// [`span_words`], with the date on an event of one whole day, whose
 /// span alone reads "All day" and would not say which day it moves to.
-pub fn landing_words<Z: TimeZone>(start: EpochMillis, end: EpochMillis, all_day: bool, zone: &Z) -> String
+pub fn landing_words<Z: TimeZone>(
+    start: EpochMillis,
+    end: EpochMillis,
+    all_day: bool,
+    zone: &Z,
+) -> String
 where
     Z::Offset: std::fmt::Display,
 {
-    let one_day = utc_date(start).zip(utc_date(end)).is_some_and(|(first, next)| first.succ_opt() == Some(next));
+    let one_day = utc_date(start)
+        .zip(utc_date(end))
+        .is_some_and(|(first, next)| first.succ_opt() == Some(next));
     match (all_day, utc_date(start)) {
-        (true, Some(day)) if one_day => fill(&gettext("{date} · All day"), &[("date", &crate::format::long_date(day))]),
+        (true, Some(day)) if one_day => fill(
+            &gettext("{date} · All day"),
+            &[("date", &crate::format::long_date(day))],
+        ),
         _ => span_words(start, end, all_day, zone),
     }
 }
@@ -107,10 +122,16 @@ where
 /// local midnight to another, as a whole-day out of office does, reads as
 /// all day over the days it covers.
 fn as_days<Z: TimeZone>(o: &Occurrence, zone: &Z) -> (EpochMillis, EpochMillis, bool) {
-    let utc_midnight = |day: NaiveDate| day.and_hms_opt(0, 0, 0).map(|t| t.and_utc().timestamp_millis());
+    let utc_midnight = |day: NaiveDate| {
+        day.and_hms_opt(0, 0, 0)
+            .map(|t| t.and_utc().timestamp_millis())
+    };
     if !o.event.all_day
         && let Some((first, last)) = super::layout::whole_days(o.start, o.end, zone)
-        && let (Some(start), Some(end)) = (utc_midnight(first), utc_midnight(last + chrono::Duration::days(1)))
+        && let (Some(start), Some(end)) = (
+            utc_midnight(first),
+            utc_midnight(last + chrono::Duration::days(1)),
+        )
     {
         return (start, end, true);
     }
@@ -146,7 +167,12 @@ where
         };
         fill(
             &gettext("{title}, {start} to {end}, {calendar}"),
-            &[("title", title), ("start", &at(o.start)), ("end", &at(o.end)), ("calendar", calendar)],
+            &[
+                ("title", title),
+                ("start", &at(o.start)),
+                ("end", &at(o.end)),
+                ("calendar", calendar),
+            ],
         )
     }
 }
@@ -162,7 +188,10 @@ where
     } else {
         fill(
             &gettext("{start}–{end}"),
-            &[("start", &clock_words(o.start, zone)), ("end", &clock_words(o.end, zone))],
+            &[
+                ("start", &clock_words(o.start, zone)),
+                ("end", &clock_words(o.end, zone)),
+            ],
         )
     }
 }
@@ -172,7 +201,10 @@ where
 /// nothing when neither is.
 pub fn agenda_subtitle_words(place: &str, calendar: &str) -> String {
     match (place.is_empty(), calendar.is_empty()) {
-        (false, false) => fill(&gettext("{place} · {calendar}"), &[("place", place), ("calendar", calendar)]),
+        (false, false) => fill(
+            &gettext("{place} · {calendar}"),
+            &[("place", place), ("calendar", calendar)],
+        ),
         (false, true) => place.to_string(),
         (true, false) => calendar.to_string(),
         (true, true) => String::new(),
@@ -243,7 +275,11 @@ pub fn people_words(organizer: Option<&str>, guests: &[Guest]) -> String {
 /// What a toast says when Undo could not take a held change back: the
 /// change stays, and goes to the provider as if nobody had pressed Undo.
 pub fn undo_failed(reason: &impl std::fmt::Display) -> String {
-    mailrs_domain::translate::with_reason(&gettext("Could not undo, so the change stays: {reason}"), reason, &[])
+    mailrs_domain::translate::with_reason(
+        &gettext("Could not undo, so the change stays: {reason}"),
+        reason,
+        &[],
+    )
 }
 
 /// "and 3 more", for the popover's guest list once it passes five names.
@@ -270,7 +306,9 @@ pub fn join_words(link: &str) -> String {
 /// Google Meet, Microsoft Teams or Zoom by the link's host, and a plain
 /// "Video Call" for any other.
 pub fn conference_name(link: &str) -> String {
-    let host = url::Url::parse(link).ok().and_then(|url| url.host_str().map(str::to_ascii_lowercase));
+    let host = url::Url::parse(link)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase));
     let on = |domain: &str| {
         host.as_deref()
             .is_some_and(|host| host == domain || host.ends_with(&format!(".{domain}")))
@@ -370,7 +408,9 @@ where
     let Some(day) = waiting_day(start, all_day, zone) else {
         return String::new();
     };
-    let weekday = day.format_localized(&gettext("%a"), date_locale()).to_string();
+    let weekday = day
+        .format_localized(&gettext("%a"), date_locale())
+        .to_string();
     if all_day {
         weekday
     } else {
@@ -406,7 +446,11 @@ where
 /// occurrence's own UTC date for an all-day one, never converted to
 /// local time, as [`span_words`] reads it; the local day otherwise.
 fn waiting_day<Z: TimeZone>(start: EpochMillis, all_day: bool, zone: &Z) -> Option<NaiveDate> {
-    if all_day { utc_date(start) } else { Some(local_date(start, zone)) }
+    if all_day {
+        utc_date(start)
+    } else {
+        Some(local_date(start, zone))
+    }
 }
 
 /// The "Waiting for your answer" card's own "Open mail" door, named so
@@ -563,7 +607,9 @@ pub fn answer_words(guest: &Guest) -> String {
 /// guest list marks the organizer beside their name instead
 /// ([`guest_name_words`]), so their own answer still reads here.
 pub fn guest_answer_words(guest: &Guest) -> String {
-    guest.answer.map_or_else(|| gettext("No answer yet"), Answer::said)
+    guest
+        .answer
+        .map_or_else(|| gettext("No answer yet"), Answer::said)
 }
 
 /// The symbolic icon a guest's answer shows in the popover's list: a
@@ -612,7 +658,11 @@ pub fn notes_collapsed(notes: &str) -> String {
     if !notes_need_more(notes) {
         return notes.to_string();
     }
-    let lines: String = notes.lines().take(MOST_NOTE_LINES).collect::<Vec<_>>().join("\n");
+    let lines: String = notes
+        .lines()
+        .take(MOST_NOTE_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
     if lines.chars().count() <= MOST_NOTE_CHARS {
         return lines;
     }
@@ -663,7 +713,10 @@ fn escape_markup(text: &str) -> String {
 
 /// Where the next `http://` or `https://` address starts in `s`, if any.
 fn find_url(s: &str) -> Option<usize> {
-    [s.find("https://"), s.find("http://")].into_iter().flatten().min()
+    [s.find("https://"), s.find("http://")]
+        .into_iter()
+        .flatten()
+        .min()
 }
 
 /// Whether the occurrence repeats, in the editor's own words ("Weekly
@@ -772,7 +825,10 @@ mod tests {
             .unwrap()
             .timestamp_millis();
         let o = occurrence(false, start, end);
-        assert_eq!(when_words(&o, &Utc), "Wednesday, 23 September 2026 · 15:00–16:00");
+        assert_eq!(
+            when_words(&o, &Utc),
+            "Wednesday, 23 September 2026 · 15:00–16:00"
+        );
     }
 
     #[test]
@@ -789,8 +845,14 @@ mod tests {
     #[test]
     fn a_bar_names_both_days_and_clocks_of_a_timed_event() {
         mailrs_domain::translate::set_date_locale("en_US");
-        let start = Utc.with_ymd_and_hms(2026, 10, 2, 22, 0, 0).unwrap().timestamp_millis();
-        let end = Utc.with_ymd_and_hms(2026, 10, 3, 2, 0, 0).unwrap().timestamp_millis();
+        let start = Utc
+            .with_ymd_and_hms(2026, 10, 2, 22, 0, 0)
+            .unwrap()
+            .timestamp_millis();
+        let end = Utc
+            .with_ymd_and_hms(2026, 10, 3, 2, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let mut o = occurrence(false, start, end);
         Arc::make_mut(&mut o.event).title = "Night shift".into();
         assert_eq!(
@@ -803,21 +865,33 @@ mod tests {
     fn a_move_to_one_whole_day_names_the_day() {
         mailrs_domain::translate::set_date_locale("en_US");
         let (start, end) = (midnight(d(2026, 9, 29)), midnight(d(2026, 9, 30)));
-        assert_eq!(landing_words(start, end, true, &Utc), "Tuesday, 29 September 2026 · All day");
+        assert_eq!(
+            landing_words(start, end, true, &Utc),
+            "Tuesday, 29 September 2026 · All day"
+        );
     }
 
     #[test]
     fn a_move_to_several_days_or_to_a_time_reads_as_the_popover_does() {
         mailrs_domain::translate::set_date_locale("en_US");
         let (start, end) = (midnight(d(2026, 10, 2)), midnight(d(2026, 10, 5)));
-        assert_eq!(landing_words(start, end, true, &Utc), span_words(start, end, true, &Utc));
+        assert_eq!(
+            landing_words(start, end, true, &Utc),
+            span_words(start, end, true, &Utc)
+        );
     }
 
     #[test]
     fn an_agenda_row_times_a_timed_occurrence_with_no_date() {
         mailrs_domain::translate::set_date_locale("en_US");
-        let start = Utc.with_ymd_and_hms(2026, 9, 23, 15, 0, 0).unwrap().timestamp_millis();
-        let end = Utc.with_ymd_and_hms(2026, 9, 23, 16, 0, 0).unwrap().timestamp_millis();
+        let start = Utc
+            .with_ymd_and_hms(2026, 9, 23, 15, 0, 0)
+            .unwrap()
+            .timestamp_millis();
+        let end = Utc
+            .with_ymd_and_hms(2026, 9, 23, 16, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let o = occurrence(false, start, end);
         assert_eq!(agenda_span_words(&o, &Utc), "15:00–16:00");
     }
@@ -862,7 +936,10 @@ mod tests {
         assert_eq!(agenda_span_words(&one, &Utc), "All day");
         assert_eq!(when_words(&one, &Utc), "All day");
         let three = occurrence(false, midnight(d(2026, 9, 23)), midnight(d(2026, 9, 26)));
-        assert_eq!(when_words(&three, &Utc), "Wednesday 23 – Friday 25 September");
+        assert_eq!(
+            when_words(&three, &Utc),
+            "Wednesday 23 – Friday 25 September"
+        );
     }
 
     #[test]
@@ -894,7 +971,12 @@ mod tests {
 
     #[test]
     fn said_yes_words_counts_every_guest_whatever_they_answered() {
-        let answers = [Some(Answer::Yes), None, Some(Answer::Maybe), Some(Answer::No)];
+        let answers = [
+            Some(Answer::Yes),
+            None,
+            Some(Answer::Maybe),
+            Some(Answer::No),
+        ];
         assert_eq!(said_yes_words(answers), "1 of 4 said yes");
     }
 
@@ -909,17 +991,29 @@ mod tests {
 
     #[test]
     fn a_conference_link_is_named_by_the_service_it_opens() {
-        assert_eq!(conference_name("https://meet.google.com/abc-defg-hij"), "Google Meet");
+        assert_eq!(
+            conference_name("https://meet.google.com/abc-defg-hij"),
+            "Google Meet"
+        );
         assert_eq!(
             conference_name("https://teams.microsoft.com/l/meetup-join/19%3ameeting"),
             "Microsoft Teams"
         );
-        assert_eq!(conference_name("https://teams.live.com/meet/9876"), "Microsoft Teams");
-        assert_eq!(conference_name("https://us02web.zoom.us/j/123456789"), "Zoom");
+        assert_eq!(
+            conference_name("https://teams.live.com/meet/9876"),
+            "Microsoft Teams"
+        );
+        assert_eq!(
+            conference_name("https://us02web.zoom.us/j/123456789"),
+            "Zoom"
+        );
         assert_eq!(conference_name("https://zoom.us/j/123456789"), "Zoom");
         assert_eq!(conference_name("https://whereby.com/team"), "Video Call");
         // A host that only mentions a service's name is not that service.
-        assert_eq!(conference_name("https://zoom.us.example.com/j/1"), "Video Call");
+        assert_eq!(
+            conference_name("https://zoom.us.example.com/j/1"),
+            "Video Call"
+        );
         assert_eq!(conference_name("not a link"), "Video Call");
     }
 
@@ -984,8 +1078,14 @@ mod tests {
     #[test]
     fn the_people_line_names_the_organizer_and_the_yes_count() {
         let guests = [
-            Guest { answer: Some(Answer::Yes), ..Default::default() },
-            Guest { answer: None, ..Default::default() },
+            Guest {
+                answer: Some(Answer::Yes),
+                ..Default::default()
+            },
+            Guest {
+                answer: None,
+                ..Default::default()
+            },
         ];
         assert_eq!(
             people_words(Some("Rita Lopes"), &guests),
@@ -996,28 +1096,50 @@ mod tests {
     #[test]
     fn the_people_line_leaves_the_organizer_to_a_guest_row_that_names_them() {
         let guests = [
-            Guest { name: Some("Rita Lopes".into()), answer: Some(Answer::Yes), organizer: true, ..Default::default() },
-            Guest { answer: None, me: true, ..Default::default() },
+            Guest {
+                name: Some("Rita Lopes".into()),
+                answer: Some(Answer::Yes),
+                organizer: true,
+                ..Default::default()
+            },
+            Guest {
+                answer: None,
+                me: true,
+                ..Default::default()
+            },
         ];
         assert_eq!(people_words(Some("Rita Lopes"), &guests), "1 of 2 said yes");
     }
 
     #[test]
     fn a_guest_row_calls_the_reader_you() {
-        let me = Guest { email: "dana@fernwood.example".into(), me: true, ..Guest::default() };
+        let me = Guest {
+            email: "dana@fernwood.example".into(),
+            me: true,
+            ..Guest::default()
+        };
         assert_eq!(guest_name_words(&me), "You");
     }
 
     #[test]
     fn the_people_line_without_an_organizer_counts_the_answers() {
-        let guests = [Guest { answer: Some(Answer::Yes), ..Default::default() }];
+        let guests = [Guest {
+            answer: Some(Answer::Yes),
+            ..Default::default()
+        }];
         assert_eq!(people_words(None, &guests), "1 of 1 said yes");
-        assert_eq!(people_words(Some("Rita Lopes"), &[]), "Rita Lopes, organizer");
+        assert_eq!(
+            people_words(Some("Rita Lopes"), &[]),
+            "Rita Lopes, organizer"
+        );
     }
 
     #[test]
     fn reminders_read_in_the_largest_whole_unit() {
-        let said: Vec<String> = [0, 1, 10, 60, 90, 120, 1440, 2880, 10080].into_iter().map(reminder_words).collect();
+        let said: Vec<String> = [0, 1, 10, 60, 90, 120, 1440, 2880, 10080]
+            .into_iter()
+            .map(reminder_words)
+            .collect();
         assert_eq!(
             said,
             [
@@ -1048,10 +1170,21 @@ mod tests {
         // The invitation card's own wording: no
         // comma before "until", and the end date's own year is always
         // taken as the start year, so it never shows.
-        assert_eq!(repeat_words(&two_weeks), "Every 2 weeks on Monday and Wednesday until 31 December");
-        let five = Repeat::Custom(Custom { every: 1, frequency: Frequency::Daily, days: vec![], ends: Ends::After(5) });
+        assert_eq!(
+            repeat_words(&two_weeks),
+            "Every 2 weeks on Monday and Wednesday until 31 December"
+        );
+        let five = Repeat::Custom(Custom {
+            every: 1,
+            frequency: Frequency::Daily,
+            days: vec![],
+            ends: Ends::After(5),
+        });
         assert_eq!(repeat_words(&five), "Every day, 5 times");
-        assert_eq!(repeat_words(&Repeat::Kept("RRULE:FREQ=MONTHLY;BYDAY=1MO,3MO".into())), "A rule set in another app");
+        assert_eq!(
+            repeat_words(&Repeat::Kept("RRULE:FREQ=MONTHLY;BYDAY=1MO,3MO".into())),
+            "A rule set in another app"
+        );
     }
 
     #[test]
@@ -1070,7 +1203,12 @@ mod tests {
 
     #[test]
     fn a_guest_answer_reads_as_a_word() {
-        let guest = |answer, organizer| Guest { email: "ana@example.com".into(), answer, organizer, ..Guest::default() };
+        let guest = |answer, organizer| Guest {
+            email: "ana@example.com".into(),
+            answer,
+            organizer,
+            ..Guest::default()
+        };
         assert_eq!(answer_words(&guest(Some(Answer::Yes), false)), "Going");
         assert_eq!(answer_words(&guest(Some(Answer::No), false)), "Not going");
         assert_eq!(answer_words(&guest(Some(Answer::Maybe), false)), "Maybe");
@@ -1080,7 +1218,12 @@ mod tests {
 
     #[test]
     fn guest_answer_words_reads_the_answer_even_for_the_organizer() {
-        let guest = |answer| Guest { email: "ana@example.com".into(), answer, organizer: true, ..Guest::default() };
+        let guest = |answer| Guest {
+            email: "ana@example.com".into(),
+            answer,
+            organizer: true,
+            ..Guest::default()
+        };
         assert_eq!(guest_answer_words(&guest(Some(Answer::Yes))), "Going");
         assert_eq!(guest_answer_words(&guest(None)), "No answer yet");
     }
@@ -1095,9 +1238,16 @@ mod tests {
 
     #[test]
     fn guest_name_words_marks_the_organizer_and_falls_back_to_the_address() {
-        let named = Guest { name: Some("Rita Lopes".into()), organizer: true, ..Guest::default() };
+        let named = Guest {
+            name: Some("Rita Lopes".into()),
+            organizer: true,
+            ..Guest::default()
+        };
         assert_eq!(guest_name_words(&named), "Rita Lopes, organizer");
-        let unnamed = Guest { email: "ana@example.com".into(), ..Guest::default() };
+        let unnamed = Guest {
+            email: "ana@example.com".into(),
+            ..Guest::default()
+        };
         assert_eq!(guest_name_words(&unnamed), "ana@example.com");
     }
 
@@ -1114,12 +1264,18 @@ mod tests {
 
     #[test]
     fn notes_collapsed_gives_the_notes_whole_under_the_cap() {
-        assert_eq!(notes_collapsed("Room 5\nDial in: 555-0100"), "Room 5\nDial in: 555-0100");
+        assert_eq!(
+            notes_collapsed("Room 5\nDial in: 555-0100"),
+            "Room 5\nDial in: 555-0100"
+        );
     }
 
     #[test]
     fn notes_collapsed_cuts_to_the_first_few_lines() {
-        assert_eq!(notes_collapsed("One\nTwo\nThree\nFour\nFive\nSix"), "One\nTwo\nThree\nFour");
+        assert_eq!(
+            notes_collapsed("One\nTwo\nThree\nFour\nFive\nSix"),
+            "One\nTwo\nThree\nFour"
+        );
     }
 
     #[test]
@@ -1167,37 +1323,54 @@ mod tests {
     }
 
     fn wednesday_at(hour: u32) -> EpochMillis {
-        Utc.with_ymd_and_hms(2026, 9, 23, hour, 0, 0).unwrap().timestamp_millis()
+        Utc.with_ymd_and_hms(2026, 9, 23, hour, 0, 0)
+            .unwrap()
+            .timestamp_millis()
     }
 
     #[test]
     fn waiting_when_words_gives_the_short_day_and_time() {
         mailrs_domain::translate::set_date_locale("en_US");
-        assert_eq!(waiting_when_words(wednesday_at(15), false, &Utc), "Wed 15:00");
+        assert_eq!(
+            waiting_when_words(wednesday_at(15), false, &Utc),
+            "Wed 15:00"
+        );
     }
 
     #[test]
     fn waiting_when_words_for_an_all_day_occurrence_gives_just_the_day() {
         mailrs_domain::translate::set_date_locale("en_US");
-        assert_eq!(waiting_when_words(midnight(d(2026, 9, 23)), true, &Utc), "Wed");
+        assert_eq!(
+            waiting_when_words(midnight(d(2026, 9, 23)), true, &Utc),
+            "Wed"
+        );
     }
 
     #[test]
     fn waiting_card_detail_gives_the_full_day_and_time() {
         mailrs_domain::translate::set_date_locale("en_US");
-        assert_eq!(waiting_card_detail(wednesday_at(15), false, &Utc), "Wednesday 23, 15:00");
+        assert_eq!(
+            waiting_card_detail(wednesday_at(15), false, &Utc),
+            "Wednesday 23, 15:00"
+        );
     }
 
     #[test]
     fn waiting_card_detail_for_an_all_day_occurrence_gives_just_the_day() {
         mailrs_domain::translate::set_date_locale("en_US");
-        assert_eq!(waiting_card_detail(midnight(d(2026, 9, 23)), true, &Utc), "Wednesday 23");
+        assert_eq!(
+            waiting_card_detail(midnight(d(2026, 9, 23)), true, &Utc),
+            "Wednesday 23"
+        );
     }
 
     #[test]
     fn own_zone_words_names_the_event_s_own_zone_when_it_differs() {
         mailrs_domain::translate::set_date_locale("en_US");
-        let start = Utc.with_ymd_and_hms(2026, 9, 23, 15, 0, 0).unwrap().timestamp_millis();
+        let start = Utc
+            .with_ymd_and_hms(2026, 9, 23, 15, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         // 15:00 UTC is 11:00 in New York, on Eastern Daylight Time in
         // September.
         assert_eq!(
@@ -1208,8 +1381,14 @@ mod tests {
 
     #[test]
     fn own_zone_words_says_nothing_for_the_desktop_s_own_zone() {
-        let start = Utc.with_ymd_and_hms(2026, 9, 23, 15, 0, 0).unwrap().timestamp_millis();
-        assert_eq!(own_zone_words(start, Tz::Europe__Lisbon, Tz::Europe__Lisbon), None);
+        let start = Utc
+            .with_ymd_and_hms(2026, 9, 23, 15, 0, 0)
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(
+            own_zone_words(start, Tz::Europe__Lisbon, Tz::Europe__Lisbon),
+            None
+        );
     }
 
     #[test]
@@ -1233,7 +1412,10 @@ mod tests {
 
     #[test]
     fn offline_with_nothing_synced_yet_says_just_offline() {
-        assert_eq!(offline_line(false, false, None), Some("Offline".to_string()));
+        assert_eq!(
+            offline_line(false, false, None),
+            Some("Offline".to_string())
+        );
     }
 
     #[test]

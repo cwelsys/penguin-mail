@@ -65,11 +65,17 @@ mod tests {
     #[test]
     fn save_while_a_save_runs_hears_the_draft_it_made() {
         let saving = Saving::default();
-        assert!(saving.wait().is_none(), "nothing runs, so nothing to wait for");
+        assert!(
+            saving.wait().is_none(),
+            "nothing runs, so nothing to wait for"
+        );
         saving.began();
         let heard = saving.wait().expect("a save runs");
         assert_eq!(saving.landed(None, Some("d1")), Landed::Keep);
-        assert_eq!(futures::executor::block_on(heard), Ok(Some("d1".to_string())));
+        assert_eq!(
+            futures::executor::block_on(heard),
+            Ok(Some("d1".to_string()))
+        );
         assert!(saving.wait().is_none(), "the save is over");
     }
 
@@ -99,6 +105,10 @@ mod tests {
         saving.discard();
         assert_eq!(saving.landed(Some("d0"), Some("d2")), Landed::Keep);
         saving.began();
-        assert_eq!(saving.landed(None, None), Landed::Keep, "a failed save made nothing");
+        assert_eq!(
+            saving.landed(None, None),
+            Landed::Keep,
+            "a failed save made nothing"
+        );
     }
 }

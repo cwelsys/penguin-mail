@@ -168,7 +168,10 @@ mod tests {
             decide(&Action::Trash, &trash, Marks::default(), true),
             Some(Decision::DeleteForever)
         );
-        assert_eq!(decide(&Action::Trash, &trash, Marks::default(), false), None);
+        assert_eq!(
+            decide(&Action::Trash, &trash, Marks::default(), false),
+            None
+        );
     }
 
     #[test]

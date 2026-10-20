@@ -11,7 +11,9 @@ use crate::compat::Mutex;
 use crate::service::Service;
 use crate::{Icon, ToolTip, Tray};
 
-pub const SNI_PATH: ObjectPath = ObjectPath::from_static_str_unchecked("/StatusNotifierItem");
+// Snap's unity7 interface permits Ayatana label signals only under this prefix.
+pub const SNI_PATH: ObjectPath =
+    ObjectPath::from_static_str_unchecked("/org/ayatana/NotificationItem/ksni");
 pub const MENU_PATH: ObjectPath = ObjectPath::from_static_str_unchecked("/MenuBar");
 pub const SNI_INTERFACE: InterfaceName =
     InterfaceName::from_static_str_unchecked("org.kde.StatusNotifierItem");

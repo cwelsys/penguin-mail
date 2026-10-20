@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mailrs_domain::calendar::series::Step;
-use mailrs_domain::calendar::{self as model, Access, Calendar, Event, Guest, Kind, Notify, Occurrence, Reminder, Status};
+use mailrs_domain::calendar::{
+    self as model, Access, Calendar, Event, Guest, Kind, Notify, Occurrence, Reminder, Status,
+};
 use mailrs_domain::invitation::Answer;
 use mailrs_domain::{AccountId, EpochMillis};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -48,10 +50,14 @@ pub fn save_calendars(conn: &Connection, account_id: AccountId, list: &[Calendar
     let keep: HashSet<&str> = list.iter().map(|c| c.id.as_str()).collect();
     let held: Vec<String> = {
         let mut stmt = conn.prepare("SELECT id FROM calendars WHERE account_id = ?1")?;
-        stmt.query_map(params![account_id], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?
+        stmt.query_map(params![account_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?
     };
     for gone in held.iter().filter(|id| !keep.contains(id.as_str())) {
-        conn.execute("DELETE FROM calendars WHERE account_id = ?1 AND id = ?2", params![account_id, gone])?;
+        conn.execute(
+            "DELETE FROM calendars WHERE account_id = ?1 AND id = ?2",
+            params![account_id, gone],
+        )?;
     }
     for calendar in list {
         conn.execute(
@@ -107,7 +113,9 @@ pub fn calendars(conn: &Connection, account_id: AccountId) -> Result<Vec<Calenda
 pub(crate) fn reminders_text(calendar: &Calendar) -> String {
     match &calendar.all_day_reminders {
         None => json(&calendar.reminders),
-        Some(all_day) => json(&serde_json::json!({ "timed": calendar.reminders, "allDay": all_day })),
+        Some(all_day) => {
+            json(&serde_json::json!({ "timed": calendar.reminders, "allDay": all_day }))
+        }
     }
 }
 
@@ -124,7 +132,12 @@ fn reminders_of(text: &str) -> (Vec<Reminder>, Option<Vec<Reminder>>) {
     }
 }
 
-pub fn set_shown(conn: &Connection, account_id: AccountId, calendar: &str, shown: bool) -> Result<()> {
+pub fn set_shown(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    shown: bool,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET shown = ?3 WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, shown],
@@ -135,7 +148,12 @@ pub fn set_shown(conn: &Connection, account_id: AccountId, calendar: &str, shown
 /// Takes a calendar off the sidebar's list, or puts it back. A calendar
 /// off the list is off the grid too, so this sets its shown flag with
 /// it, and one put back shows again.
-pub fn set_listed(conn: &Connection, account_id: AccountId, calendar: &str, listed: bool) -> Result<()> {
+pub fn set_listed(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    listed: bool,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET listed = ?3, shown = ?3 WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, listed],
@@ -145,7 +163,8 @@ pub fn set_listed(conn: &Connection, account_id: AccountId, calendar: &str, list
 
 /// The ids of the account's calendars the person took off the list.
 pub fn unlisted(conn: &Connection, account_id: AccountId) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT id FROM calendars WHERE account_id = ?1 AND NOT listed ORDER BY name")?;
+    let mut stmt = conn
+        .prepare("SELECT id FROM calendars WHERE account_id = ?1 AND NOT listed ORDER BY name")?;
     let rows = stmt.query_map(params![account_id], |row| row.get(0))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -153,7 +172,12 @@ pub fn unlisted(conn: &Connection, account_id: AccountId) -> Result<Vec<String>>
 /// A colour of the person's own for a calendar, `#rrggbb`, which
 /// [`calendars`] gives in place of the provider's. `None` goes back to
 /// the provider's colour.
-pub fn set_own_color(conn: &Connection, account_id: AccountId, calendar: &str, color: Option<&str>) -> Result<()> {
+pub fn set_own_color(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    color: Option<&str>,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET own_color = ?3 WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, color],
@@ -189,7 +213,11 @@ pub fn set_token(
 /// How far back the copy of `calendar` reaches: events that end before
 /// this instant may be missing. `None` before its first whole read, and
 /// for a calendar that does not exist.
-pub fn reach(conn: &Connection, account_id: AccountId, calendar: &str) -> Result<Option<EpochMillis>> {
+pub fn reach(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+) -> Result<Option<EpochMillis>> {
     Ok(conn
         .query_row(
             "SELECT reaches_back FROM calendars WHERE account_id = ?1 AND id = ?2",
@@ -203,7 +231,12 @@ pub fn reach(conn: &Connection, account_id: AccountId, calendar: &str) -> Result
 /// Records that the copy of `calendar` now holds every event that ends
 /// after `from`. It leaves the sync token alone, since a read of an older
 /// range is not a read of changes.
-pub fn set_reach(conn: &Connection, account_id: AccountId, calendar: &str, from: EpochMillis) -> Result<()> {
+pub fn set_reach(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    from: EpochMillis,
+) -> Result<()> {
     conn.execute(
         "UPDATE calendars SET reaches_back = ?3 WHERE account_id = ?1 AND id = ?2",
         params![account_id, calendar, from],
@@ -214,7 +247,11 @@ pub fn set_reach(conn: &Connection, account_id: AccountId, calendar: &str, from:
 /// When a calendar was last read whole or for its changes, `None` before
 /// its first read. `CalendarCopy` reads this for a hidden calendar, which
 /// it reads at the slow cadence rather than every tick.
-pub fn synced_at(conn: &Connection, account_id: AccountId, calendar: &str) -> Result<Option<EpochMillis>> {
+pub fn synced_at(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+) -> Result<Option<EpochMillis>> {
     Ok(conn
         .query_row(
             "SELECT synced_at FROM calendars WHERE account_id = ?1 AND id = ?2",
@@ -242,7 +279,12 @@ pub fn synced(conn: &Connection, account_id: AccountId) -> Result<bool> {
 /// marks every row `seen_at`, the page of a whole read that wrote it (or
 /// the moment of a single save), so [`sweep`] can tell a row no later
 /// page repeated from one still current.
-pub fn save_events(conn: &Connection, account_id: AccountId, events: &[Event], seen_at: EpochMillis) -> Result<()> {
+pub fn save_events(
+    conn: &Connection,
+    account_id: AccountId,
+    events: &[Event],
+    seen_at: EpochMillis,
+) -> Result<()> {
     for event in events {
         let attachments = kept_attachments(conn, account_id, event)?;
         conn.prepare_cached(
@@ -284,8 +326,10 @@ pub fn save_events(conn: &Connection, account_id: AccountId, events: &[Event], s
             (event.kind != Kind::Event).then(|| json(&event.kind)),
             attachments.as_ref().map(json),
         ])?;
-        conn.prepare_cached("DELETE FROM event_guests WHERE account_id = ?1 AND calendar = ?2 AND event = ?3")?
-            .execute(params![account_id, event.calendar, event.id])?;
+        conn.prepare_cached(
+            "DELETE FROM event_guests WHERE account_id = ?1 AND calendar = ?2 AND event = ?3",
+        )?
+        .execute(params![account_id, event.calendar, event.id])?;
         let mut insert = conn.prepare_cached(
             "INSERT OR REPLACE INTO event_guests (account_id, calendar, event, email, name, answer, organizer, me) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -306,7 +350,12 @@ pub fn save_events(conn: &Connection, account_id: AccountId, events: &[Event], s
     Ok(())
 }
 
-pub fn remove_events(conn: &Connection, account_id: AccountId, calendar: &str, ids: &[String]) -> Result<()> {
+pub fn remove_events(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    ids: &[String],
+) -> Result<()> {
     for id in ids {
         conn.execute(
             "DELETE FROM events WHERE account_id = ?1 AND calendar = ?2 AND (id = ?3 OR series = ?3)",
@@ -397,7 +446,12 @@ pub fn set_my_answer_for_uid(
 /// Drops a calendar's rows a whole read did not repeat: every row still
 /// marked `seen_at` before `before`, save for one a queued change still
 /// owns, which the read must not drop out from under an unsent edit.
-pub fn sweep(conn: &Connection, account_id: AccountId, calendar: &str, before: EpochMillis) -> Result<()> {
+pub fn sweep(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    before: EpochMillis,
+) -> Result<()> {
     conn.execute(
         "DELETE FROM events WHERE account_id = ?1 AND calendar = ?2 AND pending = 0 AND seen_at < ?3",
         params![account_id, calendar, before],
@@ -410,7 +464,12 @@ const COLUMNS: &str = "e.account_id, e.calendar, e.id, e.uid, e.etag, e.starts_a
     e.my_answer, e.reminders, e.conference, e.rules, e.series, e.original_start, e.pending, e.sequence, e.kind, \
     e.attachments";
 
-pub fn event(conn: &Connection, account_id: AccountId, calendar: &str, id: &str) -> Result<Option<Event>> {
+pub fn event(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    id: &str,
+) -> Result<Option<Event>> {
     let found = conn
         .query_row(
             &format!("SELECT {COLUMNS} FROM events e WHERE e.account_id = ?1 AND e.calendar = ?2 AND e.id = ?3"),
@@ -439,8 +498,9 @@ pub fn changed_occurrences(
         "SELECT {COLUMNS} FROM events e WHERE e.account_id = ?1 AND e.calendar = ?2 AND e.series = ?3 \
          ORDER BY e.original_start"
     ))?;
-    let mut found: Vec<Event> =
-        stmt.query_map(params![account_id, calendar, series], read_event)?.collect::<rusqlite::Result<_>>()?;
+    let mut found: Vec<Event> = stmt
+        .query_map(params![account_id, calendar, series], read_event)?
+        .collect::<rusqlite::Result<_>>()?;
     read_guests(conn, account_id, &mut found)?;
     Ok(found)
 }
@@ -449,7 +509,11 @@ pub fn changed_occurrences(
 /// takes its list as it is. A list from the provider keeps what only this
 /// computer knows: the files still waiting to upload, and which uploaded
 /// files are shared with whom (`calendar::keep_local`).
-fn kept_attachments(conn: &Connection, account_id: AccountId, event: &Event) -> Result<Option<Vec<model::Attachment>>> {
+fn kept_attachments(
+    conn: &Connection,
+    account_id: AccountId,
+    event: &Event,
+) -> Result<Option<Vec<model::Attachment>>> {
     let Some(fresh) = &event.attachments else {
         return Ok(None);
     };
@@ -479,13 +543,20 @@ pub fn replace_attachments(
     list: &[model::Attachment],
 ) -> Result<()> {
     let body: Option<Option<String>> = conn
-        .query_row("SELECT body FROM calendar_changes WHERE seq = ?1", params![seq], |row| row.get(0))
+        .query_row(
+            "SELECT body FROM calendar_changes WHERE seq = ?1",
+            params![seq],
+            |row| row.get(0),
+        )
         .optional()?;
     if let Some(body) = body.flatten() {
         let mut event: Event = parse(&body);
         if event.attachments.is_some() {
             event.attachments = Some(list.to_vec());
-            conn.execute("UPDATE calendar_changes SET body = ?2 WHERE seq = ?1", params![seq, json(&event)])?;
+            conn.execute(
+                "UPDATE calendar_changes SET body = ?2 WHERE seq = ?1",
+                params![seq, json(&event)],
+            )?;
         }
     }
     conn.execute(
@@ -498,7 +569,10 @@ pub fn replace_attachments(
 
 /// The events, by calendar and id, holding a file that waits for the
 /// account to grant Drive.
-pub fn waiting_for_access(conn: &Connection, account_id: AccountId) -> Result<Vec<(String, String)>> {
+pub fn waiting_for_access(
+    conn: &Connection,
+    account_id: AccountId,
+) -> Result<Vec<(String, String)>> {
     let mut stmt = conn.prepare(
         "SELECT calendar, id FROM events WHERE account_id = ?1 AND attachments LIKE '%\"problem\":\"NeedsAccess\"%' \
          ORDER BY calendar, id",
@@ -524,7 +598,13 @@ pub fn settle(conn: &Connection, account_id: AccountId, calendar: &str, id: &str
 /// shown, every queued change for it (whose bodies carry the id too) and
 /// the change held for Undo. A later change then goes to the event the
 /// provider knows. Runs inside the caller's write transaction.
-pub fn rename_event(conn: &Connection, account_id: AccountId, calendar: &str, from: &str, to: &str) -> Result<()> {
+pub fn rename_event(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
     if from == to {
         return Ok(());
     }
@@ -541,7 +621,12 @@ pub fn rename_event(conn: &Connection, account_id: AccountId, calendar: &str, fr
         "calendar_changes SET event",
     ] {
         let column = table.rsplit(' ').next().unwrap_or("id");
-        conn.execute(&format!("UPDATE {table} = ?4 WHERE account_id = ?1 AND calendar = ?2 AND {column} = ?3"), at)?;
+        conn.execute(
+            &format!(
+                "UPDATE {table} = ?4 WHERE account_id = ?1 AND calendar = ?2 AND {column} = ?3"
+            ),
+            at,
+        )?;
     }
     // A queued event carries its id, and a changed occurrence its series,
     // in its body too. A move's body names its destination in `calendar`.
@@ -558,9 +643,11 @@ pub fn rename_event(conn: &Connection, account_id: AccountId, calendar: &str, fr
         }
     }
     let held: Option<(String, Option<String>)> = conn
-        .query_row("SELECT steps, before FROM calendar_holds WHERE account_id = ?1", params![account_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(
+            "SELECT steps, before FROM calendar_holds WHERE account_id = ?1",
+            params![account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .optional()?;
     if let Some((steps, before)) = held {
         let rename = |event: &mut Event| {
@@ -626,7 +713,11 @@ pub fn occurrences(
     to: EpochMillis,
     reach: CalendarScope,
 ) -> Result<Vec<Occurrence>> {
-    let to = if to - from > MAX_RANGE { from + MAX_RANGE } else { to };
+    let to = if to - from > MAX_RANGE {
+        from + MAX_RANGE
+    } else {
+        to
+    };
     let calendar_filter = match reach {
         CalendarScope::Shown => "AND c.shown = 1",
         CalendarScope::All => "",
@@ -653,8 +744,9 @@ pub fn occurrences(
               OR (e.series IS NOT NULL AND e.original_start < ?3 AND e.original_start >= ?2 - ?4) \
              )"
         ))?;
-        let events: Vec<Event> =
-            stmt.query_map(params![account_id, from, to, longest], read_event)?.collect::<rusqlite::Result<_>>()?;
+        let events: Vec<Event> = stmt
+            .query_map(params![account_id, from, to, longest], read_event)?
+            .collect::<rusqlite::Result<_>>()?;
         found.extend(expand_rows(conn, account_id, events, from, to)?);
     }
     found.sort_by(|a, b| (a.start, &a.event.title).cmp(&(b.start, &b.event.title)));
@@ -677,7 +769,10 @@ fn expand_rows(
         .iter()
         .filter_map(|e| Some((e.calendar.clone(), e.series.clone()?, e.original_start?)))
         .collect();
-    let mut events: Vec<Event> = events.into_iter().filter(|e| e.status != Status::Cancelled).collect();
+    let mut events: Vec<Event> = events
+        .into_iter()
+        .filter(|e| e.status != Status::Cancelled)
+        .collect();
     read_guests(conn, account_id, &mut events)?;
     let mut found = Vec::new();
     for event in events {
@@ -686,7 +781,12 @@ fn expand_rows(
             if replaced.contains(&(event.calendar.clone(), event.id.clone(), start)) {
                 continue;
             }
-            found.push(Occurrence { account_id, event: Arc::clone(&event), start, end });
+            found.push(Occurrence {
+                account_id,
+                event: Arc::clone(&event),
+                start,
+                end,
+            });
         }
     }
     Ok(found)
@@ -708,8 +808,9 @@ pub fn with_uid(
         "SELECT {COLUMNS} FROM events e JOIN calendars c ON c.account_id = e.account_id AND c.id = e.calendar \
          WHERE e.account_id = ?1 AND c.shown = 1 AND lower(e.uid) = lower(?2)"
     ))?;
-    let events: Vec<Event> =
-        stmt.query_map(params![account_id, uid], read_event)?.collect::<rusqlite::Result<_>>()?;
+    let events: Vec<Event> = stmt
+        .query_map(params![account_id, uid], read_event)?
+        .collect::<rusqlite::Result<_>>()?;
     let mut found = expand_rows(conn, account_id, events, from, to)?;
     found.sort_by(|a, b| (a.start, &a.event.title).cmp(&(b.start, &b.event.title)));
     Ok(found)
@@ -720,7 +821,11 @@ pub fn with_uid(
 /// holds it, the primary calendar's row comes first, then one the
 /// account owns, as [`find_event`] orders them. `None` when no row under
 /// that UID repeats.
-pub fn series_with_uid(conn: &Connection, account_id: AccountId, uid: &str) -> Result<Option<Event>> {
+pub fn series_with_uid(
+    conn: &Connection,
+    account_id: AccountId,
+    uid: &str,
+) -> Result<Option<Event>> {
     Ok(conn
         .query_row(
             &format!(
@@ -772,13 +877,25 @@ pub fn waiting(
             let Some((start, end)) = next_after(conn, account_id, &event, now)? else {
                 continue;
             };
-            let same = if event.uid.is_empty() { event.id.clone() } else { event.uid.to_lowercase() };
+            let same = if event.uid.is_empty() {
+                event.id.clone()
+            } else {
+                event.uid.to_lowercase()
+            };
             let key = (account_id, event.calendar.clone(), same);
             if nearest.get(&key).is_some_and(|kept| kept.start <= start) {
                 continue;
             }
             let event = Arc::new(event);
-            nearest.insert(key, Occurrence { account_id, event, start, end });
+            nearest.insert(
+                key,
+                Occurrence {
+                    account_id,
+                    event,
+                    start,
+                    end,
+                },
+            );
         }
     }
     let mut found: Vec<Occurrence> = nearest.into_values().collect();
@@ -786,7 +903,11 @@ pub fn waiting(
     found.truncate(limit);
     for &account_id in accounts {
         let of_account = found.iter_mut().filter(|o| o.account_id == account_id);
-        read_guests(conn, account_id, of_account.map(|o| Arc::make_mut(&mut o.event)))?;
+        read_guests(
+            conn,
+            account_id,
+            of_account.map(|o| Arc::make_mut(&mut o.event)),
+        )?;
     }
     Ok(found)
 }
@@ -807,7 +928,9 @@ fn next_after(
          AND original_start IS NOT NULL",
     )?;
     let replaced: HashSet<EpochMillis> = stmt
-        .query_map(params![account_id, event.calendar, event.id], |row| row.get(0))?
+        .query_map(params![account_id, event.calendar, event.id], |row| {
+            row.get(0)
+        })?
         .collect::<rusqlite::Result<_>>()?;
     Ok(model::expand(event, now, now + MAX_RANGE)
         .into_iter()
@@ -858,7 +981,14 @@ pub fn search(
     // so a series and its own changed occurrence collapse to one result.
     // `past` and `rank` are the sort key: coming events (`past` false)
     // before past ones, earliest coming or latest past first.
-    type Ranked = (bool, EpochMillis, AccountId, Event, EpochMillis, EpochMillis);
+    type Ranked = (
+        bool,
+        EpochMillis,
+        AccountId,
+        Event,
+        EpochMillis,
+        EpochMillis,
+    );
     let mut ranked: HashMap<(AccountId, String, String), Ranked> = HashMap::new();
     for &account_id in accounts {
         let mut stmt = conn.prepare(&format!(
@@ -874,17 +1004,24 @@ pub fn search(
                CASE WHEN e.rules <> '' OR e.ends_at >= ?3 THEN e.starts_at ELSE -e.starts_at END \
              LIMIT {MOST_EVENTS}"
         ))?;
-        let events: Vec<Event> =
-            stmt.query_map(params![account_id, needle, from], read_event)?.collect::<rusqlite::Result<_>>()?;
+        let events: Vec<Event> = stmt
+            .query_map(params![account_id, needle, from], read_event)?
+            .collect::<rusqlite::Result<_>>()?;
         for event in events {
             let (start, end) = next_showing(&event, from);
             let past = start < from;
             let rank = if past { -start } else { start };
             // An event made here has no uid until the provider answers, so
             // its own id keeps it apart from other new events.
-            let same = if event.uid.is_empty() { event.id.clone() } else { event.uid.to_lowercase() };
+            let same = if event.uid.is_empty() {
+                event.id.clone()
+            } else {
+                event.uid.to_lowercase()
+            };
             let key = (account_id, event.calendar.clone(), same);
-            let keep = ranked.get(&key).is_none_or(|(p, r, ..)| (past, rank) < (*p, *r));
+            let keep = ranked
+                .get(&key)
+                .is_none_or(|(p, r, ..)| (past, rank) < (*p, *r));
             if keep {
                 ranked.insert(key, (past, rank, account_id, event, start, end));
             }
@@ -899,7 +1036,12 @@ pub fn search(
     }
     Ok(found
         .into_iter()
-        .map(|(_, _, account_id, event, start, end)| Occurrence { account_id, event: Arc::new(event), start, end })
+        .map(|(_, _, account_id, event, start, end)| Occurrence {
+            account_id,
+            event: Arc::new(event),
+            start,
+            end,
+        })
         .collect())
 }
 
@@ -937,13 +1079,18 @@ fn read_guests<'e>(
     if events.is_empty() {
         return Ok(());
     }
-    let keys: Vec<[&str; 2]> = events.iter().map(|e| [e.calendar.as_str(), e.id.as_str()]).collect();
+    let keys: Vec<[&str; 2]> = events
+        .iter()
+        .map(|e| [e.calendar.as_str(), e.id.as_str()])
+        .collect();
     let mut stmt = conn.prepare_cached(GUESTS_OF)?;
     let rows = stmt.query_map(params![account_id, json(&keys)], |row| {
         let guest = Guest {
             email: row.get(2)?,
             name: row.get(3)?,
-            answer: row.get::<_, Option<String>>(4)?.and_then(|a| a.parse().ok()),
+            answer: row
+                .get::<_, Option<String>>(4)?
+                .and_then(|a| a.parse().ok()),
             organizer: row.get(5)?,
             me: row.get(6)?,
         };
@@ -979,7 +1126,9 @@ fn read_event(row: &Row) -> rusqlite::Result<Event> {
         status: Status::parse(&row.get::<_, String>(14)?),
         private: row.get(15)?,
         organizer: row.get(16)?,
-        my_answer: row.get::<_, Option<String>>(17)?.and_then(|a| a.parse().ok()),
+        my_answer: row
+            .get::<_, Option<String>>(17)?
+            .and_then(|a| a.parse().ok()),
         reminders: row.get::<_, Option<String>>(18)?.map(|r| parse(&r)),
         conference: row.get(19)?,
         rules: row
@@ -997,7 +1146,10 @@ fn read_event(row: &Row) -> rusqlite::Result<Event> {
         // A Meet request lives only in a queued write, never in a row
         // the store reads back.
         meet_request: None,
-        kind: row.get::<_, Option<String>>(25)?.map(|k| parse(&k)).unwrap_or_default(),
+        kind: row
+            .get::<_, Option<String>>(25)?
+            .map(|k| parse(&k))
+            .unwrap_or_default(),
         attachments: row.get::<_, Option<String>>(26)?.map(|a| parse(&a)),
         kept_theirs: Vec::new(),
         series_etag: String::new(),
@@ -1094,7 +1246,11 @@ pub enum Dropped {
     /// A waiting step had folded into an earlier change of this event,
     /// which is queued again as it was: `body` is that change's event, or
     /// `None` for a removal.
-    Kept { calendar: String, event: String, body: Option<Box<Event>> },
+    Kept {
+        calendar: String,
+        event: String,
+        body: Option<Box<Event>>,
+    },
 }
 
 /// Queues a change for the provider. One row holds the latest change for
@@ -1106,7 +1262,12 @@ pub enum Dropped {
 /// - a Remove meeting an unsent Save turns that row into the Remove.
 /// - a Remove meeting an unsent Remove changes nothing;
 /// - a Save meeting an unsent Remove turns that row into the Save.
-pub fn enqueue(conn: &Connection, account_id: AccountId, kind: ChangeKind, event: &Event) -> Result<()> {
+pub fn enqueue(
+    conn: &Connection,
+    account_id: AccountId,
+    kind: ChangeKind,
+    event: &Event,
+) -> Result<()> {
     enqueue_after(conn, account_id, kind, event, None, None, Notify::Guests).map(drop)
 }
 
@@ -1136,8 +1297,16 @@ pub fn enqueue_after(
         )
         .optional()?;
     if let Some((seq, queued_kind, queued)) = &existing {
-        let folded = folded_notify(ChangeKind::parse(queued_kind), Notify::from_stored(queued.as_deref()), kind, notify);
-        conn.execute("UPDATE calendar_changes SET notify = ?2 WHERE seq = ?1", params![seq, folded.stored()])?;
+        let folded = folded_notify(
+            ChangeKind::parse(queued_kind),
+            Notify::from_stored(queued.as_deref()),
+            kind,
+            notify,
+        );
+        conn.execute(
+            "UPDATE calendar_changes SET notify = ?2 WHERE seq = ?1",
+            params![seq, folded.stored()],
+        )?;
     }
     let existing = existing.map(|(seq, kind, _)| (seq, kind));
     // A waiting step that folds into an earlier change keeps that change,
@@ -1160,27 +1329,30 @@ pub fn enqueue_after(
     };
 
     if let Some((seq, existing_kind)) = existing {
-        match (kind, existing_kind.as_str()) {
-            (ChangeKind::Remove, "create") => {
+        match (kind, ChangeKind::parse(&existing_kind)) {
+            (ChangeKind::Remove, ChangeKind::Create) => {
                 conn.execute("DELETE FROM calendar_changes WHERE seq = ?1", params![seq])?;
                 return Ok(None);
             }
-            (ChangeKind::Remove, "save") => {
+            (ChangeKind::Remove, ChangeKind::Save) => {
                 conn.execute(
                     "UPDATE calendar_changes SET kind = 'remove', body = ?2 WHERE seq = ?1",
                     params![seq, json(event)],
                 )?;
                 return waited(seq);
             }
-            (ChangeKind::Save, "create") | (ChangeKind::Save, "save") => {
-                conn.execute("UPDATE calendar_changes SET body = ?2 WHERE seq = ?1", params![seq, json(event)])?;
+            (ChangeKind::Save, ChangeKind::Create | ChangeKind::Save) => {
+                conn.execute(
+                    "UPDATE calendar_changes SET body = ?2 WHERE seq = ?1",
+                    params![seq, json(event)],
+                )?;
                 return waited(seq);
             }
             // The removal already covers the event.
-            (ChangeKind::Remove, "remove") => return waited(seq),
+            (ChangeKind::Remove, ChangeKind::Remove) => return waited(seq),
             // The provider still holds the event, since its removal never
             // went out, so the edit changes it against the same version.
-            (ChangeKind::Save, "remove") => {
+            (ChangeKind::Save, ChangeKind::Remove) => {
                 conn.execute(
                     "UPDATE calendar_changes SET kind = 'save', body = ?2 WHERE seq = ?1",
                     params![seq, json(event)],
@@ -1195,7 +1367,9 @@ pub fn enqueue_after(
     // A removal keeps the event it takes off, so its UID can still find
     // the event if the account's calendar server changes before it goes.
     let body = match kind {
-        ChangeKind::Create | ChangeKind::Save | ChangeKind::Move | ChangeKind::Remove => Some(json(event)),
+        ChangeKind::Create | ChangeKind::Save | ChangeKind::Move | ChangeKind::Remove => {
+            Some(json(event))
+        }
         ChangeKind::Answer => None,
     };
     conn.execute(
@@ -1232,7 +1406,10 @@ pub fn enqueue_answer(
                 note: answer.note.clone().or_else(|| earlier.and_then(|e| e.note)),
                 ..answer.clone()
             };
-            conn.execute("UPDATE calendar_changes SET body = ?2 WHERE seq = ?1", params![seq, json(&merged)])?;
+            conn.execute(
+                "UPDATE calendar_changes SET body = ?2 WHERE seq = ?1",
+                params![seq, json(&merged)],
+            )?;
         }
         None => {
             conn.execute(
@@ -1330,7 +1507,12 @@ pub fn finish_move(conn: &Connection, seq: i64, id: &str, new_etag: &str) -> Res
 /// since the guests never heard of the one it replaces. Two edits, or an
 /// edit onto an unsent create, tell the guests if either did: the
 /// earlier one may be what invites them.
-fn folded_notify(queued_kind: ChangeKind, queued: Notify, kind: ChangeKind, notify: Notify) -> Notify {
+fn folded_notify(
+    queued_kind: ChangeKind,
+    queued: Notify,
+    kind: ChangeKind,
+    notify: Notify,
+) -> Notify {
     if (queued_kind == ChangeKind::Remove) == (kind == ChangeKind::Remove) {
         queued.and(notify)
     } else {
@@ -1354,7 +1536,12 @@ pub fn drop_waiting_on(conn: &Connection, seq: i64) -> Result<Vec<Dropped>> {
                 "SELECT seq, calendar, event, prior_kind, prior_body FROM calendar_changes WHERE waits_on = ?1",
             )?;
             let rows = stmt.query_map(params![lead], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, (row.get(3)?, row.get(4)?)))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    (row.get(3)?, row.get(4)?),
+                ))
             })?;
             rows.collect::<rusqlite::Result<_>>()?
         };
@@ -1369,8 +1556,14 @@ pub fn drop_waiting_on(conn: &Connection, seq: i64) -> Result<Vec<Dropped>> {
                     )?;
                     // A removal's body is the event it takes off, not one
                     // to put back.
-                    let body = prior_body.filter(|_| kind != "remove").and_then(|b| serde_json::from_str(&b).ok());
-                    dropped.push(Dropped::Kept { calendar, event, body });
+                    let body = prior_body
+                        .filter(|_| ChangeKind::parse(&kind) != ChangeKind::Remove)
+                        .and_then(|b| serde_json::from_str(&b).ok());
+                    dropped.push(Dropped::Kept {
+                        calendar,
+                        event,
+                        body,
+                    });
                 }
                 None => {
                     conn.execute("DELETE FROM calendar_changes WHERE seq = ?1", params![seq])?;
@@ -1406,7 +1599,11 @@ pub fn queued(conn: &Connection, account_id: AccountId) -> Result<Vec<QueuedChan
 /// or edited since the send began goes out as it is now or not at all,
 /// and one queued during the send still goes out in the same send. A
 /// change waiting on a row still queued is passed over.
-pub fn next_change(conn: &Connection, account_id: AccountId, after: i64) -> Result<Option<QueuedChange>> {
+pub fn next_change(
+    conn: &Connection,
+    account_id: AccountId,
+    after: i64,
+) -> Result<Option<QueuedChange>> {
     Ok(conn
         .query_row(
             "SELECT seq, calendar, event, kind, etag, body, waits_on, restores, notify FROM calendar_changes c \
@@ -1437,7 +1634,9 @@ fn read_change(row: &Row, account_id: AccountId) -> rusqlite::Result<QueuedChang
         body,
         answer,
         waits_on: row.get(6)?,
-        restores: row.get::<_, Option<String>>(7)?.and_then(|b| serde_json::from_str(&b).ok()),
+        restores: row
+            .get::<_, Option<String>>(7)?
+            .and_then(|b| serde_json::from_str(&b).ok()),
         notify: Notify::from_stored(row.get::<_, Option<String>>(8)?.as_deref()),
     })
 }
@@ -1472,7 +1671,11 @@ pub fn resumed_read(token: &str) -> Option<ResumedRead> {
     let mut parts = rest.splitn(3, '|');
     let mark = parts.next()?.parse().ok()?;
     let from = parts.next()?.parse().ok()?;
-    Some(ResumedRead { mark, from, page: parts.next()?.to_string() })
+    Some(ResumedRead {
+        mark,
+        from,
+        page: parts.next()?.to_string(),
+    })
 }
 
 /// What a queued change's calendar starts with once the account's calendar
@@ -1506,10 +1709,17 @@ pub fn has_queued(conn: &Connection, account_id: AccountId) -> Result<bool> {
 /// its JSON body while the copy still holds that event's row.
 pub fn note_list(conn: &Connection, account_id: AccountId, listed: &HashSet<String>) -> Result<()> {
     let rows: Vec<(i64, String, String, String, Option<String>)> = {
-        let mut stmt =
-            conn.prepare("SELECT seq, calendar, event, kind, body FROM calendar_changes WHERE account_id = ?1")?;
+        let mut stmt = conn.prepare(
+            "SELECT seq, calendar, event, kind, body FROM calendar_changes WHERE account_id = ?1",
+        )?;
         let rows = stmt.query_map(params![account_id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
@@ -1524,14 +1734,19 @@ pub fn note_list(conn: &Connection, account_id: AccountId, listed: &HashSet<Stri
     }
     let held: Vec<String> = {
         let mut stmt = conn.prepare("SELECT id FROM calendars WHERE account_id = ?1")?;
-        stmt.query_map(params![account_id], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?
+        stmt.query_map(params![account_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?
     };
-    let switched = !listed.is_empty() && !held.is_empty() && !held.iter().any(|id| listed.contains(id));
+    let switched =
+        !listed.is_empty() && !held.is_empty() && !held.iter().any(|id| listed.contains(id));
     if !switched {
         return Ok(());
     }
     for (seq, calendar, id, kind, body) in rows {
-        if left_behind(&calendar).is_some() || listed.contains(&calendar) || model::list::is_local(&calendar) {
+        if left_behind(&calendar).is_some()
+            || listed.contains(&calendar)
+            || model::list::is_local(&calendar)
+        {
             continue;
         }
         let mut uid = uid_of_queued(conn, account_id, &calendar, &id, body.as_deref())?;
@@ -1549,7 +1764,9 @@ pub fn note_list(conn: &Connection, account_id: AccountId, listed: &HashSet<Stri
             body => body,
         };
         let body = match body.as_deref().map(serde_json::from_str::<Event>) {
-            Some(Ok(held)) if ChangeKind::parse(&kind) != ChangeKind::Answer => json(&Event { uid, ..held }),
+            Some(Ok(held)) if ChangeKind::parse(&kind) != ChangeKind::Answer => {
+                json(&Event { uid, ..held })
+            }
             _ => {
                 let mut held: serde_json::Value = body
                     .as_deref()
@@ -1569,10 +1786,20 @@ pub fn note_list(conn: &Connection, account_id: AccountId, listed: &HashSet<Stri
 
 /// The UID of the event a queued change names: its body's, or the copy's
 /// row for the event or, for one occurrence, for its series.
-fn uid_of_queued(conn: &Connection, account_id: AccountId, calendar: &str, id: &str, body: Option<&str>) -> Result<String> {
+fn uid_of_queued(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+    id: &str,
+    body: Option<&str>,
+) -> Result<String> {
     let in_body = body
         .and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok())
-        .and_then(|b| b.get("uid").and_then(serde_json::Value::as_str).map(str::to_string))
+        .and_then(|b| {
+            b.get("uid")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
         .filter(|uid| !uid.is_empty());
     if let Some(uid) = in_body {
         return Ok(uid);
@@ -1581,7 +1808,9 @@ fn uid_of_queued(conn: &Connection, account_id: AccountId, calendar: &str, id: &
         return Ok(row.uid);
     }
     match model::split_occurrence_id(id) {
-        Some((series, _)) => Ok(event(conn, account_id, calendar, series)?.map(|row| row.uid).unwrap_or_default()),
+        Some((series, _)) => Ok(event(conn, account_id, calendar, series)?
+            .map(|row| row.uid)
+            .unwrap_or_default()),
         None => Ok(String::new()),
     }
 }
@@ -1622,16 +1851,32 @@ pub fn settle_left(conn: &Connection, account_id: AccountId, seq: i64) -> Result
         let mut stmt = conn.prepare(
             "SELECT id, sync_token IS NOT NULL AND substr(sync_token, 1, length(?2)) <> ?2 FROM calendars WHERE account_id = ?1",
         )?;
-        stmt.query_map(params![account_id, RESUME], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        stmt.query_map(params![account_id, RESUME], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?
     };
-    let unread = listed.iter().any(|(id, read)| !read && !model::list::is_local(id));
+    let unread = listed
+        .iter()
+        .any(|(id, read)| !read && !model::list::is_local(id));
     if listed.is_empty() || listed.iter().any(|(id, _)| id == old) || unread {
         return Ok(Left::Waiting);
     }
-    let body: serde_json::Value = body.as_deref().and_then(|b| serde_json::from_str(b).ok()).unwrap_or_default();
-    let uid = body.get("uid").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    let body: serde_json::Value = body
+        .as_deref()
+        .and_then(|b| serde_json::from_str(b).ok())
+        .unwrap_or_default();
+    let uid = body
+        .get("uid")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let kind = ChangeKind::parse(&kind);
-    let destination = body.get("calendar").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    let destination = body
+        .get("calendar")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let lands = kind != ChangeKind::Move || listed.iter().any(|(id, _)| *id == destination);
     let master = match uid.is_empty() || !lands {
         true => None,
@@ -1648,7 +1893,10 @@ pub fn settle_left(conn: &Connection, account_id: AccountId, seq: i64) -> Result
             .optional()?,
     };
     let Some(master) = master else {
-        conn.execute("UPDATE calendar_changes SET waits_on = seq WHERE seq = ?1", params![seq])?;
+        conn.execute(
+            "UPDATE calendar_changes SET waits_on = seq WHERE seq = ?1",
+            params![seq],
+        )?;
         return Ok(Left::Kept);
     };
     let original = body
@@ -1657,10 +1905,16 @@ pub fn settle_left(conn: &Connection, account_id: AccountId, seq: i64) -> Result
         .or_else(|| model::split_occurrence_id(&id).map(|(_, at)| at));
     let new_id = original.map_or_else(|| master.id.clone(), |at| model::occurrence_id(&master, at));
     let etag = match original {
-        Some(_) => event(conn, account_id, &master.calendar, &new_id)?.map(|row| row.etag).unwrap_or_default(),
+        Some(_) => event(conn, account_id, &master.calendar, &new_id)?
+            .map(|row| row.etag)
+            .unwrap_or_default(),
         None => master.etag.clone(),
     };
-    let kind = if kind == ChangeKind::Create { ChangeKind::Save } else { kind };
+    let kind = if kind == ChangeKind::Create {
+        ChangeKind::Save
+    } else {
+        kind
+    };
     let body = match kind {
         ChangeKind::Remove => None,
         ChangeKind::Answer => Some(body.to_string()),
@@ -1687,7 +1941,11 @@ pub fn settle_left(conn: &Connection, account_id: AccountId, seq: i64) -> Result
 
 /// The ids of a calendar's events with an unsent change, without loading
 /// every queued body.
-pub fn pending_ids(conn: &Connection, account_id: AccountId, calendar: &str) -> Result<HashSet<String>> {
+pub fn pending_ids(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+) -> Result<HashSet<String>> {
     let mut stmt =
         conn.prepare("SELECT event FROM calendar_changes WHERE account_id = ?1 AND calendar = ?2")?;
     let rows = stmt.query_map(params![account_id, calendar], |row| row.get(0))?;
@@ -1697,7 +1955,11 @@ pub fn pending_ids(conn: &Connection, account_id: AccountId, calendar: &str) -> 
 /// The ids of a calendar's events with an unsent removal or move away. A
 /// read keeps a series' changed occurrences out while the series waits
 /// to leave.
-pub fn removing_ids(conn: &Connection, account_id: AccountId, calendar: &str) -> Result<HashSet<String>> {
+pub fn removing_ids(
+    conn: &Connection,
+    account_id: AccountId,
+    calendar: &str,
+) -> Result<HashSet<String>> {
     let mut stmt = conn.prepare(
         "SELECT event FROM calendar_changes WHERE account_id = ?1 AND calendar = ?2 AND kind IN ('remove', 'move')",
     )?;
@@ -1751,7 +2013,10 @@ pub fn save_holding(
 /// Drops the account's persisted held change, once it is queued or taken
 /// back.
 pub fn clear_holding(conn: &Connection, account_id: AccountId) -> Result<()> {
-    conn.execute("DELETE FROM calendar_holds WHERE account_id = ?1", params![account_id])?;
+    conn.execute(
+        "DELETE FROM calendar_holds WHERE account_id = ?1",
+        params![account_id],
+    )?;
     Ok(())
 }
 
@@ -1809,9 +2074,11 @@ pub fn finish_change(
     new_etag: &str,
 ) -> Result<bool> {
     let current: Option<(String, Option<String>)> = conn
-        .query_row("SELECT kind, body FROM calendar_changes WHERE seq = ?1", params![seq], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(
+            "SELECT kind, body FROM calendar_changes WHERE seq = ?1",
+            params![seq],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .optional()?;
     // A delete that took the row over carries the same event in its body,
     // and is still to go out.
@@ -1866,7 +2133,12 @@ mod tests {
     fn store() -> (Connection, AccountId) {
         let conn = crate::open_in_memory().unwrap();
         let id = accounts::insert_account(&conn, "me@example.com", 0).unwrap();
-        save_calendars(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        save_calendars(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         (conn, id)
     }
 
@@ -1903,10 +2175,23 @@ mod tests {
     #[test]
     fn a_calendar_keeps_its_all_day_reminders_apart() {
         let (conn, id) = store();
-        let ten = Reminder { minutes: 10, method: model::ReminderMethod::Notification };
-        let night = Reminder { minutes: 540, method: model::ReminderMethod::Email };
-        let split = Calendar { reminders: vec![ten], all_day_reminders: Some(vec![night]), ..calendar("primary", true) };
-        let one = Calendar { reminders: vec![ten], ..calendar("team", false) };
+        let ten = Reminder {
+            minutes: 10,
+            method: model::ReminderMethod::Notification,
+        };
+        let night = Reminder {
+            minutes: 540,
+            method: model::ReminderMethod::Email,
+        };
+        let split = Calendar {
+            reminders: vec![ten],
+            all_day_reminders: Some(vec![night]),
+            ..calendar("primary", true)
+        };
+        let one = Calendar {
+            reminders: vec![ten],
+            ..calendar("team", false)
+        };
         save_calendars(&conn, id, &[split.clone(), one.clone()]).unwrap();
         let read = calendars(&conn, id).unwrap();
         assert_eq!(read, [split, one]);
@@ -1916,14 +2201,43 @@ mod tests {
     fn a_renamed_event_takes_its_guests_and_its_queued_change_along() {
         let (conn, id) = store();
         let mut series = event("primary", "pmlocal1", MONDAY, 1);
-        series.guests = vec![Guest { email: "ann@example.com".into(), ..Guest::default() }];
+        series.guests = vec![Guest {
+            email: "ann@example.com".into(),
+            ..Guest::default()
+        }];
         let mut changed = event("primary", "pmlocal1_x", MONDAY + DAY, 1);
         changed.series = Some("pmlocal1".into());
         save_events(&conn, id, &[series.clone(), changed], 1).unwrap();
-        enqueue(&conn, id, ChangeKind::Save, &Event { title: "Later".into(), ..series.clone() }).unwrap();
-        let held = [Step::Save(series.clone()), Step::Remove { calendar: "primary".into(), id: "pmlocal1".into() }];
-        save_holding(&conn, id, &held, std::slice::from_ref(&series), Notify::Guests).unwrap();
-        conn.execute("UPDATE calendar_changes SET prior_body = body, restores = body", []).unwrap();
+        enqueue(
+            &conn,
+            id,
+            ChangeKind::Save,
+            &Event {
+                title: "Later".into(),
+                ..series.clone()
+            },
+        )
+        .unwrap();
+        let held = [
+            Step::Save(series.clone()),
+            Step::Remove {
+                calendar: "primary".into(),
+                id: "pmlocal1".into(),
+            },
+        ];
+        save_holding(
+            &conn,
+            id,
+            &held,
+            std::slice::from_ref(&series),
+            Notify::Guests,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE calendar_changes SET prior_body = body, restores = body",
+            [],
+        )
+        .unwrap();
 
         // `Db::write` runs every write in a transaction, which the
         // deferred key check needs.
@@ -1931,16 +2245,28 @@ mod tests {
         rename_event(&tx, id, "primary", "pmlocal1", "AAMkAGraph=").unwrap();
         tx.commit().unwrap();
 
-        assert!(super::event(&conn, id, "primary", "pmlocal1").unwrap().is_none());
-        let moved = super::event(&conn, id, "primary", "AAMkAGraph=").unwrap().unwrap();
+        assert!(
+            super::event(&conn, id, "primary", "pmlocal1")
+                .unwrap()
+                .is_none()
+        );
+        let moved = super::event(&conn, id, "primary", "AAMkAGraph=")
+            .unwrap()
+            .unwrap();
         assert_eq!(moved.guests.len(), 1);
-        let occurrence = super::event(&conn, id, "primary", "pmlocal1_x").unwrap().unwrap();
+        let occurrence = super::event(&conn, id, "primary", "pmlocal1_x")
+            .unwrap()
+            .unwrap();
         assert_eq!(occurrence.series.as_deref(), Some("AAMkAGraph="));
         let queued = next_change(&conn, id, 0).unwrap().unwrap();
         assert_eq!(queued.event, "AAMkAGraph=");
         assert_eq!(queued.body.unwrap().id, "AAMkAGraph=");
         let (prior, restores): (String, String) = conn
-            .query_row("SELECT prior_body, restores FROM calendar_changes", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row(
+                "SELECT prior_body, restores FROM calendar_changes",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert!(prior.contains("AAMkAGraph=") && restores.contains("AAMkAGraph="));
         let (_, steps, before, _) = holdings(&conn).unwrap().remove(0);
@@ -1950,23 +2276,43 @@ mod tests {
     }
 
     fn starts(found: &[Occurrence]) -> Vec<(String, EpochMillis)> {
-        found.iter().map(|o| (o.event.id.clone(), o.start)).collect()
+        found
+            .iter()
+            .map(|o| (o.event.id.clone(), o.start))
+            .collect()
     }
 
     #[test]
     fn the_copy_keeps_what_sort_of_entry_an_event_is() {
         use mailrs_domain::calendar::{Decline, Declines, Kind, Workplace};
         let (conn, id) = store();
-        let away = Kind::OutOfOffice(Decline { meetings: Declines::All, message: "Back Monday".into() });
+        let away = Kind::OutOfOffice(Decline {
+            meetings: Declines::All,
+            message: "Back Monday".into(),
+        });
         let events = [
-            Event { kind: away.clone(), ..event("primary", "away", MONDAY, 8) },
-            Event { kind: Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into())), ..event("primary", "where", MONDAY, 24) },
+            Event {
+                kind: away.clone(),
+                ..event("primary", "away", MONDAY, 8)
+            },
+            Event {
+                kind: Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into())),
+                ..event("primary", "where", MONDAY, 24)
+            },
             event("primary", "plain", MONDAY, 1),
         ];
         save_events(&conn, id, &events, 0).unwrap();
-        let read = |event: &str| super::event(&conn, id, "primary", event).unwrap().unwrap().kind;
+        let read = |event: &str| {
+            super::event(&conn, id, "primary", event)
+                .unwrap()
+                .unwrap()
+                .kind
+        };
         assert_eq!(read("away"), away);
-        assert_eq!(read("where"), Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into())));
+        assert_eq!(
+            read("where"),
+            Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into()))
+        );
         assert_eq!(read("plain"), Kind::Event);
     }
 
@@ -1977,7 +2323,8 @@ mod tests {
             title: "Agenda.pdf".into(),
             file_url: "https://drive.google.com/file/d/1abc/view".into(),
             mime_type: "application/pdf".into(),
-            icon_link: "https://drive-thirdparty.googleusercontent.com/16/type/application/pdf".into(),
+            icon_link: "https://drive-thirdparty.googleusercontent.com/16/type/application/pdf"
+                .into(),
             file_id: "1abc".into(),
             ..Default::default()
         };
@@ -1987,11 +2334,29 @@ mod tests {
             waiting: Some("/home/me/Notes.txt".into()),
             ..Default::default()
         };
-        let with = Event { attachments: Some(vec![file, waiting]), ..event("primary", "a", 0, 1) };
-        let without = Event { attachments: Some(Vec::new()), ..event("primary", "b", 0, 1) };
+        let with = Event {
+            attachments: Some(vec![file, waiting]),
+            ..event("primary", "a", 0, 1)
+        };
+        let without = Event {
+            attachments: Some(Vec::new()),
+            ..event("primary", "b", 0, 1)
+        };
         save_events(&conn, account, &[with.clone(), without], 0).unwrap();
-        assert_eq!(super::event(&conn, account, "primary", "a").unwrap().unwrap().attachments, with.attachments);
-        assert_eq!(super::event(&conn, account, "primary", "b").unwrap().unwrap().attachments, Some(Vec::new()));
+        assert_eq!(
+            super::event(&conn, account, "primary", "a")
+                .unwrap()
+                .unwrap()
+                .attachments,
+            with.attachments
+        );
+        assert_eq!(
+            super::event(&conn, account, "primary", "b")
+                .unwrap()
+                .unwrap()
+                .attachments,
+            Some(Vec::new())
+        );
     }
 
     fn uploaded(id: &str, share: bool) -> mailrs_domain::calendar::Attachment {
@@ -2005,7 +2370,9 @@ mod tests {
         }
     }
 
-    fn waiting_file(problem: Option<mailrs_domain::calendar::UploadProblem>) -> mailrs_domain::calendar::Attachment {
+    fn waiting_file(
+        problem: Option<mailrs_domain::calendar::UploadProblem>,
+    ) -> mailrs_domain::calendar::Attachment {
         mailrs_domain::calendar::Attachment {
             title: "Notes.txt".into(),
             waiting: Some("/home/me/Notes.txt".into()),
@@ -2025,57 +2392,121 @@ mod tests {
         };
         save_events(&conn, account, &[mine], 0).unwrap();
         // Google's copy knows the Drive file and nothing of the rest.
-        let google = mailrs_domain::calendar::Attachment { share: None, shared_with: Vec::new(), ..uploaded("1abc", true) };
-        let theirs = Event { attachments: Some(vec![google]), ..event("primary", "a", 0, 1) };
+        let google = mailrs_domain::calendar::Attachment {
+            share: None,
+            shared_with: Vec::new(),
+            ..uploaded("1abc", true)
+        };
+        let theirs = Event {
+            attachments: Some(vec![google]),
+            ..event("primary", "a", 0, 1)
+        };
         save_events(&conn, account, &[theirs], 1).unwrap();
-        let kept = super::event(&conn, account, "primary", "a").unwrap().unwrap().attachments.unwrap();
+        let kept = super::event(&conn, account, "primary", "a")
+            .unwrap()
+            .unwrap()
+            .attachments
+            .unwrap();
         assert_eq!(kept, vec![uploaded("1abc", false), waiting_file(None)]);
     }
 
     #[test]
     fn a_change_made_here_takes_the_list_as_it_is() {
         let (conn, account) = store();
-        let with = Event { pending: true, attachments: Some(vec![waiting_file(None)]), ..event("primary", "a", 0, 1) };
+        let with = Event {
+            pending: true,
+            attachments: Some(vec![waiting_file(None)]),
+            ..event("primary", "a", 0, 1)
+        };
         save_events(&conn, account, &[with], 0).unwrap();
-        let removed = Event { pending: true, attachments: Some(Vec::new()), ..event("primary", "a", 0, 1) };
+        let removed = Event {
+            pending: true,
+            attachments: Some(Vec::new()),
+            ..event("primary", "a", 0, 1)
+        };
         save_events(&conn, account, &[removed], 1).unwrap();
-        assert_eq!(super::event(&conn, account, "primary", "a").unwrap().unwrap().attachments, Some(Vec::new()));
+        assert_eq!(
+            super::event(&conn, account, "primary", "a")
+                .unwrap()
+                .unwrap()
+                .attachments,
+            Some(Vec::new())
+        );
     }
 
     #[test]
     fn new_attachments_go_into_the_queued_change_and_the_copy() {
         let (conn, account) = store();
-        let with = Event { pending: true, attachments: Some(vec![waiting_file(None)]), ..event("primary", "a", 0, 1) };
+        let with = Event {
+            pending: true,
+            attachments: Some(vec![waiting_file(None)]),
+            ..event("primary", "a", 0, 1)
+        };
         save_events(&conn, account, std::slice::from_ref(&with), 0).unwrap();
         enqueue(&conn, account, ChangeKind::Create, &with).unwrap();
         let seq = queued(&conn, account).unwrap()[0].seq;
         let list = vec![uploaded("1abc", true)];
         replace_attachments(&conn, account, seq, "primary", "a", &list).unwrap();
-        assert_eq!(queued(&conn, account).unwrap()[0].body.as_ref().unwrap().attachments, Some(list.clone()));
-        assert_eq!(super::event(&conn, account, "primary", "a").unwrap().unwrap().attachments, Some(list));
+        assert_eq!(
+            queued(&conn, account).unwrap()[0]
+                .body
+                .as_ref()
+                .unwrap()
+                .attachments,
+            Some(list.clone())
+        );
+        assert_eq!(
+            super::event(&conn, account, "primary", "a")
+                .unwrap()
+                .unwrap()
+                .attachments,
+            Some(list)
+        );
     }
 
     #[test]
     fn files_waiting_for_access_name_their_events() {
         let (conn, account) = store();
         let stuck = Event {
-            attachments: Some(vec![waiting_file(Some(mailrs_domain::calendar::UploadProblem::NeedsAccess))]),
+            attachments: Some(vec![waiting_file(Some(
+                mailrs_domain::calendar::UploadProblem::NeedsAccess,
+            ))]),
             ..event("primary", "a", 0, 1)
         };
         let gone = Event {
-            attachments: Some(vec![waiting_file(Some(mailrs_domain::calendar::UploadProblem::NotFound))]),
+            attachments: Some(vec![waiting_file(Some(
+                mailrs_domain::calendar::UploadProblem::NotFound,
+            ))]),
             ..event("primary", "b", 0, 1)
         };
-        save_events(&conn, account, &[stuck, gone, event("primary", "c", 0, 1)], 0).unwrap();
-        assert_eq!(waiting_for_access(&conn, account).unwrap(), [("primary".to_string(), "a".to_string())]);
+        save_events(
+            &conn,
+            account,
+            &[stuck, gone, event("primary", "c", 0, 1)],
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            waiting_for_access(&conn, account).unwrap(),
+            [("primary".to_string(), "a".to_string())]
+        );
     }
 
     #[test]
     fn the_copy_keeps_the_organizers_version_of_an_event() {
         let (conn, id) = store();
-        let review = Event { sequence: 3, ..event("primary", "review", MONDAY, 1) };
+        let review = Event {
+            sequence: 3,
+            ..event("primary", "review", MONDAY, 1)
+        };
         save_events(&conn, id, &[review], 0).unwrap();
-        assert_eq!(super::event(&conn, id, "primary", "review").unwrap().unwrap().sequence, 3);
+        assert_eq!(
+            super::event(&conn, id, "primary", "review")
+                .unwrap()
+                .unwrap()
+                .sequence,
+            3
+        );
     }
 
     #[test]
@@ -2083,18 +2514,35 @@ mod tests {
         let (conn, id) = store();
         let mut standup = event("primary", "standup", MONDAY + 9 * HOUR, 1);
         standup.guests = vec![
-            Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
-            Guest { email: "priya@example.com".into(), organizer: true, ..Guest::default() },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            },
+            Guest {
+                email: "priya@example.com".into(),
+                organizer: true,
+                ..Guest::default()
+            },
         ];
         save_events(&conn, id, &[standup], 0).unwrap();
 
         set_my_answer(&conn, id, "primary", "standup", Answer::Yes).unwrap();
 
-        let found = super::event(&conn, id, "primary", "standup").unwrap().unwrap();
+        let found = super::event(&conn, id, "primary", "standup")
+            .unwrap()
+            .unwrap();
         assert_eq!(found.my_answer, Some(Answer::Yes));
-        assert_eq!(found.guests.iter().find(|g| g.me).and_then(|g| g.answer), Some(Answer::Yes));
         assert_eq!(
-            found.guests.iter().find(|g| g.organizer).and_then(|g| g.answer),
+            found.guests.iter().find(|g| g.me).and_then(|g| g.answer),
+            Some(Answer::Yes)
+        );
+        assert_eq!(
+            found
+                .guests
+                .iter()
+                .find(|g| g.organizer)
+                .and_then(|g| g.answer),
             None,
             "only the guest marked me changes"
         );
@@ -2103,7 +2551,13 @@ mod tests {
     #[test]
     fn set_my_answer_marks_every_row_of_the_series() {
         let (conn, id) = store();
-        let me = || vec![Guest { email: "me@example.com".into(), me: true, ..Guest::default() }];
+        let me = || {
+            vec![Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            }]
+        };
         let mut series = event("primary", "planning", MONDAY + 10 * HOUR, 1);
         series.guests = me();
         let mut moved = event("primary", "planning_moved", MONDAY + 11 * HOUR, 1);
@@ -2116,10 +2570,14 @@ mod tests {
 
         set_my_answer(&conn, id, "primary", "planning", Answer::Maybe).unwrap();
 
-        let moved = super::event(&conn, id, "primary", "planning_moved").unwrap().unwrap();
+        let moved = super::event(&conn, id, "primary", "planning_moved")
+            .unwrap()
+            .unwrap();
         assert_eq!(moved.my_answer, Some(Answer::Maybe));
         assert_eq!(moved.guests[0].answer, Some(Answer::Maybe));
-        let other = super::event(&conn, id, "primary", "lunch").unwrap().unwrap();
+        let other = super::event(&conn, id, "primary", "lunch")
+            .unwrap()
+            .unwrap();
         assert_eq!(other.my_answer, None, "another event keeps its own answer");
     }
 
@@ -2134,7 +2592,9 @@ mod tests {
 
         set_my_answer(&conn, id, "primary", "first", Answer::Yes).unwrap();
 
-        let second = super::event(&conn, id, "primary", "second").unwrap().unwrap();
+        let second = super::event(&conn, id, "primary", "second")
+            .unwrap()
+            .unwrap();
         assert_eq!(second.my_answer, None);
     }
 
@@ -2142,9 +2602,16 @@ mod tests {
     fn a_saved_event_comes_back_with_its_guests() {
         let (conn, id) = store();
         let mut lunch = event("primary", "lunch", MONDAY + 12 * HOUR, 1);
-        lunch.guests = vec![Guest { email: "ana@example.com".into(), answer: Some(Answer::Yes), ..Guest::default() }];
+        lunch.guests = vec![Guest {
+            email: "ana@example.com".into(),
+            answer: Some(Answer::Yes),
+            ..Guest::default()
+        }];
         save_events(&conn, id, &[lunch.clone()], 0).unwrap();
-        assert_eq!(super::event(&conn, id, "primary", "lunch").unwrap(), Some(lunch));
+        assert_eq!(
+            super::event(&conn, id, "primary", "lunch").unwrap(),
+            Some(lunch)
+        );
     }
 
     /// A range read reads every event's guests at once; each event still
@@ -2153,17 +2620,36 @@ mod tests {
     #[test]
     fn each_event_in_a_range_comes_back_with_its_own_guests() {
         let (conn, id) = store();
-        let guest = |email: &str, organizer: bool| Guest { email: email.into(), organizer, ..Guest::default() };
+        let guest = |email: &str, organizer: bool| Guest {
+            email: email.into(),
+            organizer,
+            ..Guest::default()
+        };
         let mut ours = event("primary", "lunch", MONDAY + 12 * HOUR, 1);
-        ours.guests = vec![guest("zoe@example.com", true), guest("ana@example.com", false)];
+        ours.guests = vec![
+            guest("zoe@example.com", true),
+            guest("ana@example.com", false),
+        ];
         let mut theirs = event("team", "lunch", MONDAY + 13 * HOUR, 1);
         theirs.guests = vec![guest("bo@example.com", false)];
         let alone = event("team", "walk", MONDAY + 14 * HOUR, 1);
         save_events(&conn, id, &[ours.clone(), theirs.clone(), alone], 0).unwrap();
-        let found = occurrences(&conn, &[id], MONDAY, MONDAY + 24 * HOUR, CalendarScope::Shown).unwrap();
+        let found = occurrences(
+            &conn,
+            &[id],
+            MONDAY,
+            MONDAY + 24 * HOUR,
+            CalendarScope::Shown,
+        )
+        .unwrap();
         let guests: Vec<(&str, Vec<&str>)> = found
             .iter()
-            .map(|o| (o.event.calendar.as_str(), o.event.guests.iter().map(|g| g.email.as_str()).collect()))
+            .map(|o| {
+                (
+                    o.event.calendar.as_str(),
+                    o.event.guests.iter().map(|g| g.email.as_str()).collect(),
+                )
+            })
             .collect();
         assert_eq!(
             guests,
@@ -2179,13 +2665,19 @@ mod tests {
     fn two_copies_of_one_event_both_get_its_guests() {
         let (conn, id) = store();
         let mut lunch = event("primary", "lunch", MONDAY + 12 * HOUR, 1);
-        lunch.guests = vec![Guest { email: "ana@example.com".into(), ..Guest::default() }];
+        lunch.guests = vec![Guest {
+            email: "ana@example.com".into(),
+            ..Guest::default()
+        }];
         save_events(&conn, id, &[lunch.clone()], 0).unwrap();
         let (mut first, mut second) = (lunch.clone(), lunch.clone());
         first.guests.clear();
         second.guests.clear();
         read_guests(&conn, id, [&mut first, &mut second]).unwrap();
-        assert_eq!((first.guests, second.guests), (lunch.guests.clone(), lunch.guests));
+        assert_eq!(
+            (first.guests, second.guests),
+            (lunch.guests.clone(), lunch.guests)
+        );
     }
 
     #[test]
@@ -2194,12 +2686,15 @@ mod tests {
         let plan: Vec<String> = conn
             .prepare(&format!("EXPLAIN QUERY PLAN {GUESTS_OF}"))
             .unwrap()
-            .query_map(params![1, r#"[["primary","a"]]"#], |row| row.get::<_, String>(3))
+            .query_map(params![1, r#"[["primary","a"]]"#], |row| {
+                row.get::<_, String>(3)
+            })
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert!(
-            plan.iter().any(|step| step.contains("event_guests") && step.contains("account_id=? AND calendar=? AND event=?")),
+            plan.iter().any(|step| step.contains("event_guests")
+                && step.contains("account_id=? AND calendar=? AND event=?")),
             "{plan:?}"
         );
     }
@@ -2209,9 +2704,17 @@ mod tests {
         let (conn, id) = store();
         let mut reader = calendar("shared", false);
         reader.access = Access::Reader;
-        save_calendars(&conn, id, &[calendar("primary", true), calendar("team", false), reader]).unwrap();
+        save_calendars(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false), reader],
+        )
+        .unwrap();
         save_events(&conn, id, &[event("shared", "x", MONDAY, 1)], 0).unwrap();
-        assert_eq!(find_event(&conn, id, "x").unwrap().map(|e| e.calendar), Some("shared".into()));
+        assert_eq!(
+            find_event(&conn, id, "x").unwrap().map(|e| e.calendar),
+            Some("shared".into())
+        );
         save_events(&conn, id, &[event("team", "x", MONDAY, 1)], 0).unwrap();
         assert_eq!(
             find_event(&conn, id, "x").unwrap().map(|e| e.calendar),
@@ -2243,7 +2746,13 @@ mod tests {
         )
         .unwrap();
         let found = occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Shown).unwrap();
-        assert_eq!(starts(&found), vec![("across".into(), MONDAY - HOUR), ("inside".into(), MONDAY + 9 * HOUR)]);
+        assert_eq!(
+            starts(&found),
+            vec![
+                ("across".into(), MONDAY - HOUR),
+                ("inside".into(), MONDAY + 9 * HOUR)
+            ]
+        );
     }
 
     #[test]
@@ -2252,7 +2761,14 @@ mod tests {
         let mut standup = event("primary", "standup", MONDAY + 9 * HOUR, 1);
         standup.rules = vec!["RRULE:FREQ=DAILY;COUNT=5".into()];
         save_events(&conn, id, &[standup], 0).unwrap();
-        let found = occurrences(&conn, &[id], MONDAY + DAY, MONDAY + 3 * DAY, CalendarScope::Shown).unwrap();
+        let found = occurrences(
+            &conn,
+            &[id],
+            MONDAY + DAY,
+            MONDAY + 3 * DAY,
+            CalendarScope::Shown,
+        )
+        .unwrap();
         assert_eq!(found.len(), 2);
     }
 
@@ -2265,7 +2781,8 @@ mod tests {
         moved.series = Some("standup".into());
         moved.original_start = Some(MONDAY + DAY + 9 * HOUR);
         save_events(&conn, id, &[standup, moved], 0).unwrap();
-        let found = occurrences(&conn, &[id], MONDAY, MONDAY + 3 * DAY, CalendarScope::Shown).unwrap();
+        let found =
+            occurrences(&conn, &[id], MONDAY, MONDAY + 3 * DAY, CalendarScope::Shown).unwrap();
         assert_eq!(
             starts(&found),
             vec![
@@ -2289,7 +2806,8 @@ mod tests {
         moved.series = Some("standup".into());
         moved.original_start = Some(MONDAY + DAY + 9 * HOUR);
         save_events(&conn, id, &[standup, moved], 0).unwrap();
-        let found = occurrences(&conn, &[id], MONDAY, MONDAY + 2 * DAY, CalendarScope::Shown).unwrap();
+        let found =
+            occurrences(&conn, &[id], MONDAY, MONDAY + 2 * DAY, CalendarScope::Shown).unwrap();
         assert_eq!(starts(&found), vec![("standup".into(), MONDAY + 9 * HOUR)]);
     }
 
@@ -2303,26 +2821,52 @@ mod tests {
         cancelled.original_start = Some(MONDAY + DAY + 9 * HOUR);
         cancelled.status = Status::Cancelled;
         save_events(&conn, id, &[standup, cancelled], 0).unwrap();
-        let found = occurrences(&conn, &[id], MONDAY, MONDAY + 3 * DAY, CalendarScope::Shown).unwrap();
+        let found =
+            occurrences(&conn, &[id], MONDAY, MONDAY + 3 * DAY, CalendarScope::Shown).unwrap();
         assert_eq!(found.len(), 2);
     }
 
     #[test]
     fn a_hidden_calendar_leaves_the_range_unless_asked_for() {
         let (conn, id) = store();
-        save_events(&conn, id, &[event("team", "retro", MONDAY + 9 * HOUR, 1)], 0).unwrap();
+        save_events(
+            &conn,
+            id,
+            &[event("team", "retro", MONDAY + 9 * HOUR, 1)],
+            0,
+        )
+        .unwrap();
         set_shown(&conn, id, "team", false).unwrap();
-        assert!(occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Shown).unwrap().is_empty());
-        assert_eq!(occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::All).unwrap().len(), 1);
+        assert!(
+            occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Shown)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::All)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
     fn a_calendar_taken_off_the_list_leaves_the_range_too() {
         let (conn, id) = store();
-        save_events(&conn, id, &[event("team", "retro", MONDAY + 9 * HOUR, 1)], 0).unwrap();
+        save_events(
+            &conn,
+            id,
+            &[event("team", "retro", MONDAY + 9 * HOUR, 1)],
+            0,
+        )
+        .unwrap();
         set_listed(&conn, id, "team", false).unwrap();
         assert_eq!(unlisted(&conn, id).unwrap(), vec!["team".to_string()]);
-        assert!(occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Shown).unwrap().is_empty());
+        assert!(
+            occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Shown)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2331,7 +2875,11 @@ mod tests {
         set_listed(&conn, id, "team", false).unwrap();
         set_listed(&conn, id, "team", true).unwrap();
         assert!(unlisted(&conn, id).unwrap().is_empty());
-        let team = calendars(&conn, id).unwrap().into_iter().find(|c| c.id == "team").unwrap();
+        let team = calendars(&conn, id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == "team")
+            .unwrap();
         assert!(team.shown);
     }
 
@@ -2339,8 +2887,17 @@ mod tests {
     fn a_colour_chosen_here_outlasts_the_next_read_of_the_calendar_list() {
         let (conn, id) = store();
         set_own_color(&conn, id, "team", Some("#16a766")).unwrap();
-        save_calendars(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
-        let team = calendars(&conn, id).unwrap().into_iter().find(|c| c.id == "team").unwrap();
+        save_calendars(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
+        let team = calendars(&conn, id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == "team")
+            .unwrap();
         assert_eq!(team.color, "#16a766");
     }
 
@@ -2349,7 +2906,11 @@ mod tests {
         let (conn, id) = store();
         set_own_color(&conn, id, "team", Some("#16a766")).unwrap();
         set_own_color(&conn, id, "team", None).unwrap();
-        let team = calendars(&conn, id).unwrap().into_iter().find(|c| c.id == "team").unwrap();
+        let team = calendars(&conn, id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == "team")
+            .unwrap();
         assert_eq!(team.color, "#3584e4");
     }
 
@@ -2361,9 +2922,24 @@ mod tests {
         let mut team = calendar("team", false);
         team.access = Access::Reader;
         save_calendars(&conn, id, &[calendar("primary", true), team]).unwrap();
-        save_events(&conn, id, &[event("team", "retro", MONDAY + 9 * HOUR, 1)], 0).unwrap();
-        assert!(occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Owned).unwrap().is_empty());
-        assert_eq!(occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::All).unwrap().len(), 1);
+        save_events(
+            &conn,
+            id,
+            &[event("team", "retro", MONDAY + 9 * HOUR, 1)],
+            0,
+        )
+        .unwrap();
+        assert!(
+            occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::Owned)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            occurrences(&conn, &[id], MONDAY, MONDAY + DAY, CalendarScope::All)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     /// `occurrences` clones a whole event into every row it
@@ -2383,7 +2959,14 @@ mod tests {
             0,
         )
         .unwrap();
-        let found = occurrences(&conn, &[id], MONDAY, MONDAY + 400 * DAY, CalendarScope::Shown).unwrap();
+        let found = occurrences(
+            &conn,
+            &[id],
+            MONDAY,
+            MONDAY + 400 * DAY,
+            CalendarScope::Shown,
+        )
+        .unwrap();
         assert_eq!(starts(&found), vec![("within".into(), MONDAY + 300 * DAY)]);
     }
 
@@ -2396,7 +2979,14 @@ mod tests {
         let mut standup = event("primary", "standup", MONDAY, 1);
         standup.rules = vec!["RRULE:FREQ=HOURLY;COUNT=600".into()];
         save_events(&conn, id, &[standup], 0).unwrap();
-        let found = occurrences(&conn, &[id], MONDAY, MONDAY + 30 * DAY, CalendarScope::Shown).unwrap();
+        let found = occurrences(
+            &conn,
+            &[id],
+            MONDAY,
+            MONDAY + 30 * DAY,
+            CalendarScope::Shown,
+        )
+        .unwrap();
         assert_eq!(found.len(), 500);
     }
 
@@ -2406,9 +2996,17 @@ mod tests {
         let mut lunch = event("primary", "lunch", MONDAY + 12 * HOUR, 1);
         lunch.place = "Café Império".into();
         let mut review = event("team", "review", MONDAY + DAY, 1);
-        review.guests = vec![Guest { email: "rita@c9dev.pt".into(), name: Some("Rita Lopes".into()), ..Guest::default() }];
+        review.guests = vec![Guest {
+            email: "rita@c9dev.pt".into(),
+            name: Some("Rita Lopes".into()),
+            ..Guest::default()
+        }];
         let mut standup = event("team", "standup", MONDAY + 2 * DAY, 1);
-        standup.guests = vec![Guest { email: "elia@c9dev.pt".into(), name: Some("Élia Constante".into()), ..Guest::default() }];
+        standup.guests = vec![Guest {
+            email: "elia@c9dev.pt".into(),
+            name: Some("Élia Constante".into()),
+            ..Guest::default()
+        }];
         save_events(&conn, id, &[lunch, review, standup], 0).unwrap();
         let ids = |text: &str| {
             search(&conn, &[id], text, MONDAY, CalendarScope::Shown, 10)
@@ -2419,7 +3017,11 @@ mod tests {
         };
         assert_eq!(ids("império"), vec!["lunch"]);
         assert_eq!(ids("RITA"), vec!["review"]);
-        assert_eq!(ids("ÉLIA"), vec!["standup"], "penguin_fold folds beyond ASCII, so a search for the upper case still finds Élia");
+        assert_eq!(
+            ids("ÉLIA"),
+            vec!["standup"],
+            "penguin_fold folds beyond ASCII, so a search for the upper case still finds Élia"
+        );
         assert!(ids("nothing").is_empty());
     }
 
@@ -2435,7 +3037,11 @@ mod tests {
         planning.description = "Br<b>ead</b> for the team".into();
         save_events(&conn, id, &[planning], 0).unwrap();
         let found = search(&conn, &[id], "bread", MONDAY, CalendarScope::Shown, 10).unwrap();
-        assert_eq!(found.len(), 1, "a word an inline tag splits must still match once its tags are read as text");
+        assert_eq!(
+            found.len(),
+            1,
+            "a word an inline tag splits must still match once its tags are read as text"
+        );
     }
 
     /// A `<br>` line break must not itself read as the word "br": the
@@ -2448,14 +3054,18 @@ mod tests {
         sync.description = "Notes<br>more notes".into();
         save_events(&conn, id, &[sync], 0).unwrap();
         let found = search(&conn, &[id], "br", MONDAY, CalendarScope::Shown, 10).unwrap();
-        assert!(found.is_empty(), "the <br> tag's own name must not match a search for it");
+        assert!(
+            found.is_empty(),
+            "the <br> tag's own name must not match a search for it"
+        );
     }
 
     #[test]
     fn a_search_stops_at_the_requested_limit() {
         let (conn, id) = store();
-        let events: Vec<Event> =
-            (0..5).map(|n| event("primary", &format!("standup{n}"), MONDAY + n * HOUR, 1)).collect();
+        let events: Vec<Event> = (0..5)
+            .map(|n| event("primary", &format!("standup{n}"), MONDAY + n * HOUR, 1))
+            .collect();
         save_events(&conn, id, &events, 0).unwrap();
         let found = search(&conn, &[id], "standup", MONDAY, CalendarScope::Shown, 3).unwrap();
         assert_eq!(found.len(), 3);
@@ -2467,8 +3077,9 @@ mod tests {
     #[test]
     fn a_search_reads_at_most_500_rows_per_account() {
         let (conn, id) = store();
-        let events: Vec<Event> =
-            (0..510).map(|n| event("primary", &format!("standup{n}"), MONDAY + n * HOUR, 1)).collect();
+        let events: Vec<Event> = (0..510)
+            .map(|n| event("primary", &format!("standup{n}"), MONDAY + n * HOUR, 1))
+            .collect();
         save_events(&conn, id, &events, 0).unwrap();
         let found = search(&conn, &[id], "standup", MONDAY, CalendarScope::Shown, 1000).unwrap();
         assert_eq!(found.len(), 500);
@@ -2482,15 +3093,37 @@ mod tests {
     #[test]
     fn a_search_keeps_upcoming_events_when_500_past_ones_already_matched() {
         let (conn, id) = store();
-        let past: Vec<Event> =
-            (0..500).map(|n| event("primary", &format!("standup-old{n}"), MONDAY - (500 - n) * DAY, 1)).collect();
+        let past: Vec<Event> = (0..500)
+            .map(|n| {
+                event(
+                    "primary",
+                    &format!("standup-old{n}"),
+                    MONDAY - (500 - n) * DAY,
+                    1,
+                )
+            })
+            .collect();
         save_events(&conn, id, &past, 0).unwrap();
-        let soon: Vec<Event> =
-            (0..5).map(|n| event("primary", &format!("standup-soon{n}"), MONDAY + (n + 1) * DAY, 1)).collect();
+        let soon: Vec<Event> = (0..5)
+            .map(|n| {
+                event(
+                    "primary",
+                    &format!("standup-soon{n}"),
+                    MONDAY + (n + 1) * DAY,
+                    1,
+                )
+            })
+            .collect();
         save_events(&conn, id, &soon, 0).unwrap();
         let found = search(&conn, &[id], "standup", MONDAY, CalendarScope::Shown, 505).unwrap();
-        let kept_soon = found.iter().filter(|o| o.event.id.starts_with("standup-soon")).count();
-        assert_eq!(kept_soon, 5, "every upcoming match must survive the cap, not just whichever 500 rows came first");
+        let kept_soon = found
+            .iter()
+            .filter(|o| o.event.id.starts_with("standup-soon"))
+            .count();
+        assert_eq!(
+            kept_soon, 5,
+            "every upcoming match must survive the cap, not just whichever 500 rows came first"
+        );
     }
 
     #[test]
@@ -2519,16 +3152,42 @@ mod tests {
         save_events(&conn, id, &[standup, moved], 0).unwrap();
         let found = search(&conn, &[id], "standup", MONDAY, CalendarScope::Shown, 10).unwrap();
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].start, MONDAY + 9 * HOUR, "the earliest coming occurrence wins");
+        assert_eq!(
+            found[0].start,
+            MONDAY + 9 * HOUR,
+            "the earliest coming occurrence wins"
+        );
     }
 
     #[test]
     fn a_search_reads_shown_calendars_only() {
         let (conn, id) = store();
-        save_events(&conn, id, &[event("team", "hidden-lunch", MONDAY + HOUR, 1)], 0).unwrap();
+        save_events(
+            &conn,
+            id,
+            &[event("team", "hidden-lunch", MONDAY + HOUR, 1)],
+            0,
+        )
+        .unwrap();
         set_shown(&conn, id, "team", false).unwrap();
-        assert!(search(&conn, &[id], "hidden-lunch", MONDAY, CalendarScope::Shown, 10).unwrap().is_empty());
-        assert_eq!(search(&conn, &[id], "hidden-lunch", MONDAY, CalendarScope::All, 10).unwrap().len(), 1);
+        assert!(
+            search(
+                &conn,
+                &[id],
+                "hidden-lunch",
+                MONDAY,
+                CalendarScope::Shown,
+                10
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert_eq!(
+            search(&conn, &[id], "hidden-lunch", MONDAY, CalendarScope::All, 10)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -2554,7 +3213,9 @@ mod tests {
         enqueue(&conn, id, ChangeKind::Remove, &dinner).unwrap();
         let held = queued(&conn, id).unwrap();
         assert_eq!(
-            held.iter().map(|q| (q.event.as_str(), q.kind)).collect::<Vec<_>>(),
+            held.iter()
+                .map(|q| (q.event.as_str(), q.kind))
+                .collect::<Vec<_>>(),
             vec![("lunch", ChangeKind::Save), ("dinner", ChangeKind::Remove)]
         );
         assert_eq!(held[0].body.as_ref().map(|e| e.id.as_str()), Some("lunch"));
@@ -2573,7 +3234,10 @@ mod tests {
         enqueue(&conn, id, ChangeKind::Save, &lunch).unwrap();
         let held = queued(&conn, id).unwrap();
         assert_eq!(held.len(), 1);
-        assert_eq!(held[0].body.as_ref().map(|e| e.title.as_str()), Some("Lunch with Ana"));
+        assert_eq!(
+            held[0].body.as_ref().map(|e| e.title.as_str()),
+            Some("Lunch with Ana")
+        );
     }
 
     /// Removing an event this computer made
@@ -2599,7 +3263,11 @@ mod tests {
         let held = queued(&conn, id).unwrap();
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].kind, ChangeKind::Remove);
-        assert_eq!(held[0].body.as_ref().map(|b| b.uid.as_str()), Some("lunch@example.com"), "the removal keeps its event's UID");
+        assert_eq!(
+            held[0].body.as_ref().map(|b| b.uid.as_str()),
+            Some("lunch@example.com"),
+            "the removal keeps its event's UID"
+        );
     }
 
     fn going(answer: Answer, note: Option<&str>) -> QueuedAnswer {
@@ -2616,8 +3284,22 @@ mod tests {
     #[test]
     fn two_answers_before_a_send_queue_the_latest_one() {
         let (conn, id) = store();
-        enqueue_answer(&conn, id, "primary", "standup_20261020T090000Z", &going(Answer::Yes, Some("Late"))).unwrap();
-        enqueue_answer(&conn, id, "primary", "standup_20261020T090000Z", &going(Answer::Maybe, None)).unwrap();
+        enqueue_answer(
+            &conn,
+            id,
+            "primary",
+            "standup_20261020T090000Z",
+            &going(Answer::Yes, Some("Late")),
+        )
+        .unwrap();
+        enqueue_answer(
+            &conn,
+            id,
+            "primary",
+            "standup_20261020T090000Z",
+            &going(Answer::Maybe, None),
+        )
+        .unwrap();
         let held = queued(&conn, id).unwrap();
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].kind, ChangeKind::Answer);
@@ -2642,13 +3324,18 @@ mod tests {
     #[test]
     fn a_sent_answer_moves_the_edit_behind_it_to_the_new_version() {
         let (conn, id) = store();
-        let standup = Event { pending: true, ..event("primary", "standup", MONDAY, 1) };
+        let standup = Event {
+            pending: true,
+            ..event("primary", "standup", MONDAY, 1)
+        };
         save_events(&conn, id, std::slice::from_ref(&standup), 0).unwrap();
         enqueue_answer(&conn, id, "primary", "standup", &going(Answer::No, None)).unwrap();
         let answer_seq = queued(&conn, id).unwrap()[0].seq;
         finish_answer(&conn, id, answer_seq, "primary", "standup", "\"2\"").unwrap();
         assert!(queued(&conn, id).unwrap().is_empty());
-        let row = super::event(&conn, id, "primary", "standup").unwrap().unwrap();
+        let row = super::event(&conn, id, "primary", "standup")
+            .unwrap()
+            .unwrap();
         assert_eq!((row.etag.as_str(), row.pending), ("\"2\"", false));
 
         enqueue_answer(&conn, id, "primary", "standup", &going(Answer::Yes, None)).unwrap();
@@ -2692,7 +3379,15 @@ mod tests {
         save_events(&conn, id, &rows, 1).unwrap();
         keep_occurrences(&conn, id, "primary", "standup", &["kept".to_string()]).unwrap();
         let held = |name: &str| super::event(&conn, id, "primary", name).unwrap().is_some();
-        assert_eq!([held("standup"), held("kept"), held("taken-back"), held("queued")], [true, true, false, true]);
+        assert_eq!(
+            [
+                held("standup"),
+                held("kept"),
+                held("taken-back"),
+                held("queued")
+            ],
+            [true, true, false, true]
+        );
     }
 
     /// A page-at-a-time read marks each row
@@ -2707,7 +3402,11 @@ mod tests {
         save_events(&conn, id, &[kept], 1).unwrap();
         sweep(&conn, id, "primary", 2).unwrap();
         assert!(super::event(&conn, id, "primary", "old").unwrap().is_none());
-        assert!(super::event(&conn, id, "primary", "kept").unwrap().is_some());
+        assert!(
+            super::event(&conn, id, "primary", "kept")
+                .unwrap()
+                .is_some()
+        );
     }
 
     /// How far back a calendar's copy reaches is kept per calendar, and a
@@ -2715,11 +3414,24 @@ mod tests {
     #[test]
     fn how_far_back_a_calendar_reaches_is_remembered_and_survives_a_list_refresh() {
         let (conn, id) = store();
-        assert_eq!(reach(&conn, id, "primary").unwrap(), None, "unknown before the first read");
+        assert_eq!(
+            reach(&conn, id, "primary").unwrap(),
+            None,
+            "unknown before the first read"
+        );
         set_reach(&conn, id, "primary", 1_000).unwrap();
         assert_eq!(reach(&conn, id, "primary").unwrap(), Some(1_000));
-        assert_eq!(reach(&conn, id, "team").unwrap(), None, "another calendar is unaffected");
-        save_calendars(&conn, id, &[calendar("primary", true), calendar("team", false)]).unwrap();
+        assert_eq!(
+            reach(&conn, id, "team").unwrap(),
+            None,
+            "another calendar is unaffected"
+        );
+        save_calendars(
+            &conn,
+            id,
+            &[calendar("primary", true), calendar("team", false)],
+        )
+        .unwrap();
         assert_eq!(reach(&conn, id, "primary").unwrap(), Some(1_000));
     }
 
@@ -2772,9 +3484,16 @@ mod tests {
         assert!(!finish_change(&conn, id, seq, &lunch, "\"2\"").unwrap());
         let held = queued(&conn, id).unwrap();
         assert_eq!(held.len(), 1);
-        assert_eq!(held[0].kind, ChangeKind::Save, "a create demotes to a save once the id exists");
+        assert_eq!(
+            held[0].kind,
+            ChangeKind::Save,
+            "a create demotes to a save once the id exists"
+        );
         assert_eq!(held[0].etag.as_deref(), Some("\"2\""));
-        assert_eq!(held[0].body.as_ref().map(|e| e.title.as_str()), Some("Lunch with Ana"));
+        assert_eq!(
+            held[0].body.as_ref().map(|e| e.title.as_str()),
+            Some("Lunch with Ana")
+        );
     }
 
     /// A delete made while the event's create is in flight drops the
@@ -2815,8 +3534,20 @@ mod tests {
     #[test]
     fn the_next_change_is_the_first_queued_after_the_one_named() {
         let (conn, id) = store();
-        enqueue(&conn, id, ChangeKind::Create, &event("primary", "one", MONDAY, 1)).unwrap();
-        enqueue(&conn, id, ChangeKind::Create, &event("primary", "two", MONDAY, 1)).unwrap();
+        enqueue(
+            &conn,
+            id,
+            ChangeKind::Create,
+            &event("primary", "one", MONDAY, 1),
+        )
+        .unwrap();
+        enqueue(
+            &conn,
+            id,
+            ChangeKind::Create,
+            &event("primary", "two", MONDAY, 1),
+        )
+        .unwrap();
         let first = next_change(&conn, id, 0).unwrap().unwrap();
         assert_eq!(first.event, "one");
         let second = next_change(&conn, id, first.seq).unwrap().unwrap();
@@ -2833,13 +3564,24 @@ mod tests {
         moved.series = Some("standup".into());
         moved.original_start = Some(MONDAY + DAY + 9 * HOUR);
         moved.pending = true;
-        moved.guests = vec![Guest { email: "ann@example.com".into(), ..Guest::default() }];
+        moved.guests = vec![Guest {
+            email: "ann@example.com".into(),
+            ..Guest::default()
+        }];
         save_events(&conn, id, &[standup, moved], 1).unwrap();
         let found = changed_occurrences(&conn, id, "primary", "standup").unwrap();
-        assert_eq!(found.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["standup_tue"]);
+        assert_eq!(
+            found.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["standup_tue"]
+        );
         assert_eq!(found[0].guests.len(), 1, "with its guests");
         settle(&conn, id, "primary", "standup_tue").unwrap();
-        assert!(!super::event(&conn, id, "primary", "standup_tue").unwrap().unwrap().pending);
+        assert!(
+            !super::event(&conn, id, "primary", "standup_tue")
+                .unwrap()
+                .unwrap()
+                .pending
+        );
     }
 
     /// A cancelled occurrence can be removed twice before a send, once by
@@ -2861,13 +3603,19 @@ mod tests {
         let (conn, id) = store();
         let lunch = event("primary", "lunch", MONDAY, 1);
         enqueue(&conn, id, ChangeKind::Remove, &lunch).unwrap();
-        let edited = Event { title: "Late lunch".into(), ..lunch };
+        let edited = Event {
+            title: "Late lunch".into(),
+            ..lunch
+        };
         enqueue(&conn, id, ChangeKind::Save, &edited).unwrap();
         let held = queued(&conn, id).unwrap();
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].kind, ChangeKind::Save);
         assert_eq!(held[0].etag.as_deref(), Some("\"1\""));
-        assert_eq!(held[0].body.as_ref().map(|e| e.title.as_str()), Some("Late lunch"));
+        assert_eq!(
+            held[0].body.as_ref().map(|e| e.title.as_str()),
+            Some("Late lunch")
+        );
     }
 
     /// A held change persists so a crash or a quit before its Undo toast
@@ -2876,10 +3624,23 @@ mod tests {
     fn a_held_change_survives_to_the_next_start() {
         let (conn, id) = store();
         let dentist = event("primary", "dentist", MONDAY, 1);
-        let moved = Event { title: "Moved".into(), ..dentist.clone() };
-        save_holding(&conn, id, &[Step::Save(moved.clone())], std::slice::from_ref(&dentist), Notify::Guests).unwrap();
+        let moved = Event {
+            title: "Moved".into(),
+            ..dentist.clone()
+        };
+        save_holding(
+            &conn,
+            id,
+            &[Step::Save(moved.clone())],
+            std::slice::from_ref(&dentist),
+            Notify::Guests,
+        )
+        .unwrap();
 
-        assert_eq!(holdings(&conn).unwrap(), vec![(id, vec![Step::Save(moved)], vec![dentist], Notify::Guests)]);
+        assert_eq!(
+            holdings(&conn).unwrap(),
+            vec![(id, vec![Step::Save(moved)], vec![dentist], Notify::Guests)]
+        );
     }
 
     /// A move the person chose to keep from the guests stays quiet when a
@@ -2887,7 +3648,10 @@ mod tests {
     #[test]
     fn a_held_change_keeps_the_choice_not_to_tell_the_guests() {
         let (conn, id) = store();
-        let remove = vec![Step::Remove { calendar: "primary".into(), id: "dentist".into() }];
+        let remove = vec![Step::Remove {
+            calendar: "primary".into(),
+            id: "dentist".into(),
+        }];
         save_holding(&conn, id, &remove, &[], Notify::Nobody).unwrap();
 
         assert_eq!(holdings(&conn).unwrap()[0].3, Notify::Nobody);
@@ -2897,10 +3661,29 @@ mod tests {
     fn a_queued_change_keeps_the_choice_not_to_tell_the_guests() {
         let (conn, id) = store();
         let lunch = event("primary", "lunch", MONDAY, 1);
-        enqueue_after(&conn, id, ChangeKind::Save, &lunch, None, None, Notify::Nobody).unwrap();
-        enqueue(&conn, id, ChangeKind::Remove, &event("primary", "dinner", MONDAY, 1)).unwrap();
+        enqueue_after(
+            &conn,
+            id,
+            ChangeKind::Save,
+            &lunch,
+            None,
+            None,
+            Notify::Nobody,
+        )
+        .unwrap();
+        enqueue(
+            &conn,
+            id,
+            ChangeKind::Remove,
+            &event("primary", "dinner", MONDAY, 1),
+        )
+        .unwrap();
 
-        let notices: Vec<Notify> = queued(&conn, id).unwrap().iter().map(|q| q.notify).collect();
+        let notices: Vec<Notify> = queued(&conn, id)
+            .unwrap()
+            .iter()
+            .map(|q| q.notify)
+            .collect();
         assert_eq!(notices, [Notify::Nobody, Notify::Guests]);
     }
 
@@ -2912,7 +3695,16 @@ mod tests {
         let (conn, id) = store();
         let lunch = event("primary", "lunch", MONDAY, 1);
         enqueue(&conn, id, ChangeKind::Create, &lunch).unwrap();
-        enqueue_after(&conn, id, ChangeKind::Save, &lunch, None, None, Notify::Nobody).unwrap();
+        enqueue_after(
+            &conn,
+            id,
+            ChangeKind::Save,
+            &lunch,
+            None,
+            None,
+            Notify::Nobody,
+        )
+        .unwrap();
 
         assert_eq!(queued(&conn, id).unwrap()[0].notify, Notify::Guests);
     }
@@ -2924,10 +3716,22 @@ mod tests {
         let (conn, id) = store();
         let lunch = event("primary", "lunch", MONDAY, 1);
         enqueue(&conn, id, ChangeKind::Save, &lunch).unwrap();
-        enqueue_after(&conn, id, ChangeKind::Remove, &lunch, None, None, Notify::Nobody).unwrap();
+        enqueue_after(
+            &conn,
+            id,
+            ChangeKind::Remove,
+            &lunch,
+            None,
+            None,
+            Notify::Nobody,
+        )
+        .unwrap();
 
         let held = queued(&conn, id).unwrap();
-        assert_eq!((held[0].kind, held[0].notify), (ChangeKind::Remove, Notify::Nobody));
+        assert_eq!(
+            (held[0].kind, held[0].notify),
+            (ChangeKind::Remove, Notify::Nobody)
+        );
     }
 
     /// Only one change is held at a time, so holding another replaces the
@@ -2935,11 +3739,19 @@ mod tests {
     #[test]
     fn holding_another_change_replaces_the_persisted_one() {
         let (conn, id) = store();
-        let remove = |event: &str| vec![Step::Remove { calendar: "primary".into(), id: event.into() }];
+        let remove = |event: &str| {
+            vec![Step::Remove {
+                calendar: "primary".into(),
+                id: event.into(),
+            }]
+        };
         save_holding(&conn, id, &remove("a"), &[], Notify::Guests).unwrap();
         save_holding(&conn, id, &remove("b"), &[], Notify::Guests).unwrap();
 
-        assert_eq!(holdings(&conn).unwrap(), vec![(id, remove("b"), Vec::new(), Notify::Guests)]);
+        assert_eq!(
+            holdings(&conn).unwrap(),
+            vec![(id, remove("b"), Vec::new(), Notify::Guests)]
+        );
     }
 
     /// Queuing or reverting a held change clears its persisted row, so a
@@ -2947,8 +3759,17 @@ mod tests {
     #[test]
     fn clearing_a_held_change_drops_its_persisted_row() {
         let (conn, id) = store();
-        save_holding(&conn, id, &[Step::Remove { calendar: "primary".into(), id: "a".into() }], &[], Notify::Guests)
-            .unwrap();
+        save_holding(
+            &conn,
+            id,
+            &[Step::Remove {
+                calendar: "primary".into(),
+                id: "a".into(),
+            }],
+            &[],
+            Notify::Guests,
+        )
+        .unwrap();
 
         clear_holding(&conn, id).unwrap();
 
@@ -2962,11 +3783,19 @@ mod tests {
         cancelled.pending = true;
         save_events(&conn, id, std::slice::from_ref(&cancelled), 1).unwrap();
         enqueue(&conn, id, ChangeKind::Remove, &cancelled).unwrap();
-        assert_eq!(removing_ids(&conn, id, "primary").unwrap(), HashSet::from(["standup_tue".to_string()]));
+        assert_eq!(
+            removing_ids(&conn, id, "primary").unwrap(),
+            HashSet::from(["standup_tue".to_string()])
+        );
         let seq = queued(&conn, id).unwrap()[0].seq;
         finish_removal(&conn, id, seq).unwrap();
         assert!(queued(&conn, id).unwrap().is_empty());
-        assert!(!super::event(&conn, id, "primary", "standup_tue").unwrap().unwrap().pending);
+        assert!(
+            !super::event(&conn, id, "primary", "standup_tue")
+                .unwrap()
+                .unwrap()
+                .pending
+        );
     }
 
     /// The edit landed on the removal's row while the removal was on its
@@ -3008,8 +3837,18 @@ mod tests {
     #[test]
     fn a_uid_on_a_hidden_calendar_finds_nothing() {
         let (conn, id) = store();
-        save_events(&conn, id, &[event("team", "retro", MONDAY + 9 * HOUR, 1)], 0).unwrap();
+        save_events(
+            &conn,
+            id,
+            &[event("team", "retro", MONDAY + 9 * HOUR, 1)],
+            0,
+        )
+        .unwrap();
         set_shown(&conn, id, "team", false).unwrap();
-        assert!(with_uid(&conn, id, "retro@example.com", MONDAY, MONDAY + DAY).unwrap().is_empty());
+        assert!(
+            with_uid(&conn, id, "retro@example.com", MONDAY, MONDAY + DAY)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

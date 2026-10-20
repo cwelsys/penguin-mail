@@ -53,7 +53,12 @@ impl Grab {
             Handle::Body | Handle::Start => start,
             Handle::End => end,
         };
-        Grab { handle, start, end, offset: pointer - edge }
+        Grab {
+            handle,
+            start,
+            end,
+            offset: pointer - edge,
+        }
     }
 
     /// The event's span with the pointer at `pointer`, unsnapped, so the
@@ -70,7 +75,11 @@ impl Grab {
     /// Where the event lands on release: on the nearest quarter hour, and
     /// inside `day`, which the rubber band only lets the card leave for a
     /// moment.
-    pub fn settle(&self, pointer: EpochMillis, day: (EpochMillis, EpochMillis)) -> (EpochMillis, EpochMillis) {
+    pub fn settle(
+        &self,
+        pointer: EpochMillis,
+        day: (EpochMillis, EpochMillis),
+    ) -> (EpochMillis, EpochMillis) {
         let (start, end) = self.follow(pointer);
         match self.handle {
             Handle::Body => {
@@ -81,9 +90,15 @@ impl Grab {
             }
             Handle::Start => {
                 let latest = end - SHORTEST;
-                (snap(start, STEP_MINUTES).clamp(day.0.min(latest), latest), end)
+                (
+                    snap(start, STEP_MINUTES).clamp(day.0.min(latest), latest),
+                    end,
+                )
             }
-            Handle::End => (start, snap(end, STEP_MINUTES).clamp(start + SHORTEST, day.1.max(start + SHORTEST))),
+            Handle::End => (
+                start,
+                snap(end, STEP_MINUTES).clamp(start + SHORTEST, day.1.max(start + SHORTEST)),
+            ),
         }
     }
 }
@@ -199,7 +214,11 @@ pub fn velocity(samples: &VecDeque<(i64, f64)>) -> f64 {
         return 0.0;
     };
     let seconds = (t1 - t0) as f64 / 1_000_000.0;
-    if seconds <= 0.0 { 0.0 } else { (y1 - y0) / seconds }
+    if seconds <= 0.0 {
+        0.0
+    } else {
+        (y1 - y0) / seconds
+    }
 }
 
 /// The event's span moved by `steps` quarter hours, keeping its length:
@@ -220,7 +239,11 @@ pub fn stretch(start: EpochMillis, end: EpochMillis, steps: i64) -> (EpochMillis
 /// The event stretched by `steps` quarter hours at its start, never
 /// closer to its end than `SHORTEST`: the keyboard path Ctrl+Shift+Up
 /// and Ctrl+Shift+Down offer beside the drag of a card's top edge.
-pub fn stretch_start(start: EpochMillis, end: EpochMillis, steps: i64) -> (EpochMillis, EpochMillis) {
+pub fn stretch_start(
+    start: EpochMillis,
+    end: EpochMillis,
+    steps: i64,
+) -> (EpochMillis, EpochMillis) {
     ((start + steps * STEP).min(end - SHORTEST), end)
 }
 
@@ -248,7 +271,13 @@ pub fn month_day_at(x: f64, y: f64, width: f64, weeks: &[i32], rtl: bool) -> Opt
 /// The event moved `days` days: an all-day event by whole UTC days, as
 /// its dates are UTC dates, and a timed one at the same wall-clock time
 /// in `zone` ([`nudge_days`]).
-pub fn by_days(start: EpochMillis, end: EpochMillis, all_day: bool, days: i64, zone: Tz) -> (EpochMillis, EpochMillis) {
+pub fn by_days(
+    start: EpochMillis,
+    end: EpochMillis,
+    all_day: bool,
+    days: i64,
+    zone: Tz,
+) -> (EpochMillis, EpochMillis) {
     nudge_days(start, end, days, if all_day { Tz::UTC } else { zone })
 }
 
@@ -276,7 +305,12 @@ pub fn edge_at(x: f64, width: f64) -> Option<Edge> {
 
 /// An all-day bar with its `edge` moved `days` days, never shorter than
 /// one day.
-pub fn resize_days(start: EpochMillis, end: EpochMillis, edge: Edge, days: i64) -> (EpochMillis, EpochMillis) {
+pub fn resize_days(
+    start: EpochMillis,
+    end: EpochMillis,
+    edge: Edge,
+    days: i64,
+) -> (EpochMillis, EpochMillis) {
     match edge {
         Edge::Start => ((start + days * DAY).min(end - DAY), end),
         Edge::End => (start, (end + days * DAY).max(start + DAY)),
@@ -302,16 +336,28 @@ pub fn strip_landing(
         (true, None) => by_days(start, end, true, days, zone),
         (true, Some(edge)) => resize_days(start, end, edge, days),
         (false, None) => nudge_days(start, end, days, zone),
-        (false, Some(Edge::Start)) => (shift_days(start, days, zone).min(shift_days(end, -1, zone)), end),
-        (false, Some(Edge::End)) => (start, shift_days(end, days, zone).max(shift_days(start, 1, zone))),
+        (false, Some(Edge::Start)) => (
+            shift_days(start, days, zone).min(shift_days(end, -1, zone)),
+            end,
+        ),
+        (false, Some(Edge::End)) => (
+            start,
+            shift_days(end, days, zone).max(shift_days(start, 1, zone)),
+        ),
     };
-    Landing { start, end, all_day }
+    Landing {
+        start,
+        end,
+        all_day,
+    }
 }
 
 /// The span of an event made all-day on `day`: UTC midnight to the next,
 /// the way an all-day event keeps its dates.
 pub fn all_day_on(day: NaiveDate) -> (EpochMillis, EpochMillis) {
-    let midnight = day.and_hms_opt(0, 0, 0).map_or(0, |t| t.and_utc().timestamp_millis());
+    let midnight = day
+        .and_hms_opt(0, 0, 0)
+        .map_or(0, |t| t.and_utc().timestamp_millis());
     (midnight, midnight + DAY)
 }
 
@@ -352,15 +398,15 @@ pub fn grid_key(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> Option
         return None;
     }
     let alt = modifiers.contains(ModifierType::ALT_MASK);
-    let control = modifiers.contains(ModifierType::CONTROL_MASK);
+    let primary = modifiers.contains(crate::ui::PRIMARY);
     let steps = match key {
         Key::Up => -1,
         Key::Down => 1,
-        Key::Left if !alt && !control => return Some(GridKey::Days(-1)),
-        Key::Right if !alt && !control => return Some(GridKey::Days(1)),
+        Key::Left if !alt && !primary => return Some(GridKey::Days(-1)),
+        Key::Right if !alt && !primary => return Some(GridKey::Days(1)),
         _ => return None,
     };
-    match (alt, control) {
+    match (alt, primary) {
         (false, false) => Some(GridKey::Move(steps)),
         (true, false) => Some(GridKey::End(steps)),
         (false, true) => Some(GridKey::Start(steps)),
@@ -374,7 +420,12 @@ pub fn grid_key(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> Option
 /// date and keeping the same local time, rather than adding a fixed
 /// number of milliseconds, keeps the clock steady across a change to
 /// `zone`'s own offset (see the rrule-until-dst skill).
-pub fn nudge_days(start: EpochMillis, end: EpochMillis, days: i64, zone: Tz) -> (EpochMillis, EpochMillis) {
+pub fn nudge_days(
+    start: EpochMillis,
+    end: EpochMillis,
+    days: i64,
+    zone: Tz,
+) -> (EpochMillis, EpochMillis) {
     (shift_days(start, days, zone), shift_days(end, days, zone))
 }
 
@@ -383,9 +434,13 @@ pub fn nudge_days(start: EpochMillis, end: EpochMillis, days: i64, zone: Tz) -> 
 /// the near-impossible chance a date this far out overflows, or a local
 /// time a clock change skips entirely.
 fn shift_days(at: EpochMillis, days: i64, zone: Tz) -> EpochMillis {
-    let Some(utc) = DateTime::<Utc>::from_timestamp_millis(at) else { return at };
+    let Some(utc) = DateTime::<Utc>::from_timestamp_millis(at) else {
+        return at;
+    };
     let local = utc.with_timezone(&zone);
-    let Some(date) = shift_date(local.date_naive(), days) else { return at };
+    let Some(date) = shift_date(local.date_naive(), days) else {
+        return at;
+    };
     let naive = date.and_time(local.time());
     zone.from_local_datetime(&naive)
         .earliest()
@@ -419,7 +474,11 @@ pub struct Nudges {
 impl Nudges {
     /// A run that has not moved the card yet, started at `now`.
     pub fn start(from: (EpochMillis, EpochMillis), now: i64) -> Nudges {
-        Nudges { from, to: from, last_press: now }
+        Nudges {
+            from,
+            to: from,
+            last_press: now,
+        }
     }
 
     /// One more press, which put the card at `to`.
@@ -445,7 +504,12 @@ impl Nudges {
 /// write to, the account must offer a calendar and not have withheld it,
 /// and the event must not be a guest's own event or already leaving
 /// through a queued removal.
-pub fn can_move(o: &Occurrence, access: Access, offers_calendar: bool, withheld_calendar: bool) -> bool {
+pub fn can_move(
+    o: &Occurrence,
+    access: Access,
+    offers_calendar: bool,
+    withheld_calendar: bool,
+) -> bool {
     access.can_write()
         && offers_calendar
         && !withheld_calendar
@@ -464,7 +528,10 @@ mod tests {
     fn a_dragged_event_stays_under_the_pointer_where_it_was_grabbed() {
         // Grabbed 20 minutes into a 10:00 to 11:00 event.
         let grab = Grab::new(Handle::Body, 10 * H, 11 * H, 10 * H + 20 * M);
-        assert_eq!(grab.follow(13 * H + 27 * M), (13 * H + 7 * M, 14 * H + 7 * M));
+        assert_eq!(
+            grab.follow(13 * H + 27 * M),
+            (13 * H + 7 * M, 14 * H + 7 * M)
+        );
     }
 
     #[test]
@@ -473,7 +540,10 @@ mod tests {
         let day = (0, 24 * H);
         // 13:07 is nearer 13:00 than 13:15.
         assert_eq!(grab.settle(13 * H + 27 * M, day), (13 * H, 14 * H));
-        assert_eq!(grab.settle(13 * H + 29 * M, day), (13 * H + 15 * M, 14 * H + 15 * M));
+        assert_eq!(
+            grab.settle(13 * H + 29 * M, day),
+            (13 * H + 15 * M, 14 * H + 15 * M)
+        );
     }
 
     #[test]
@@ -503,13 +573,19 @@ mod tests {
     #[test]
     fn a_drag_across_empty_time_covers_whole_quarter_hours() {
         assert_eq!(selection(10 * H + 50 * M, 10 * H + 5 * M), (10 * H, 11 * H));
-        assert_eq!(selection(10 * H + 3 * M, 10 * H + 4 * M), (10 * H, 10 * H + SHORTEST));
+        assert_eq!(
+            selection(10 * H + 3 * M, 10 * H + 4 * M),
+            (10 * H, 10 * H + SHORTEST)
+        );
     }
 
     #[test]
     fn a_press_under_the_threshold_is_a_click() {
         assert!(is_click(2.0, 1.0, 8.0));
-        assert!(!is_click(6.0, 6.0, 8.0), "8.49 px of travel passes an 8 px threshold");
+        assert!(
+            !is_click(6.0, 6.0, 8.0),
+            "8.49 px of travel passes an 8 px threshold"
+        );
         assert!(is_click(0.0, 0.0, 8.0));
     }
 
@@ -527,7 +603,10 @@ mod tests {
 
     #[test]
     fn only_the_second_press_opens_the_editor() {
-        assert!(!opens_editor(1), "the first press leaves the popover the button's own click opens");
+        assert!(
+            !opens_editor(1),
+            "the first press leaves the popover the button's own click opens"
+        );
         assert!(opens_editor(2));
         assert!(!opens_editor(3), "a third press opens nothing more");
     }
@@ -571,10 +650,22 @@ mod tests {
     fn a_new_event_starts_where_the_person_is() {
         let range = (0, 7 * 24 * H);
         let morning = 9 * H;
-        assert_eq!(new_slot(Some((10 * H, 11 * H)), Some(15 * H), 30 * H, range, morning), (11 * H, 12 * H));
-        assert_eq!(new_slot(None, Some(15 * H), 30 * H, range, morning), (15 * H, 16 * H));
-        assert_eq!(new_slot(None, None, 30 * H + 5 * M, range, morning), (30 * H + 15 * M, 31 * H + 15 * M));
-        assert_eq!(new_slot(None, None, 9 * 24 * H, range, morning), (9 * H, 10 * H));
+        assert_eq!(
+            new_slot(Some((10 * H, 11 * H)), Some(15 * H), 30 * H, range, morning),
+            (11 * H, 12 * H)
+        );
+        assert_eq!(
+            new_slot(None, Some(15 * H), 30 * H, range, morning),
+            (15 * H, 16 * H)
+        );
+        assert_eq!(
+            new_slot(None, None, 30 * H + 5 * M, range, morning),
+            (30 * H + 15 * M, 31 * H + 15 * M)
+        );
+        assert_eq!(
+            new_slot(None, None, 9 * 24 * H, range, morning),
+            (9 * H, 10 * H)
+        );
     }
 
     #[test]
@@ -595,7 +686,11 @@ mod tests {
         use std::sync::Arc;
         Occurrence {
             account_id: 1,
-            event: Arc::new(Event { all_day, status, ..Event::default() }),
+            event: Arc::new(Event {
+                all_day,
+                status,
+                ..Event::default()
+            }),
             start: 0,
             end: H,
         }
@@ -606,18 +701,42 @@ mod tests {
         use mailrs_domain::calendar::Status;
         let o = timed(false, Status::Confirmed);
         assert!(can_move(&o, Access::Owner, true, false));
-        assert!(!can_move(&o, Access::Reader, true, false), "a read-only calendar starts no drag");
-        assert!(!can_move(&o, Access::Owner, false, false), "an account with no calendar offer starts no drag");
-        assert!(!can_move(&o, Access::Owner, true, true), "a withheld calendar permission starts no drag");
-        assert!(can_move(&timed(true, Status::Confirmed), Access::Owner, true, false), "an all-day event drags in the all-day row and Month");
-        assert!(!can_move(&timed(false, Status::Cancelled), Access::Owner, true, false), "a cancelled occurrence, on its way out, starts no drag");
+        assert!(
+            !can_move(&o, Access::Reader, true, false),
+            "a read-only calendar starts no drag"
+        );
+        assert!(
+            !can_move(&o, Access::Owner, false, false),
+            "an account with no calendar offer starts no drag"
+        );
+        assert!(
+            !can_move(&o, Access::Owner, true, true),
+            "a withheld calendar permission starts no drag"
+        );
+        assert!(
+            can_move(&timed(true, Status::Confirmed), Access::Owner, true, false),
+            "an all-day event drags in the all-day row and Month"
+        );
+        assert!(
+            !can_move(&timed(false, Status::Cancelled), Access::Owner, true, false),
+            "a cancelled occurrence, on its way out, starts no drag"
+        );
     }
 
     #[test]
     fn a_birthday_starts_no_drag() {
         use mailrs_domain::calendar::{Event, Kind};
-        let o = Occurrence { event: std::sync::Arc::new(Event { kind: Kind::Birthday, ..Event::default() }), ..timed(true, mailrs_domain::calendar::Status::Confirmed) };
-        assert!(!can_move(&o, Access::Owner, true, false), "Google's own apps make birthdays");
+        let o = Occurrence {
+            event: std::sync::Arc::new(Event {
+                kind: Kind::Birthday,
+                ..Event::default()
+            }),
+            ..timed(true, mailrs_domain::calendar::Status::Confirmed)
+        };
+        assert!(
+            !can_move(&o, Access::Owner, true, false),
+            "Google's own apps make birthdays"
+        );
     }
 
     #[test]
@@ -625,7 +744,11 @@ mod tests {
         let mut run = Nudges::start((10 * H, 11 * H), 0);
         run.press(nudge(10 * H, 11 * H, 1), 0);
         run.press(nudge(10 * H + 15 * M, 11 * H + 15 * M, 1), 600);
-        assert_eq!(run.wait(1_000), 600, "the second press starts the wait again");
+        assert_eq!(
+            run.wait(1_000),
+            600,
+            "the second press starts the wait again"
+        );
         assert_eq!(run.wait(1_600), 0);
         assert_eq!(run.wait(5_000), 0);
     }
@@ -651,22 +774,37 @@ mod tests {
     #[test]
     fn shift_up_and_down_nudge_an_event_by_whole_quarter_hours() {
         assert_eq!(nudge(10 * H, 11 * H, 1), (10 * H + 15 * M, 11 * H + 15 * M));
-        assert_eq!(nudge(10 * H, 11 * H, -2), (10 * H - 30 * M, 11 * H - 30 * M));
+        assert_eq!(
+            nudge(10 * H, 11 * H, -2),
+            (10 * H - 30 * M, 11 * H - 30 * M)
+        );
     }
 
     #[test]
     fn shift_alt_up_and_down_stretch_an_event_s_end_never_below_the_shortest() {
         assert_eq!(stretch(10 * H, 11 * H, 1), (10 * H, 11 * H + 15 * M));
-        assert_eq!(stretch(10 * H, 10 * H + SHORTEST, -4), (10 * H, 10 * H + SHORTEST));
+        assert_eq!(
+            stretch(10 * H, 10 * H + SHORTEST, -4),
+            (10 * H, 10 * H + SHORTEST)
+        );
     }
 
     #[test]
     fn shift_left_and_right_move_an_event_by_whole_days() {
         let lisbon = chrono_tz::Europe::Lisbon;
-        let start = lisbon.with_ymd_and_hms(2026, 9, 23, 10, 0, 0).unwrap().timestamp_millis();
+        let start = lisbon
+            .with_ymd_and_hms(2026, 9, 23, 10, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let end = start + H;
-        assert_eq!(nudge_days(start, end, 1, lisbon), (start + 24 * H, end + 24 * H));
-        assert_eq!(nudge_days(start, end, -2, lisbon), (start - 48 * H, end - 48 * H));
+        assert_eq!(
+            nudge_days(start, end, 1, lisbon),
+            (start + 24 * H, end + 24 * H)
+        );
+        assert_eq!(
+            nudge_days(start, end, -2, lisbon),
+            (start - 48 * H, end - 48 * H)
+        );
     }
 
     /// Lisbon falls back an hour on the last Sunday of October 2026, 25
@@ -676,15 +814,28 @@ mod tests {
     #[test]
     fn shift_left_keeps_the_wall_clock_time_across_a_clock_change() {
         let lisbon = chrono_tz::Europe::Lisbon;
-        let start = lisbon.with_ymd_and_hms(2026, 10, 26, 10, 0, 0).unwrap().timestamp_millis();
+        let start = lisbon
+            .with_ymd_and_hms(2026, 10, 26, 10, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let end = start + H;
         let (moved_start, moved_end) = nudge_days(start, end, -1, lisbon);
         let local = DateTime::<Utc>::from_timestamp_millis(moved_start)
             .unwrap()
             .with_timezone(&lisbon);
-        assert_eq!(local.date_naive(), NaiveDate::from_ymd_opt(2026, 10, 25).unwrap());
-        assert_eq!(local.time(), chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap());
-        assert_eq!(moved_end - moved_start, H, "the event's own length stays the same");
+        assert_eq!(
+            local.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 10, 25).unwrap()
+        );
+        assert_eq!(
+            local.time(),
+            chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap()
+        );
+        assert_eq!(
+            moved_end - moved_start,
+            H,
+            "the event's own length stays the same"
+        );
     }
 
     #[test]
@@ -701,14 +852,20 @@ mod tests {
         let grab = Grab::new(Handle::Start, 10 * H, 11 * H, 10 * H + 2 * M);
         assert_eq!(grab.follow(9 * H + 2 * M), (9 * H, 11 * H));
         // 09:22 snaps to 09:15; the end stays at 11:00.
-        assert_eq!(grab.settle(9 * H + 24 * M, (0, 24 * H)), (9 * H + 15 * M, 11 * H));
+        assert_eq!(
+            grab.settle(9 * H + 24 * M, (0, 24 * H)),
+            (9 * H + 15 * M, 11 * H)
+        );
     }
 
     #[test]
     fn the_top_edge_stops_a_quarter_hour_before_the_end() {
         let grab = Grab::new(Handle::Start, 10 * H, 11 * H, 10 * H);
         assert_eq!(grab.follow(12 * H), (11 * H - SHORTEST, 11 * H));
-        assert_eq!(grab.settle(12 * H, (0, 24 * H)), (11 * H - SHORTEST, 11 * H));
+        assert_eq!(
+            grab.settle(12 * H, (0, 24 * H)),
+            (11 * H - SHORTEST, 11 * H)
+        );
     }
 
     #[test]
@@ -720,7 +877,10 @@ mod tests {
     #[test]
     fn control_shift_up_and_down_move_the_start_never_past_the_shortest() {
         assert_eq!(stretch_start(10 * H, 11 * H, -1), (10 * H - 15 * M, 11 * H));
-        assert_eq!(stretch_start(10 * H, 11 * H, 8), (11 * H - SHORTEST, 11 * H));
+        assert_eq!(
+            stretch_start(10 * H, 11 * H, 8),
+            (11 * H - SHORTEST, 11 * H)
+        );
     }
 
     #[test]
@@ -747,56 +907,128 @@ mod tests {
     }
 
     fn utc_day(y: i32, m: u32, d: u32) -> EpochMillis {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis()
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_millis()
     }
 
     #[test]
     fn an_all_day_event_moves_by_whole_utc_days() {
         let (start, end) = (utc_day(2026, 10, 1), utc_day(2026, 10, 3));
         let lisbon = chrono_tz::Europe::Lisbon;
-        assert_eq!(by_days(start, end, true, 3, lisbon), (utc_day(2026, 10, 4), utc_day(2026, 10, 6)));
+        assert_eq!(
+            by_days(start, end, true, 3, lisbon),
+            (utc_day(2026, 10, 4), utc_day(2026, 10, 6))
+        );
     }
 
     #[test]
     fn a_timed_event_moved_across_a_clock_change_keeps_its_wall_time() {
         let lisbon = chrono_tz::Europe::Lisbon;
-        let start = lisbon.with_ymd_and_hms(2026, 10, 23, 10, 0, 0).unwrap().timestamp_millis();
+        let start = lisbon
+            .with_ymd_and_hms(2026, 10, 23, 10, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let (moved, _) = by_days(start, start + H, false, 3, lisbon);
-        let after = lisbon.with_ymd_and_hms(2026, 10, 26, 10, 0, 0).unwrap().timestamp_millis();
+        let after = lisbon
+            .with_ymd_and_hms(2026, 10, 26, 10, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         assert_eq!(moved, after);
     }
 
     #[test]
     fn a_timed_whole_day_card_moved_in_the_all_day_row_stays_timed_from_midnight() {
         let lisbon = chrono_tz::Europe::Lisbon;
-        let midnight = |d| lisbon.with_ymd_and_hms(2026, 10, d, 0, 0, 0).unwrap().timestamp_millis();
+        let midnight = |d| {
+            lisbon
+                .with_ymd_and_hms(2026, 10, d, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        };
         // The clocks go back in Lisbon on 25 October.
         let landing = strip_landing(midnight(24), midnight(25), false, None, 1, lisbon);
-        assert_eq!(landing, Landing { start: midnight(25), end: midnight(26), all_day: false });
+        assert_eq!(
+            landing,
+            Landing {
+                start: midnight(25),
+                end: midnight(26),
+                all_day: false
+            }
+        );
     }
 
     #[test]
     fn a_timed_whole_day_card_stretched_in_the_all_day_row_ends_at_midnight() {
         let lisbon = chrono_tz::Europe::Lisbon;
-        let midnight = |d| lisbon.with_ymd_and_hms(2026, 10, d, 0, 0, 0).unwrap().timestamp_millis();
-        let landing = strip_landing(midnight(24), midnight(25), false, Some(Edge::End), 2, lisbon);
-        assert_eq!(landing, Landing { start: midnight(24), end: midnight(27), all_day: false });
-        let landing = strip_landing(midnight(24), midnight(26), false, Some(Edge::Start), 5, lisbon);
-        assert_eq!(landing, Landing { start: midnight(25), end: midnight(26), all_day: false });
+        let midnight = |d| {
+            lisbon
+                .with_ymd_and_hms(2026, 10, d, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let landing = strip_landing(
+            midnight(24),
+            midnight(25),
+            false,
+            Some(Edge::End),
+            2,
+            lisbon,
+        );
+        assert_eq!(
+            landing,
+            Landing {
+                start: midnight(24),
+                end: midnight(27),
+                all_day: false
+            }
+        );
+        let landing = strip_landing(
+            midnight(24),
+            midnight(26),
+            false,
+            Some(Edge::Start),
+            5,
+            lisbon,
+        );
+        assert_eq!(
+            landing,
+            Landing {
+                start: midnight(25),
+                end: midnight(26),
+                all_day: false
+            }
+        );
     }
 
     #[test]
     fn an_all_day_card_moved_in_the_all_day_row_moves_by_utc_days() {
         let (start, end) = (utc_day(2026, 10, 1), utc_day(2026, 10, 3));
         let landing = strip_landing(start, end, true, None, 1, chrono_tz::Asia::Tokyo);
-        assert_eq!(landing, Landing { start: utc_day(2026, 10, 2), end: utc_day(2026, 10, 4), all_day: true });
+        assert_eq!(
+            landing,
+            Landing {
+                start: utc_day(2026, 10, 2),
+                end: utc_day(2026, 10, 4),
+                all_day: true
+            }
+        );
     }
 
     #[test]
     fn a_bar_s_end_stretches_by_whole_days() {
         let (start, end) = (utc_day(2026, 10, 1), utc_day(2026, 10, 3));
-        assert_eq!(resize_days(start, end, Edge::End, 2), (start, utc_day(2026, 10, 5)));
-        assert_eq!(resize_days(start, end, Edge::Start, -1), (utc_day(2026, 9, 30), end));
+        assert_eq!(
+            resize_days(start, end, Edge::End, 2),
+            (start, utc_day(2026, 10, 5))
+        );
+        assert_eq!(
+            resize_days(start, end, Edge::Start, -1),
+            (utc_day(2026, 9, 30), end)
+        );
     }
 
     #[test]
@@ -809,14 +1041,23 @@ mod tests {
     #[test]
     fn a_bar_never_shrinks_below_one_day() {
         let (start, end) = (utc_day(2026, 10, 1), utc_day(2026, 10, 3));
-        assert_eq!(resize_days(start, end, Edge::End, -5), (start, utc_day(2026, 10, 2)));
-        assert_eq!(resize_days(start, end, Edge::Start, 4), (utc_day(2026, 10, 2), end));
+        assert_eq!(
+            resize_days(start, end, Edge::End, -5),
+            (start, utc_day(2026, 10, 2))
+        );
+        assert_eq!(
+            resize_days(start, end, Edge::Start, 4),
+            (utc_day(2026, 10, 2), end)
+        );
     }
 
     #[test]
     fn a_timed_event_dropped_on_the_all_day_row_covers_that_day() {
         let day = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
-        assert_eq!(all_day_on(day), (utc_day(2026, 10, 1), utc_day(2026, 10, 2)));
+        assert_eq!(
+            all_day_on(day),
+            (utc_day(2026, 10, 1), utc_day(2026, 10, 2))
+        );
     }
 
     #[test]
@@ -830,8 +1071,14 @@ mod tests {
         use gtk::gdk::{Key, ModifierType as M};
         let shift = M::SHIFT_MASK;
         assert_eq!(grid_key(Key::Up, shift), Some(GridKey::Move(-1)));
-        assert_eq!(grid_key(Key::Down, shift | M::ALT_MASK), Some(GridKey::End(1)));
-        assert_eq!(grid_key(Key::Up, shift | M::CONTROL_MASK), Some(GridKey::Start(-1)));
+        assert_eq!(
+            grid_key(Key::Down, shift | M::ALT_MASK),
+            Some(GridKey::End(1))
+        );
+        assert_eq!(
+            grid_key(Key::Up, shift | crate::ui::PRIMARY),
+            Some(GridKey::Start(-1))
+        );
         assert_eq!(grid_key(Key::Right, shift), Some(GridKey::Days(1)));
     }
 
@@ -839,8 +1086,11 @@ mod tests {
     fn the_grid_keys_want_shift() {
         use gtk::gdk::{Key, ModifierType as M};
         assert_eq!(grid_key(Key::Up, M::empty()), None);
-        assert_eq!(grid_key(Key::Up, M::CONTROL_MASK), None);
-        assert_eq!(grid_key(Key::Up, M::SHIFT_MASK | M::CONTROL_MASK | M::ALT_MASK), None);
+        assert_eq!(grid_key(Key::Up, crate::ui::PRIMARY), None);
+        assert_eq!(
+            grid_key(Key::Up, M::SHIFT_MASK | crate::ui::PRIMARY | M::ALT_MASK),
+            None
+        );
     }
 
     #[test]
@@ -849,12 +1099,25 @@ mod tests {
         use std::sync::Arc;
         let event = Event {
             guests: vec![
-                Guest { email: "ana@example.com".into(), organizer: true, ..Guest::default() },
-                Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
+                Guest {
+                    email: "ana@example.com".into(),
+                    organizer: true,
+                    ..Guest::default()
+                },
+                Guest {
+                    email: "me@example.com".into(),
+                    me: true,
+                    ..Guest::default()
+                },
             ],
             ..Event::default()
         };
-        let o = Occurrence { account_id: 1, event: Arc::new(event), start: 0, end: H };
+        let o = Occurrence {
+            account_id: 1,
+            event: Arc::new(event),
+            start: 0,
+            end: H,
+        };
         assert!(!can_move(&o, Access::Owner, true, false));
     }
 }

@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use gtk::prelude::WidgetExt;
 use gtk::{gio, glib};
-use mailrs_domain::invitation::{Answer, Invitation, Scope, When};
 use mailrs_domain::calendar::Occurrence;
+use mailrs_domain::invitation::{Answer, Invitation, Scope, When};
 use mailrs_domain::{AccountId, Address, EpochMillis};
 use mailrs_sync::{Told, now_millis};
 
@@ -44,7 +44,9 @@ impl MainWindow {
     /// its own window alike.
     pub(super) fn invitation_action(self: &Rc<Self>, view: &Rc<ConversationView>, action: Action) {
         match action {
-            Action::Answer(answer, scope, note) => self.answer_invitation(view, answer, scope, note),
+            Action::Answer(answer, scope, note) => {
+                self.answer_invitation(view, answer, scope, note)
+            }
             Action::Propose(proposal) => self.propose_time(view, proposal),
             Action::AddToCalendar => self.add_to_calendar(view),
             Action::Import(events, target) => self.import_events(view, events, target),
@@ -86,7 +88,15 @@ impl MainWindow {
                 .core
                 .call(async move {
                     invitations
-                        .answer(account_id, &invitation, &me, answer, scope, note, now_millis())
+                        .answer(
+                            account_id,
+                            &invitation,
+                            &me,
+                            answer,
+                            scope,
+                            note,
+                            now_millis(),
+                        )
                         .await
                 })
                 .await;
@@ -152,7 +162,11 @@ impl MainWindow {
     /// Propose New Time from the calendar's event popover: the same
     /// question and the same mail as the card's, for the invitation the
     /// event stands for.
-    pub(super) fn propose_for_event(self: &Rc<Self>, account_id: AccountId, occurrence: Occurrence) {
+    pub(super) fn propose_for_event(
+        self: &Rc<Self>,
+        account_id: AccountId,
+        occurrence: Occurrence,
+    ) {
         let invitations = self.core.invitations();
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
@@ -282,7 +296,12 @@ impl MainWindow {
 
     /// Adds the events of a calendar file to the calendar the card's
     /// picker named, and says on the card where they went.
-    fn import_events(self: &Rc<Self>, view: &Rc<ConversationView>, events: Vec<Invitation>, target: AddTo) {
+    fn import_events(
+        self: &Rc<Self>,
+        view: &Rc<ConversationView>,
+        events: Vec<Invitation>,
+        target: AddTo,
+    ) {
         let Some(uid) = view.with_invitation(|showing| showing.invitation.uid.clone()) else {
             return;
         };
@@ -292,7 +311,11 @@ impl MainWindow {
             let account_id = target.account_id;
             let done = this
                 .core
-                .call(async move { calendar.import(account_id, Some(&target.calendar), &events).await })
+                .call(async move {
+                    calendar
+                        .import(account_id, Some(&target.calendar), &events)
+                        .await
+                })
                 .await;
             match done {
                 Ok(mailrs_sync::Permitted::Done(added)) if added.spots.is_empty() => this.toast(&gettext(

@@ -17,7 +17,7 @@ use mailrs_domain::{AccountId, Filter, MessageMeta, Role, Target};
 use mailrs_store::{Db, local_rules};
 
 use crate::{
-    Accounts, AccountSync, BackendError, History, MailAction, MailActions, MailBackend, SyncError,
+    AccountSync, Accounts, BackendError, History, MailAction, MailActions, MailBackend, SyncError,
     TriageAction,
 };
 
@@ -46,7 +46,12 @@ pub struct RulesEngine<A: Accounts> {
 
 impl<A: Accounts> RulesEngine<A> {
     pub fn new(accounts: Arc<A>, db: Db, actions: Arc<MailActions<A>>) -> Self {
-        RulesEngine { accounts, db, actions, running: tokio::sync::Mutex::new(()) }
+        RulesEngine {
+            accounts,
+            db,
+            actions,
+            running: tokio::sync::Mutex::new(()),
+        }
     }
 
     pub fn actions(&self) -> &Arc<MailActions<A>> {
@@ -57,13 +62,24 @@ impl<A: Accounts> RulesEngine<A> {
         let _one = self.running.lock().await;
         let (rules, due) = self
             .db
-            .read(move |c| Ok((local_rules::list(c, account_id)?, local_rules::candidates(c, account_id, PASS)?)))
+            .read(move |c| {
+                Ok((
+                    local_rules::list(c, account_id)?,
+                    local_rules::candidates(c, account_id, PASS)?,
+                ))
+            })
             .await?;
-        let mut ran = Ran { looked_at: due.len(), ..Ran::default() };
+        let mut ran = Ran {
+            looked_at: due.len(),
+            ..Ran::default()
+        };
         if rules.is_empty() || due.is_empty() {
             return Ok(ran);
         }
-        let sync = self.accounts.account(account_id).ok_or(SyncError::UnknownAccount(account_id))?;
+        let sync = self
+            .accounts
+            .account(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?;
         let mut seen = Vec::with_capacity(due.len());
         for meta in due {
             match self.run_one(&sync, &rules, &meta).await {
@@ -76,14 +92,24 @@ impl<A: Accounts> RulesEngine<A> {
             }
             seen.push((meta.id, meta.date));
         }
-        self.db.write(move |c| local_rules::mark_ran(c, account_id, &seen)).await?;
+        self.db
+            .write(move |c| local_rules::mark_ran(c, account_id, &seen))
+            .await?;
         Ok(ran)
     }
 
     /// Runs every rule over one message; whether one changed it.
-    async fn run_one(&self, sync: &AccountSync, rules: &[Filter], meta: &MessageMeta) -> Result<bool, SyncError> {
+    async fn run_one(
+        &self,
+        sync: &AccountSync,
+        rules: &[Filter],
+        meta: &MessageMeta,
+    ) -> Result<bool, SyncError> {
         // The body is read once, and only when some rule reads words.
-        let body = match rules.iter().any(|r| !r.off && matching::needs_body(&r.criteria)) {
+        let body = match rules
+            .iter()
+            .any(|r| !r.off && matching::needs_body(&r.criteria))
+        {
             true => sync.body(&meta.id).await.ok().and_then(|b| b.text),
             false => None,
         };
@@ -94,7 +120,9 @@ impl<A: Accounts> RulesEngine<A> {
         };
         let mut acted = false;
         for rule in rules.iter().filter(|r| !r.off) {
-            if !matching::matches(&rule.criteria, meta, body.as_deref()) || !self.in_inbox(meta).await? {
+            if !matching::matches(&rule.criteria, meta, body.as_deref())
+                || !self.in_inbox(meta).await?
+            {
                 continue;
             }
             let action = &rule.action;
@@ -105,7 +133,10 @@ impl<A: Accounts> RulesEngine<A> {
                 });
                 // The window shares this undo stack, and Undo there takes back
                 // what the person did last, not a change they never saw.
-                let outcome = self.actions.run(std::slice::from_ref(&target), relabel, History::Skip).await;
+                let outcome = self
+                    .actions
+                    .run(std::slice::from_ref(&target), relabel, History::Skip)
+                    .await;
                 if let Some(error) = outcome.first_error() {
                     return Err(SyncError::Backend(BackendError::Refused(error.to_string())));
                 }
@@ -115,7 +146,11 @@ impl<A: Accounts> RulesEngine<A> {
                 let from = self.address(meta.account_id).await?;
                 // Mail from the account itself, or a forward that came
                 // back, would be forwarded again each time it returned.
-                if meta.from.as_ref().is_some_and(|f| f.email.eq_ignore_ascii_case(&from)) {
+                if meta
+                    .from
+                    .as_ref()
+                    .is_some_and(|f| f.email.eq_ignore_ascii_case(&from))
+                {
                     continue;
                 }
                 let raw = sync.raw_message(&meta.id).await?;

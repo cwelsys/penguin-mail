@@ -33,7 +33,14 @@ fn leaf(name: &str) -> &str {
 fn parent_key(name: &str) -> (&str, &str) {
     // Only the first Inbox component is case insensitive, even in a nested path.
     let (root, rest) = name.split_at(name.find('/').unwrap_or(name.len()));
-    (if root.eq_ignore_ascii_case("INBOX") { "INBOX" } else { root }, rest)
+    (
+        if root.eq_ignore_ascii_case("INBOX") {
+            "INBOX"
+        } else {
+            root
+        },
+        rest,
+    )
 }
 
 /// An account's labels and folders with the groups that hold folders, each
@@ -42,15 +49,23 @@ fn parent_key(name: &str) -> (&str, &str) {
 /// gave them, from `positions` by id, and the ones never moved follow by
 /// name, ignoring case.
 pub fn label_rows<'a>(labels: &'a [Label], positions: &HashMap<String, i64>) -> Vec<LabelRow<'a>> {
-    let parents: HashMap<_, Role> = labels.iter().filter_map(|label| {
-        label.role.filter(|role| *role != Role::Important).map(|role| (parent_key(&label.name), role))
-    }).collect();
+    let parents: HashMap<_, Role> = labels
+        .iter()
+        .filter_map(|label| {
+            label
+                .role
+                .filter(|role| *role != Role::Important)
+                .map(|role| (parent_key(&label.name), role))
+        })
+        .collect();
     let mut rows: Vec<LabelRow<'a>> = labels
         .iter()
         .filter(|l| matches!(l.kind, LabelKind::User | LabelKind::Group))
         .map(|label| {
             let ancestor = label.name.match_indices('/').rev().find_map(|(at, _)| {
-                parents.get(&parent_key(&label.name[..at])).map(|role| (at, *role))
+                parents
+                    .get(&parent_key(&label.name[..at]))
+                    .map(|role| (at, *role))
             });
             LabelRow {
                 under: ancestor.map(|(_, role)| role),
@@ -70,11 +85,21 @@ pub fn label_rows<'a>(labels: &'a [Label], positions: &HashMap<String, i64>) -> 
     // Each row sorts by the place of every label on its path, so a child
     // follows its parent and siblings keep the person's order among them.
     let place = |name: &str| -> Vec<(bool, i64, String, String)> {
-        let ends = name.match_indices('/').map(|(at, _)| at).chain([name.len()]);
+        let ends = name
+            .match_indices('/')
+            .map(|(at, _)| at)
+            .chain([name.len()]);
         ends.map(|end| {
             let path = parent_key(&name[..end]);
-            let position = by_name.get(&path).and_then(|id| positions.get(*id)).copied();
-            let segment = if path.1.is_empty() { path.0 } else { leaf(path.1) };
+            let position = by_name
+                .get(&path)
+                .and_then(|id| positions.get(*id))
+                .copied();
+            let segment = if path.1.is_empty() {
+                path.0
+            } else {
+                leaf(path.1)
+            };
             (
                 position.is_none(),
                 position.unwrap_or(0),
@@ -154,9 +179,12 @@ pub fn place(
         return Ok(None);
     }
     let old = moving.label.name.as_str();
-    if onto.label.name.match_indices('/').any(|(at, _)| {
-        parent_key(&onto.label.name[..at]) == parent_key(old)
-    }) {
+    if onto
+        .label
+        .name
+        .match_indices('/')
+        .any(|(at, _)| parent_key(&onto.label.name[..at]) == parent_key(old))
+    {
         return Err(Refusal::OwnSubtree);
     }
     let under = match zone {
@@ -185,7 +213,10 @@ pub fn place(
     let at = match zone {
         Zone::Inside => order.len(),
         Zone::Before | Zone::After => {
-            let at = order.iter().position(|id| id == target).unwrap_or(order.len());
+            let at = order
+                .iter()
+                .position(|id| id == target)
+                .unwrap_or(order.len());
             if zone == Zone::After { at + 1 } else { at }
         }
     };
@@ -212,7 +243,9 @@ pub fn step(rows: &[LabelRow<'_>], id: &str, by: i32) -> Option<Placement> {
     let label = rows.iter().find(|row| row.label.id == id)?.label;
     let mut order = siblings(rows, parent(&label.name));
     let at = order.iter().position(|sibling| sibling == id)?;
-    let to = at.checked_add_signed(by as isize).filter(|to| *to < order.len())?;
+    let to = at
+        .checked_add_signed(by as isize)
+        .filter(|to| *to < order.len())?;
     order.swap(at, to);
     Some(Placement {
         name: label.name.clone(),
@@ -258,10 +291,16 @@ mod tests {
     /// Personal holds bills and Important, Work holds bugs, as the owner's
     /// Gmail shows them.
     fn owner_labels() -> Vec<Label> {
-        ["Personal", "Personal/bills", "Personal/Important", "Work", "Work/bugs"]
-            .into_iter()
-            .map(|name| label(name, LabelKind::User))
-            .collect()
+        [
+            "Personal",
+            "Personal/bills",
+            "Personal/Important",
+            "Work",
+            "Work/bugs",
+        ]
+        .into_iter()
+        .map(|name| label(name, LabelKind::User))
+        .collect()
     }
 
     fn names(labels: &[Label], positions: &HashMap<String, i64>) -> Vec<String> {
@@ -289,7 +328,10 @@ mod tests {
             label("zebra/crossing", LabelKind::Tag),
             label("Blue", LabelKind::Tag),
         ];
-        let names: Vec<&str> = super::tag_rows(&labels).iter().map(|l| l.name.as_str()).collect();
+        let names: Vec<&str> = super::tag_rows(&labels)
+            .iter()
+            .map(|l| l.name.as_str())
+            .collect();
         assert_eq!(names, ["Blue", "zebra/crossing"]);
         let rows = label_rows(&labels, &HashMap::new());
         assert_eq!(rows.len(), 1);
@@ -348,12 +390,22 @@ mod tests {
                 label("archive/Separate", LabelKind::User),
             ];
             let rows = label_rows(&labels, &HashMap::new());
-            let children: Vec<_> = rows.iter()
+            let children: Vec<_> = rows
+                .iter()
                 .filter(|row| row.under == Some(Role::Inbox))
                 .map(|row| (row.leaf, row.depth))
                 .collect();
-            assert_eq!(children, [("Aliexpress", 2), ("Allegro", 2), ("Lists", 2), ("Rust", 3)]);
-            assert!(rows.iter().find(|row| row.leaf == "Separate").unwrap().under.is_none());
+            assert_eq!(
+                children,
+                [("Aliexpress", 2), ("Allegro", 2), ("Lists", 2), ("Rust", 3)]
+            );
+            assert!(
+                rows.iter()
+                    .find(|row| row.leaf == "Separate")
+                    .unwrap()
+                    .under
+                    .is_none()
+            );
         }
     }
 
@@ -368,9 +420,18 @@ mod tests {
                 let labels = [
                     inbox,
                     sent,
-                    label(&format!("{child_prefix}/Sent Items/Receipts"), LabelKind::User),
-                    label(&format!("{child_prefix}/Sent Items/Receipts/2026"), LabelKind::User),
-                    label(&format!("{child_prefix}/sent items/Separate"), LabelKind::User),
+                    label(
+                        &format!("{child_prefix}/Sent Items/Receipts"),
+                        LabelKind::User,
+                    ),
+                    label(
+                        &format!("{child_prefix}/Sent Items/Receipts/2026"),
+                        LabelKind::User,
+                    ),
+                    label(
+                        &format!("{child_prefix}/sent items/Separate"),
+                        LabelKind::User,
+                    ),
                     label("InboxOther/Sent Items/Unrelated", LabelKind::User),
                 ];
                 let rows = label_rows(&labels, &HashMap::new());
@@ -430,7 +491,11 @@ mod tests {
             .collect();
         assert_eq!(
             rows,
-            [("receipts", 1, true), ("Work", 1, false), ("Clients", 2, true)]
+            [
+                ("receipts", 1, true),
+                ("Work", 1, false),
+                ("Clients", 2, true)
+            ]
         );
     }
 
@@ -443,7 +508,13 @@ mod tests {
         ]);
         assert_eq!(
             names(&labels, &positions),
-            ["Work", "Work/bugs", "Personal", "Personal/Important", "Personal/bills"]
+            [
+                "Work",
+                "Work/bugs",
+                "Personal",
+                "Personal/Important",
+                "Personal/bills"
+            ]
         );
     }
 
@@ -470,7 +541,10 @@ mod tests {
         let rows = label_rows(&labels, &HashMap::new());
         assert_eq!(
             place(&rows, "id:Work/bugs", "id:Personal/bills", Zone::After),
-            placed("Personal/bugs", &["Personal/bills", "Work/bugs", "Personal/Important"])
+            placed(
+                "Personal/bugs",
+                &["Personal/bills", "Work/bugs", "Personal/Important"]
+            )
         );
     }
 
@@ -480,7 +554,10 @@ mod tests {
         let rows = label_rows(&labels, &HashMap::new());
         assert_eq!(
             place(&rows, "id:Work/bugs", "id:Personal", Zone::Inside),
-            placed("Personal/bugs", &["Personal/bills", "Personal/Important", "Work/bugs"])
+            placed(
+                "Personal/bugs",
+                &["Personal/bills", "Personal/Important", "Work/bugs"]
+            )
         );
     }
 
@@ -499,8 +576,14 @@ mod tests {
         let labels = owner_labels();
         let rows = label_rows(&labels, &HashMap::new());
         assert_eq!(place(&rows, "id:Work", "id:Work", Zone::Inside), Ok(None));
-        assert_eq!(place(&rows, "id:Work", "id:Personal", Zone::After), Ok(None));
-        assert_eq!(place(&rows, "id:Work/bugs", "id:Work", Zone::Inside), Ok(None));
+        assert_eq!(
+            place(&rows, "id:Work", "id:Personal", Zone::After),
+            Ok(None)
+        );
+        assert_eq!(
+            place(&rows, "id:Work/bugs", "id:Work", Zone::Inside),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -538,13 +621,23 @@ mod tests {
                 assert_eq!(offered(rust_id), (true, false));
                 assert_eq!(offered(&labels[2].id), (false, false));
                 let python_down = Placement {
-                    name: python.clone(), order: vec![rust_id.clone(), python_id.clone()],
+                    name: python.clone(),
+                    order: vec![rust_id.clone(), python_id.clone()],
                 };
-                let rust_up = Placement { name: rust.clone(), order: python_down.order.clone() };
+                let rust_up = Placement {
+                    name: rust.clone(),
+                    order: python_down.order.clone(),
+                };
                 assert_eq!(step(&rows, python_id, 1), Some(python_down.clone()));
                 assert_eq!(step(&rows, rust_id, -1), Some(rust_up.clone()));
-                assert_eq!(place(&rows, python_id, rust_id, Zone::After), Ok(Some(python_down)));
-                assert_eq!(place(&rows, rust_id, python_id, Zone::Before), Ok(Some(rust_up)));
+                assert_eq!(
+                    place(&rows, python_id, rust_id, Zone::After),
+                    Ok(Some(python_down))
+                );
+                assert_eq!(
+                    place(&rows, rust_id, python_id, Zone::Before),
+                    Ok(Some(rust_up))
+                );
                 assert_eq!(place(&rows, python_id, rust_id, Zone::Before), Ok(None));
                 assert_eq!(place(&rows, rust_id, python_id, Zone::After), Ok(None));
             }
@@ -566,11 +659,17 @@ mod tests {
                 let rows = label_rows(&labels, &HashMap::new());
                 for child in &labels[1..3] {
                     for zone in [Zone::Inside, Zone::Before, Zone::After] {
-                        assert_eq!(place(&rows, &labels[0].id, &child.id, zone), Err(Refusal::OwnSubtree));
+                        assert_eq!(
+                            place(&rows, &labels[0].id, &child.id, zone),
+                            Err(Refusal::OwnSubtree)
+                        );
                     }
                 }
                 for unrelated in &labels[3..] {
-                    assert!(matches!(place(&rows, &labels[0].id, &unrelated.id, Zone::Inside), Ok(Some(_))));
+                    assert!(matches!(
+                        place(&rows, &labels[0].id, &unrelated.id, Zone::Inside),
+                        Ok(Some(_))
+                    ));
                 }
             }
         }

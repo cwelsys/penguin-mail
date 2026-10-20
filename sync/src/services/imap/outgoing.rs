@@ -37,7 +37,10 @@ fn message_id_of(raw: &[u8]) -> Option<String> {
 /// Who `raw` goes from and to: the address in its From header, or
 /// `fallback` when there is none, and every address in To, Cc and Bcc
 /// once. Refused when it names nobody.
-pub(crate) fn envelope_of(raw: &[u8], fallback: &str) -> Result<(String, Vec<String>), BackendError> {
+pub(crate) fn envelope_of(
+    raw: &[u8],
+    fallback: &str,
+) -> Result<(String, Vec<String>), BackendError> {
     envelope_from(&mailrs_mime::head::head(raw), fallback)
 }
 
@@ -54,11 +57,18 @@ fn envelope_from(head: &Head, fallback: &str) -> Result<(String, Vec<String>), B
 /// Hands `raw` to the SMTP server `smtp` and answers its Message-ID, which
 /// is all the server says about it. The envelope comes from
 /// [`envelope_of`]; the Bcc header itself stays out of what is sent.
-pub(crate) async fn submit_over<S: Submit>(smtp: &S, address: &str, raw: &[u8]) -> Result<String, BackendError> {
+pub(crate) async fn submit_over<S: Submit>(
+    smtp: &S,
+    address: &str,
+    raw: &[u8],
+) -> Result<String, BackendError> {
     let head = mailrs_mime::head::head(raw);
     let (from, to) = envelope_from(&head, address)?;
     smtp.submit(&from, &to, &without_bcc(raw)).await?;
-    Ok(head.header("Message-ID").map(|id| id.trim().to_string()).unwrap_or_default())
+    Ok(head
+        .header("Message-ID")
+        .map(|id| id.trim().to_string())
+        .unwrap_or_default())
 }
 
 impl<I: ImapApi, S: Submit> Imap<I, S> {
@@ -100,7 +110,11 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
     /// The name of the newest message in `mailbox` whose Message-ID is
     /// `message_id`, given without angle brackets. `HEADER` matches a
     /// substring, so the search names the brackets to anchor both ends.
-    async fn newest_with(&self, mailbox: &str, message_id: &str) -> Result<Option<String>, BackendError> {
+    async fn newest_with(
+        &self,
+        mailbox: &str,
+        message_id: &str,
+    ) -> Result<Option<String>, BackendError> {
         let uidvalidity = self.select(mailbox, None).await?.uidvalidity;
         let anchored = format!("<{message_id}>");
         let keys = format!("HEADER Message-ID {} UNDELETED", string(&anchored));
@@ -137,7 +151,8 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
 
     async fn drafts_mailbox(&self) -> Result<String, BackendError> {
         self.ensure_listed().await?;
-        self.mailbox_for(Role::Drafts).ok_or(BackendError::Unsupported)
+        self.mailbox_for(Role::Drafts)
+            .ok_or(BackendError::Unsupported)
     }
 
     /// Saves `raw` as a draft, replacing the one `draft_id` names.
@@ -235,7 +250,8 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
         let Some(sent) = self.mailbox_for(Role::Sent) else {
             return Ok(None);
         };
-        self.newest_with(&sent, message_id.trim_matches(['<', '>'])).await
+        self.newest_with(&sent, message_id.trim_matches(['<', '>']))
+            .await
     }
 }
 

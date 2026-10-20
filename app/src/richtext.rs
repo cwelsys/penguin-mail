@@ -102,8 +102,7 @@ pub struct RichBody {
 /// block, so every rule sits on its element.
 const FONT: &str = "font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5";
 pub(crate) const PARAGRAPH: &str = "margin:0 0 1em";
-pub(crate) const QUOTE: &str =
-    "margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-left:1ex";
+pub(crate) const QUOTE: &str = "margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-left:1ex";
 pub(crate) const PRE: &str = "background:#f6f6f8;padding:10px;border-radius:6px;overflow:auto";
 pub(crate) const IMAGE: &str = "max-width:100%;height:auto";
 const CODE: &str = "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f6f6f8;padding:1px 3px;border-radius:4px";
@@ -164,7 +163,10 @@ impl RichBody {
                 BlockKind::Quote => {
                     out.push_str(&format!("<blockquote style=\"{QUOTE}\">"));
                     for run in split_on_blanks(group) {
-                        out.push_str(&format!("<p style=\"{PARAGRAPH}\">{}</p>", lines_to_html(run)));
+                        out.push_str(&format!(
+                            "<p style=\"{PARAGRAPH}\">{}</p>",
+                            lines_to_html(run)
+                        ));
                     }
                     out.push_str("</blockquote>");
                 }
@@ -996,7 +998,11 @@ mod tests {
         let html = doc.to_html();
         assert_eq!(html.matches("<blockquote").count(), 1, "{html}");
         assert!(html.ends_with("</blockquote></div>"), "{html}");
-        assert_eq!(html.matches("<p style").count(), 4, "one paragraph above, three inside: {html}");
+        assert_eq!(
+            html.matches("<p style").count(),
+            4,
+            "one paragraph above, three inside: {html}"
+        );
     }
 
     #[test]
@@ -1221,10 +1227,17 @@ mod tests {
 
     #[test]
     fn a_table_keeps_one_line_a_row() {
-        let doc = RichBody::from_markdown("| Day | Dish |\n|-----|------|\n| Mon | Soup |\n| Tue | Stew |");
+        let doc = RichBody::from_markdown(
+            "| Day | Dish |\n|-----|------|\n| Mon | Soup |\n| Tue | Stew |",
+        );
         let rows: Vec<String> = doc.blocks.iter().map(Block::text).collect();
         assert_eq!(rows, ["Day | Dish", "Mon | Soup", "Tue | Stew"]);
-        assert!(doc.blocks[0].spans.iter().all(|s| s.style.bold || s.text == " | "));
+        assert!(
+            doc.blocks[0]
+                .spans
+                .iter()
+                .all(|s| s.style.bold || s.text == " | ")
+        );
     }
 
     #[test]

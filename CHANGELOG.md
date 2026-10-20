@@ -7,7 +7,63 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 
 ### New
 
+- Choose reasoning separately for assistant chats and email translations in Preferences → AI.
+- Russian and Czech can be selected in Never Translate.
+- Choose Simplified Chinese, Russian, Italian, Japanese, Korean, Polish, Turkish, or Indonesian in Preferences.
+- Show or hide the mailbox sidebar with Ctrl+B, or Cmd+B on macOS.
+- An AppImage bundles the current runtime for Ubuntu 22.04 and newer, and Debian 13.
+- Build and install Penguin Mail with Nix, or enter its development environment with `nix develop`.
+
+### Fixed
+
+- Gmail Sent, Drafts, and custom labels show older server mail as you scroll, even outside the sync period.
+- Mail translations ask compatible local models to skip reasoning by default for faster replies.
+- IMAP folders, including nested folders, Sent, and Drafts, show older server mail as you scroll. Failed first loads can be retried without restarting ([#60](https://github.com/c9dev/penguin-mail/issues/60)). Thanks to [zwnk](https://github.com/zwnk) for the reproductions and patches.
+- Upgrading an Outlook account keeps pending deletions and moves, without notifications for old mail found during repair ([#66](https://github.com/c9dev/penguin-mail/issues/66)).
+- Outlook unread counts update when older inbox messages are read in another app ([#66](https://github.com/c9dev/penguin-mail/issues/66)).
+- The Snap can access the graphics devices it needs at startup ([#62](https://github.com/c9dev/penguin-mail/issues/62)).
+- macOS notifications use temporary banners by default, offer all selected buttons, and keep mail actions in the background.
+- Assistant skill scripts can run with the Nix package, including on NixOS.
+- Microsoft messages with attachments open without the contentId request error.
+- IMAP Junk and Trash show messages on the server even when they have not synced to this computer.
+- A deleted or archived message no longer flashes back into the list before the server has it, on any account ([#58](https://github.com/c9dev/penguin-mail/issues/58)).
+- The Undo toast shows as soon as you act, and its Undo takes back the action it names. Undo pressed while the action is still on its way waits for it. Quick deletes or archives share one toast, such as "Moved 3 conversations to Trash" ([#54](https://github.com/c9dev/penguin-mail/issues/54), [#57](https://github.com/c9dev/penguin-mail/issues/57)).
+- On macOS the shortcuts use Command: Cmd+W closes the window, Cmd+Z undoes, Cmd+F finds, and the rest follow ([#55](https://github.com/c9dev/penguin-mail/issues/55)).
+- Pressing the Preferences or About shortcut again no longer opens a second dialog ([#53](https://github.com/c9dev/penguin-mail/issues/53)).
+- On macOS the sidebar title shows "Mailboxes" in full beside the window buttons ([#56](https://github.com/c9dev/penguin-mail/issues/56)).
+
+## 1.0.9 (2026-10-16)
+
+### New
+
+- Hover over a message link or focus it with the keyboard to see its destination. Messages with potentially deceptive links show a warning.
+- Add a calendar from a CalDAV server, such as Nextcloud, without a mail account: Add Account, then Add a calendar without mail. Remove it before going back to Penguin Mail 1.0.8 or older, which cannot open any of your accounts while it is there.
 - Vietnamese translations, chosen in Preferences.
+- The unread count sits on the app icon in Linux docks that draw badges, such as Dash to Dock, Ubuntu Dock, Dash to Panel and KDE Plasma, matching the tray.
+
+### Improved
+
+- Choose the assistant model beside your question, start a chat and manage tools from its header, attach files, and move the chat into its own window. The docked assistant shares the mail list's background, with a divider beside the message pane. Window controls follow the open pane. Turn details fold under one row, replies use restrained headings and more readable spacing, and the input grows to four lines.
+- Nested Preferences sections have inset backgrounds and single separators, and server-space rows update when reports arrive.
+- Preferences groups settings by task, with signatures, sender addresses, contacts and server space under each account, and a page list on narrow windows.
+- Reorder accounts by dragging them in Preferences, and choose one default account for all tasks or separate accounts for new messages, replies, forwards, calendar events, assistant actions and startup. Skills and MCP settings expand when you need them.
+
+### Fixed
+
+- Link previews appear when you hover links inside HTML messages.
+- Rate-limit errors name the account's provider when it is known. Draft dialogs say whether the draft stays in the account or on this computer, and report when the account is not connected.
+- The snap's panel unread count updates without requiring developer mode.
+- The Snap package finds libproxy's backend when it starts, avoiding the missing libpxbackend-1.0.so error.
+- A new-mail notification leaves the notification center once its message is read, archived or deleted, in the window or on another device. A summary of several messages leaves once every one of them has.
+- Mail that arrived while Penguin Mail was closed gets its notifications when the app opens.
+- An account removed and added again shows its calendars at once, rather than half an hour later.
+- Server-space reports update as each account answers, keep newer results when reads overlap, and refresh while the mail window is closed.
+- Switching AI providers keeps web search matched to the selected provider.
+- Files picked with the assistant's Attach button work through Flatpak and in hidden folders. Tool and model switches keep the conversation, model menus reuse recent lists without search-data tooltips, and screen readers hear turn status.
+- Complete Preferences and assistant translations in French, German, Spanish, Vietnamese, and Traditional Chinese.
+- Calendar-file imports point to the Calendar page in Preferences when a calendar needs enabling.
+- Fastmail accounts signed in through the browser report server storage through IMAP when JMAP provides no quota. Gmail signature import appears only for Gmail accounts.
+- JMAP server-space reports recognize Email quotas and use the mail account even when the server lists no quota-primary account. Expansion controls keep their chevrons with custom icon themes.
 
 ## 1.0.8 (2026-10-13)
 

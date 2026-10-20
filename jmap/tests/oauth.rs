@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mailrs_jmap::oauth::{self, Loopback, Metadata, OAuthClient, OAuthSession, Pkce, Tokens, parse_redirect};
+use mailrs_jmap::oauth::{
+    self, Loopback, Metadata, OAuthClient, OAuthSession, Pkce, Tokens, parse_redirect,
+};
 use mailrs_jmap::{Auth, JmapError};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -16,13 +18,20 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// A mock server that fails the test if any request reaches it.
 async fn untouchable() -> MockServer {
     let server = MockServer::start().await;
-    Mock::given(any()).respond_with(ResponseTemplate::new(500)).expect(0).mount(&server).await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
     server
 }
 
 fn says_no_address(err: &JmapError, address: &str) {
     let said = err.to_string();
-    assert!(!said.contains(address) && !said.contains("127.0.0.1"), "{said}");
+    assert!(
+        !said.contains(address) && !said.contains("127.0.0.1"),
+        "{said}"
+    );
 }
 
 fn https_metadata() -> Metadata {
@@ -40,7 +49,10 @@ fn https_metadata() -> Metadata {
 
 /// `https_metadata`, promising RFC 9207's `iss` on the redirect or not.
 fn promising_iss(promised: bool) -> Metadata {
-    Metadata { authorization_response_iss_parameter_supported: promised, ..https_metadata() }
+    Metadata {
+        authorization_response_iss_parameter_supported: promised,
+        ..https_metadata()
+    }
 }
 
 fn redirect(query: &str) -> String {
@@ -50,7 +62,9 @@ fn redirect(query: &str) -> String {
 #[tokio::test]
 async fn metadata_over_http_is_refused_before_any_request() {
     let server = untouchable().await;
-    let err = oauth::metadata(&format!("{}/jmap/session", server.uri())).await.unwrap_err();
+    let err = oauth::metadata(&format!("{}/jmap/session", server.uri()))
+        .await
+        .unwrap_err();
     assert_eq!(err, JmapError::NotHttps);
     says_no_address(&err, &server.uri());
 }
@@ -63,7 +77,10 @@ async fn a_token_endpoint_over_http_gets_neither_code_nor_refresh_token() {
         token_endpoint: format!("{}/token", server.uri()),
         resource: "https://api.example.com/jmap/session".into(),
     };
-    let err = client.exchange("code", "http://127.0.0.1:5555/", &Pkce::generate()).await.unwrap_err();
+    let err = client
+        .exchange("code", "http://127.0.0.1:5555/", &Pkce::generate())
+        .await
+        .unwrap_err();
     assert_eq!(err, JmapError::NotHttps);
     says_no_address(&err, &server.uri());
     assert_eq!(client.refresh("r1").await.unwrap_err(), JmapError::NotHttps);
@@ -72,16 +89,28 @@ async fn a_token_endpoint_over_http_gets_neither_code_nor_refresh_token() {
 #[tokio::test]
 async fn a_registration_endpoint_over_http_is_refused() {
     let server = untouchable().await;
-    let metadata = Metadata { registration_endpoint: Some(format!("{}/register", server.uri())), ..https_metadata() };
-    let err = oauth::register(&metadata, "http://127.0.0.1:5555/", &[]).await.unwrap_err();
+    let metadata = Metadata {
+        registration_endpoint: Some(format!("{}/register", server.uri())),
+        ..https_metadata()
+    };
+    let err = oauth::register(&metadata, "http://127.0.0.1:5555/", &[])
+        .await
+        .unwrap_err();
     assert_eq!(err, JmapError::NotHttps);
     says_no_address(&err, &server.uri());
 }
 
 #[tokio::test]
 async fn registration_names_only_the_apps_own_loopback() {
-    for redirect in ["http://evil.example/", "https://127.0.0.1/", "http://localhost:5555/", "http://127.0.0.1@evil.example/"] {
-        let err = oauth::register(&https_metadata(), redirect, &[]).await.unwrap_err();
+    for redirect in [
+        "http://evil.example/",
+        "https://127.0.0.1/",
+        "http://localhost:5555/",
+        "http://127.0.0.1@evil.example/",
+    ] {
+        let err = oauth::register(&https_metadata(), redirect, &[])
+            .await
+            .unwrap_err();
         assert_eq!(err, JmapError::BadRedirect, "{redirect}");
         assert!(!err.to_string().contains("evil.example"), "{err}");
     }
@@ -89,17 +118,38 @@ async fn registration_names_only_the_apps_own_loopback() {
 
 #[test]
 fn an_authorization_endpoint_over_http_is_refused() {
-    let metadata = Metadata { authorization_endpoint: "http://auth.example.com/authorize".into(), ..https_metadata() };
-    let err = oauth::authorize_url(&metadata, "c1", "http://127.0.0.1:5555/", &[], &Pkce::generate(), "s1", "https://api.example.com/jmap/session", None)
-        .unwrap_err();
+    let metadata = Metadata {
+        authorization_endpoint: "http://auth.example.com/authorize".into(),
+        ..https_metadata()
+    };
+    let err = oauth::authorize_url(
+        &metadata,
+        "c1",
+        "http://127.0.0.1:5555/",
+        &[],
+        &Pkce::generate(),
+        "s1",
+        "https://api.example.com/jmap/session",
+        None,
+    )
+    .unwrap_err();
     assert_eq!(err, JmapError::NotHttps);
     says_no_address(&err, "auth.example.com");
 }
 
 #[test]
 fn the_authorize_url_hands_back_only_to_the_apps_own_loopback() {
-    let err = oauth::authorize_url(&https_metadata(), "c1", "http://evil.example/", &[], &Pkce::generate(), "s1", "https://api.example.com/jmap/session", None)
-        .unwrap_err();
+    let err = oauth::authorize_url(
+        &https_metadata(),
+        "c1",
+        "http://evil.example/",
+        &[],
+        &Pkce::generate(),
+        "s1",
+        "https://api.example.com/jmap/session",
+        None,
+    )
+    .unwrap_err();
     assert_eq!(err, JmapError::BadRedirect);
 }
 
@@ -107,23 +157,55 @@ fn the_authorize_url_hands_back_only_to_the_apps_own_loopback() {
 fn a_redirect_with_another_state_is_refused() {
     let metadata = https_metadata();
     // Not the consent this sign-in opened: ignored, so the wait goes on.
-    assert_eq!(parse_redirect(&redirect("code=abc&state=other"), "mine", &metadata), None);
-    assert_eq!(parse_redirect(&redirect("code=abc"), "mine", &metadata), None);
-    assert_eq!(parse_redirect(&redirect("code=abc&state=mine"), "mine", &metadata), Some(Ok("abc".into())));
-    assert_eq!(parse_redirect(&redirect("error=access_denied&state=mine"), "mine", &metadata), Some(Err(JmapError::Declined)));
-    assert_eq!(parse_redirect("GET /favicon.ico HTTP/1.1\r\n\r\n", "mine", &metadata), None);
+    assert_eq!(
+        parse_redirect(&redirect("code=abc&state=other"), "mine", &metadata),
+        None
+    );
+    assert_eq!(
+        parse_redirect(&redirect("code=abc"), "mine", &metadata),
+        None
+    );
+    assert_eq!(
+        parse_redirect(&redirect("code=abc&state=mine"), "mine", &metadata),
+        Some(Ok("abc".into()))
+    );
+    assert_eq!(
+        parse_redirect(
+            &redirect("error=access_denied&state=mine"),
+            "mine",
+            &metadata
+        ),
+        Some(Err(JmapError::Declined))
+    );
+    assert_eq!(
+        parse_redirect("GET /favicon.ico HTTP/1.1\r\n\r\n", "mine", &metadata),
+        None
+    );
 }
 
 #[test]
 fn a_refusal_with_another_state_is_ignored() {
-    assert_eq!(parse_redirect(&redirect("error=access_denied&state=other"), "mine", &https_metadata()), None);
+    assert_eq!(
+        parse_redirect(
+            &redirect("error=access_denied&state=other"),
+            "mine",
+            &https_metadata()
+        ),
+        None
+    );
 }
 
 #[test]
 fn a_redirect_from_the_expected_issuer_is_taken() {
     let request = redirect("code=abc&state=mine&iss=https%3A%2F%2Fauth.example.com");
-    assert_eq!(parse_redirect(&request, "mine", &promising_iss(true)), Some(Ok("abc".into())));
-    assert_eq!(parse_redirect(&request, "mine", &promising_iss(false)), Some(Ok("abc".into())));
+    assert_eq!(
+        parse_redirect(&request, "mine", &promising_iss(true)),
+        Some(Ok("abc".into()))
+    );
+    assert_eq!(
+        parse_redirect(&request, "mine", &promising_iss(false)),
+        Some(Ok("abc".into()))
+    );
 }
 
 #[test]
@@ -142,25 +224,44 @@ fn a_redirect_from_another_issuer_is_refused() {
 
 #[test]
 fn a_missing_iss_is_refused_when_the_server_promised_it() {
-    let outcome = parse_redirect(&redirect("code=abc&state=mine"), "mine", &promising_iss(true));
+    let outcome = parse_redirect(
+        &redirect("code=abc&state=mine"),
+        "mine",
+        &promising_iss(true),
+    );
     assert_eq!(outcome, Some(Err(JmapError::IssuerMismatch)));
 }
 
 #[test]
 fn a_missing_iss_is_taken_when_the_server_never_promised_it() {
-    let outcome = parse_redirect(&redirect("code=abc&state=mine"), "mine", &promising_iss(false));
+    let outcome = parse_redirect(
+        &redirect("code=abc&state=mine"),
+        "mine",
+        &promising_iss(false),
+    );
     assert_eq!(outcome, Some(Ok("abc".into())));
 }
 
 #[test]
 fn a_redirect_error_keeps_no_server_text() {
     let query = "error=server_error&error_description=token+tok-SECRET-123&state=mine";
-    let err = parse_redirect(&redirect(query), "mine", &https_metadata()).unwrap().unwrap_err();
+    let err = parse_redirect(&redirect(query), "mine", &https_metadata())
+        .unwrap()
+        .unwrap_err();
     assert_eq!(err, JmapError::Forbidden("server_error".into()));
-    for oddity in ["bad%22quote", "back%5Cslash", "line%0Abreak", &"x".repeat(65)] {
-        let err = parse_redirect(&redirect(&format!("error={oddity}&state=mine")), "mine", &https_metadata())
-            .unwrap()
-            .unwrap_err();
+    for oddity in [
+        "bad%22quote",
+        "back%5Cslash",
+        "line%0Abreak",
+        &"x".repeat(65),
+    ] {
+        let err = parse_redirect(
+            &redirect(&format!("error={oddity}&state=mine")),
+            "mine",
+            &https_metadata(),
+        )
+        .unwrap()
+        .unwrap_err();
         assert_eq!(err, JmapError::Forbidden("unknown".into()), "{oddity}");
     }
     let said = format!("{err} {err:?}");
@@ -170,17 +271,28 @@ fn a_redirect_error_keeps_no_server_text() {
 #[test]
 fn a_redirect_naming_an_unknown_client_says_so() {
     for error in ["invalid_client", "unauthorized_client"] {
-        let err = parse_redirect(&redirect(&format!("error={error}&state=mine")), "mine", &https_metadata()).unwrap().unwrap_err();
+        let err = parse_redirect(
+            &redirect(&format!("error={error}&state=mine")),
+            "mine",
+            &https_metadata(),
+        )
+        .unwrap()
+        .unwrap_err();
         assert_eq!(err, JmapError::UnknownClient, "{error}");
     }
 }
 
 #[tokio::test]
 async fn a_session_url_with_a_password_is_refused_without_echo() {
-    let err = oauth::metadata("https://me:hunter2@api.example.com/jmap/session").await.unwrap_err();
+    let err = oauth::metadata("https://me:hunter2@api.example.com/jmap/session")
+        .await
+        .unwrap_err();
     assert!(matches!(err, JmapError::BadUrl(_)), "{err:?}");
     let said = format!("{err} {err:?}");
-    assert!(!said.contains("hunter2") && !said.contains("api.example.com"), "{said}");
+    assert!(
+        !said.contains("hunter2") && !said.contains("api.example.com"),
+        "{said}"
+    );
 }
 
 #[tokio::test]
@@ -226,14 +338,23 @@ fn the_authorize_url_names_pkce_the_scopes_and_the_resource() {
 #[test]
 fn secrets_stay_out_of_debug_output() {
     let pkce = Pkce::generate();
-    let tokens = Tokens { access_token: "access-secret".into(), expires_in: 60, refresh_token: Some("refresh-secret".into()) };
+    let tokens = Tokens {
+        access_token: "access-secret".into(),
+        expires_in: 60,
+        refresh_token: Some("refresh-secret".into()),
+    };
     let client = OAuthClient {
         client_id: "client-id-secret".into(),
         token_endpoint: "https://auth.example.com/token".into(),
         resource: "https://api.example.com/jmap/session".into(),
     };
     let said = format!("{pkce:?} {tokens:?} {client:?}");
-    for secret in [pkce.verifier.as_str(), "access-secret", "refresh-secret", "client-id-secret"] {
+    for secret in [
+        pkce.verifier.as_str(),
+        "access-secret",
+        "refresh-secret",
+        "client-id-secret",
+    ] {
         assert!(!said.contains(secret), "{said}");
     }
 }
@@ -247,23 +368,36 @@ async fn send(port: u16, request: &str) -> String {
 }
 
 fn port_of(loopback: &Loopback) -> u16 {
-    url::Url::parse(&loopback.redirect_uri).unwrap().port().unwrap()
+    url::Url::parse(&loopback.redirect_uri)
+        .unwrap()
+        .port()
+        .unwrap()
 }
 
 /// The loopback waiting for state `mine` from `https_metadata`'s issuer.
 async fn waiting_loopback() -> (u16, tokio::task::JoinHandle<Result<String, JmapError>>) {
     let loopback = Loopback::bind().await.unwrap();
-    assert!(loopback.redirect_uri.starts_with("http://127.0.0.1:"), "{}", loopback.redirect_uri);
+    assert!(
+        loopback.redirect_uri.starts_with("http://127.0.0.1:"),
+        "{}",
+        loopback.redirect_uri
+    );
     let port = port_of(&loopback);
-    let waiting = tokio::spawn(async move { loopback.wait_for_code("mine", &https_metadata()).await });
+    let waiting =
+        tokio::spawn(async move { loopback.wait_for_code("mine", &https_metadata()).await });
     (port, waiting)
 }
 
 /// What the loopback hands back, or a failure when it takes longer than a
 /// moment. Ten seconds is the per-connection wait, so a result inside two
 /// shows that nothing waited it out.
-async fn promptly(waiting: tokio::task::JoinHandle<Result<String, JmapError>>) -> Result<String, JmapError> {
-    tokio::time::timeout(Duration::from_secs(2), waiting).await.expect("the loopback held up the redirect").unwrap()
+async fn promptly(
+    waiting: tokio::task::JoinHandle<Result<String, JmapError>>,
+) -> Result<String, JmapError> {
+    tokio::time::timeout(Duration::from_secs(2), waiting)
+        .await
+        .expect("the loopback held up the redirect")
+        .unwrap()
 }
 
 #[tokio::test]
@@ -315,8 +449,15 @@ async fn a_request_that_arrives_in_pieces_is_read_whole() {
 #[tokio::test]
 async fn a_session_refreshes_over_https_only() {
     let server = untouchable().await;
-    let client = OAuthClient { client_id: "c1".into(), token_endpoint: format!("{}/token", server.uri()), resource: "x".into() };
-    let err = OAuthSession::new(client, "r1".into()).bearer(false).await.unwrap_err();
+    let client = OAuthClient {
+        client_id: "c1".into(),
+        token_endpoint: format!("{}/token", server.uri()),
+        resource: "x".into(),
+    };
+    let err = OAuthSession::new(client, "r1".into())
+        .bearer(false)
+        .await
+        .unwrap_err();
     assert_eq!(err, JmapError::NotHttps);
     says_no_address(&err, &server.uri());
 }
@@ -328,7 +469,11 @@ fn the_session_keeps_its_tokens_out_of_debug() {
         token_endpoint: "https://auth.example.com/token".into(),
         resource: "https://api.example.com/jmap/session".into(),
     };
-    let tokens = Tokens { access_token: "access-SECRET".into(), expires_in: 3600, refresh_token: Some("refresh-SECRET".into()) };
+    let tokens = Tokens {
+        access_token: "access-SECRET".into(),
+        expires_in: 3600,
+        refresh_token: Some("refresh-SECRET".into()),
+    };
     let signed_in = OAuthSession::signed_in(client(), tokens);
     let kept = Auth::OAuth(Arc::new(OAuthSession::new(client(), "kept-SECRET".into())));
     let said = format!("{signed_in:?} {kept:?}");

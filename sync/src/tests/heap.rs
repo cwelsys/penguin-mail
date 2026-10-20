@@ -24,7 +24,9 @@ static PROCESS_LIVE: AtomicUsize = AtomicUsize::new(0);
 static PROCESS_PEAK: AtomicUsize = AtomicUsize::new(0);
 
 fn heap_add(bytes: usize) {
-    let live = PROCESS_LIVE.fetch_add(bytes, Ordering::Relaxed).wrapping_add(bytes);
+    let live = PROCESS_LIVE
+        .fetch_add(bytes, Ordering::Relaxed)
+        .wrapping_add(bytes);
     PROCESS_PEAK.fetch_max(live, Ordering::Relaxed);
     let _ = HEAP.try_with(|heap| {
         let mut h = heap.get();

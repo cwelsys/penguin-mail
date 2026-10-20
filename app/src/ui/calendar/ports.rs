@@ -23,7 +23,9 @@ use mailrs_sync::{Permitted, Waiting};
 
 use super::block::EventKey;
 use super::range::{self, Range, ViewKind};
-use super::run::{Answer, Desk, Effects, Older, PageId, Place, Shows, SidebarRead, Unreached, Work};
+use super::run::{
+    Answer, Desk, Effects, Older, PageId, Place, Shows, SidebarRead, Unreached, Work,
+};
 use super::shown::{self, Showing};
 use super::{CalendarView, PageView, SEARCH_LIMIT, scope, sidebar};
 use crate::permission::Permission;
@@ -60,7 +62,9 @@ impl Ports {
 
 impl Desk for Ports {
     fn accounts(&self) -> Vec<AccountId> {
-        self.view().map(|view| view.account_ids()).unwrap_or_default()
+        self.view()
+            .map(|view| view.account_ids())
+            .unwrap_or_default()
     }
 
     fn waiting_accounts(&self) -> Vec<AccountId> {
@@ -70,7 +74,9 @@ impl Desk for Ports {
     }
 
     fn shows(&self, place: Place) -> Shows {
-        let Some(view) = self.view() else { return Shows::Away };
+        let Some(view) = self.view() else {
+            return Shows::Away;
+        };
         match place {
             Place::Page(id) => view
                 .page_by_id(id)
@@ -80,14 +86,19 @@ impl Desk for Ports {
                 true => Shows::Calendar,
                 false => Shows::Away,
             },
-            Place::Scroll(_) | Place::Sidebar | Place::Waiting | Place::List | Place::Older | Place::Next => {
-                Shows::Anything
-            }
+            Place::Scroll(_)
+            | Place::Sidebar
+            | Place::Waiting
+            | Place::List
+            | Place::Older
+            | Place::Next => Shows::Anything,
         }
     }
 
     fn pages(&self) -> Vec<(PageId, Range)> {
-        let Some(view) = self.view() else { return Vec::new() };
+        let Some(view) = self.view() else {
+            return Vec::new();
+        };
         let pages = view.pages.borrow();
         // The page on screen first, so its read is not queued behind its
         // neighbours'.
@@ -99,11 +110,14 @@ impl Desk for Ports {
     }
 
     fn showing_list(&self) -> bool {
-        self.view().is_some_and(|view| view.showing() == Showing::Agenda)
+        self.view()
+            .is_some_and(|view| view.showing() == Showing::Agenda)
     }
 
     fn mini(&self) -> Range {
-        let day = self.view().map_or_else(|| self.today(), |view| view.day.get());
+        let day = self
+            .view()
+            .map_or_else(|| self.today(), |view| view.day.get());
         Range::around(ViewKind::Month, day)
     }
 
@@ -112,7 +126,9 @@ impl Desk for Ports {
     }
 
     fn list_window(&self) -> (NaiveDate, NaiveDate) {
-        let day = self.view().map_or_else(|| self.today(), |view| view.day.get());
+        let day = self
+            .view()
+            .map_or_else(|| self.today(), |view| view.day.get());
         range::agenda_window(day)
     }
 
@@ -136,12 +152,17 @@ impl Effects for Ports {
         from: EpochMillis,
         to: EpochMillis,
     ) -> Answer<'_, Result<Vec<Occurrence>, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         Box::pin(async move {
-            core.call(async move { copy.occurrences(&accounts, from, to, CalendarScope::Shown).await })
-                .await
-                .map_err(|err| err.to_string())
+            core.call(async move {
+                copy.occurrences(&accounts, from, to, CalendarScope::Shown)
+                    .await
+            })
+            .await
+            .map_err(|err| err.to_string())
         })
     }
 
@@ -151,12 +172,16 @@ impl Effects for Ports {
         from: EpochMillis,
         to: EpochMillis,
     ) -> Answer<'_, Result<SidebarRead, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         Box::pin(async move {
             core.call(async move {
                 let listed = copy.listed(&accounts).await?;
-                let busy = copy.occurrences(&accounts, from, to, CalendarScope::Shown).await?;
+                let busy = copy
+                    .occurrences(&accounts, from, to, CalendarScope::Shown)
+                    .await?;
                 Ok::<_, mailrs_sync::SyncError>((listed, busy))
             })
             .await
@@ -164,8 +189,14 @@ impl Effects for Ports {
         })
     }
 
-    fn waiting(&self, accounts: Vec<AccountId>, now: EpochMillis) -> Answer<'_, Result<Vec<Waiting>, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+    fn waiting(
+        &self,
+        accounts: Vec<AccountId>,
+        now: EpochMillis,
+    ) -> Answer<'_, Result<Vec<Waiting>, String>> {
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, invitations) = (Rc::clone(&view.core), view.core.invitations());
         Box::pin(async move {
             // `Db::read`'s `spawn_blocking` needs the tokio runtime, which
@@ -182,17 +213,24 @@ impl Effects for Ports {
         text: String,
         now: EpochMillis,
     ) -> Answer<'_, Result<Vec<Occurrence>, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         Box::pin(async move {
-            core.call(async move { copy.search(&accounts, &text, now, CalendarScope::Shown, SEARCH_LIMIT).await })
-                .await
-                .map_err(|err| err.to_string())
+            core.call(async move {
+                copy.search(&accounts, &text, now, CalendarScope::Shown, SEARCH_LIMIT)
+                    .await
+            })
+            .await
+            .map_err(|err| err.to_string())
         })
     }
 
     fn event(&self, key: EventKey) -> Answer<'_, Result<Option<Event>, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         let (account_id, calendar, id) = key;
         Box::pin(async move {
@@ -202,8 +240,14 @@ impl Effects for Ports {
         })
     }
 
-    fn older_missing(&self, accounts: Vec<AccountId>, from: EpochMillis) -> Answer<'_, Result<bool, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+    fn older_missing(
+        &self,
+        accounts: Vec<AccountId>,
+        from: EpochMillis,
+    ) -> Answer<'_, Result<bool, String>> {
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         Box::pin(async move {
             core.call(async move { copy.older_missing(&accounts, from).await })
@@ -212,18 +256,25 @@ impl Effects for Ports {
         })
     }
 
-    fn reach_back(&self, accounts: Vec<AccountId>, from: EpochMillis) -> Answer<'_, Result<(), Unreached>> {
+    fn reach_back(
+        &self,
+        accounts: Vec<AccountId>,
+        from: EpochMillis,
+    ) -> Answer<'_, Result<(), Unreached>> {
         let Some(view) = self.view() else {
             return Box::pin(async { Err(Unreached::Failed("the calendar closed".to_string())) });
         };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         Box::pin(async move {
-            match core.call(async move { copy.reach_back(&accounts, from).await }).await {
+            match core
+                .call(async move { copy.reach_back(&accounts, from).await })
+                .await
+            {
                 Ok(_) => Ok(()),
                 Err(err) => {
-                    let offline = err
-                        .downcast_ref::<mailrs_sync::SyncError>()
-                        .is_some_and(|e| matches!(e, mailrs_sync::SyncError::Backend(b) if b.is_transient()));
+                    let offline = err.downcast_ref::<mailrs_sync::SyncError>().is_some_and(
+                        |e| matches!(e, mailrs_sync::SyncError::Backend(b) if b.is_transient()),
+                    );
                     Err(match offline {
                         true => Unreached::Offline,
                         false => Unreached::Failed(err.to_string()),
@@ -234,7 +285,9 @@ impl Effects for Ports {
     }
 
     fn laid_out(&self, page: PageId) -> Answer<'_, ()> {
-        let Some(scroller) = self.scroller(page) else { return Box::pin(async {}) };
+        let Some(scroller) = self.scroller(page) else {
+            return Box::pin(async {});
+        };
         let adjustment = scroller.vadjustment();
         if has_height(&adjustment) {
             return Box::pin(async {});
@@ -271,7 +324,9 @@ impl Effects for Ports {
             let page = view.page_by_id(page)?;
             Some(page.holder.clone().upcast())
         });
-        let Some(widget) = widget else { return Box::pin(async {}) };
+        let Some(widget) = widget else {
+            return Box::pin(async {});
+        };
         let (send, receive) = oneshot::channel::<()>();
         super::after_layout(&widget, move || {
             let _ = send.send(());
@@ -304,7 +359,9 @@ impl Effects for Ports {
 
     fn scroll_to(&self, page: PageId, hour: f64) {
         let Some(view) = self.view() else { return };
-        let Some(page) = view.page_by_id(page) else { return };
+        let Some(page) = view.page_by_id(page) else {
+            return;
+        };
         let shown = page.view.borrow();
         if let PageView::Grid(grid) = &*shown {
             let y = grid.grid.scroll_to_hour(hour);
@@ -314,8 +371,12 @@ impl Effects for Ports {
     }
 
     fn open_popover(&self, page: PageId, o: &Occurrence) -> bool {
-        let Some(view) = self.view() else { return false };
-        let Some(page) = view.page_by_id(page) else { return false };
+        let Some(view) = self.view() else {
+            return false;
+        };
+        let Some(page) = view.page_by_id(page) else {
+            return false;
+        };
         let key = super::block::key_of(o);
         let block = match &*page.view.borrow() {
             PageView::Grid(grid) => grid
@@ -353,25 +414,35 @@ impl Effects for Ports {
     fn draw_list(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate) {
         let Some(view) = self.view() else { return };
         let found = view.agenda_events(found, first, last);
-        view.list.show(&found, &view.calendars.borrow(), &chrono::Local);
+        view.list
+            .show(&found, &view.calendars.borrow(), &chrono::Local);
     }
 
     fn redraw_list(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate) {
         let Some(view) = self.view() else { return };
         let found = view.agenda_events(found, first, last);
-        view.list.replace(&found, &view.calendars.borrow(), &chrono::Local);
+        view.list
+            .replace(&found, &view.calendars.borrow(), &chrono::Local);
     }
 
-    fn prepend_list(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate, listed_from: EpochMillis) {
+    fn prepend_list(
+        &self,
+        found: Vec<Occurrence>,
+        first: NaiveDate,
+        last: NaiveDate,
+        listed_from: EpochMillis,
+    ) {
         let Some(view) = self.view() else { return };
         let found = view.agenda_events(shown::not_yet_listed(found, listed_from), first, last);
-        view.list.prepend(&found, &view.calendars.borrow(), &chrono::Local);
+        view.list
+            .prepend(&found, &view.calendars.borrow(), &chrono::Local);
     }
 
     fn append_list(&self, found: Vec<Occurrence>, first: NaiveDate, last: NaiveDate) {
         let Some(view) = self.view() else { return };
         let found = view.agenda_events(found, first, last);
-        view.list.append(&found, first, &view.calendars.borrow(), &chrono::Local);
+        view.list
+            .append(&found, first, &view.calendars.borrow(), &chrono::Local);
     }
 
     fn no_earlier(&self) {
@@ -382,7 +453,8 @@ impl Effects for Ports {
 
     fn draw_results(&self, found: Vec<Occurrence>) {
         if let Some(view) = self.view() {
-            view.results.show(&found, &view.calendars.borrow(), &chrono::Local);
+            view.results
+                .show(&found, &view.calendars.borrow(), &chrono::Local);
             view.views.set_visible_child_name("search");
         }
     }
@@ -391,7 +463,8 @@ impl Effects for Ports {
         let Some(view) = self.view() else { return };
         let offline = saying == Some(Older::Offline);
         view.older_spinner.set_visible(!offline);
-        view.older_spinner.set_spinning(saying == Some(Older::Loaded));
+        view.older_spinner
+            .set_spinning(saying == Some(Older::Loaded));
         view.older_label.set_label(&match offline {
             true => gettext("Older events can't load while offline"),
             false => gettext("Loading older events"),
@@ -418,7 +491,9 @@ impl Effects for Ports {
         shown: Event,
         when: Option<String>,
     ) -> Answer<'_, Result<Option<scope::Answer>, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         Box::pin(async move {
             view.choose(account_id, &change, &shown, when.as_deref())
                 .await
@@ -433,7 +508,9 @@ impl Effects for Ports {
         answer: scope::Answer,
         undo: Undo,
     ) -> Answer<'_, Result<Permitted<Option<u64>>, String>> {
-        let Some(view) = self.view() else { return Box::pin(async { closed() }) };
+        let Some(view) = self.view() else {
+            return Box::pin(async { closed() });
+        };
         let (core, copy) = (Rc::clone(&view.core), view.core.calendar_copy());
         let weak = Rc::downgrade(&view);
         Box::pin(async move {

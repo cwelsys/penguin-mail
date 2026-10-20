@@ -40,10 +40,7 @@ fn query_words_describes_the_tree_in_plain_words_otherwise() {
         Query::term(Term::From("ann@example.com".into())),
         Query::term(Term::Unread),
     ]);
-    assert_eq!(
-        query_words(&query, false),
-        "from ann@example.com, unread"
-    );
+    assert_eq!(query_words(&query, false), "from ann@example.com, unread");
 }
 
 #[tokio::test]
@@ -186,10 +183,25 @@ async fn delete_label_says_how_many_conversations_carry_it() {
     assert!(persons_labels(&h).is_empty());
     assert!(!stored_labels(&h).await.contains(&"Kites".into()));
     assert!(!h.labels_of("k1").await.contains(&"Label_kites".into()));
+    assert!(h.labels_of("k1").await.contains(&gmail::INBOX.into()));
+}
+
+#[tokio::test]
+async fn delete_label_without_a_provider_name_names_the_account() {
+    let h = with_kites().await;
+    h.desk.0.borrow_mut().accounts[0].provider_name = Some(String::new());
+    h.effects.asked.borrow_mut().approves = false;
     assert!(
-        h.labels_of("k1")
+        h.run("delete_label", json!({"account": ME, "label": "Kites"}))
             .await
-            .contains(&gmail::INBOX.into())
+            .is_err()
+    );
+    assert_eq!(
+        h.asked().questions,
+        [format!(
+            "Delete the label “Kites” from {ME}? 2 conversations carry it. \
+             The mail stays in the account, without the label."
+        )]
     );
 }
 
@@ -415,10 +427,20 @@ fn any_id_but_a_bare_address_goes_to_the_server_as_it_is() {
 #[tokio::test]
 async fn a_contact_kept_only_on_the_server_changes_by_its_id() {
     let h = harness().await;
-    let made = h.ok("create_contact", json!({"name": "Bo", "emails": ["bo@example.com"]})).await;
+    let made = h
+        .ok(
+            "create_contact",
+            json!({"name": "Bo", "emails": ["bo@example.com"]}),
+        )
+        .await;
     let id = made["created"]["id"].as_str().expect("an id").to_string();
 
-    let changed = h.ok("update_contact", json!({"contact": id, "organization": "Fernwood"})).await;
+    let changed = h
+        .ok(
+            "update_contact",
+            json!({"contact": id, "organization": "Fernwood"}),
+        )
+        .await;
     assert_eq!(changed["updated"]["organization"], "Fernwood");
     assert_eq!(
         h.asked().questions[1],
@@ -599,4 +621,20 @@ async fn export_mail_writes_one_message_as_eml() {
     let raw = std::fs::read_to_string(&file).expect("the file");
     assert!(raw.contains("Subject: Fern cuttings"), "{raw}");
     assert!(!raw.starts_with("From "), "an .eml has no mbox separator");
+}
+
+#[tokio::test]
+async fn a_throttled_label_change_names_its_provider() {
+    let h = with_kites().await;
+    h.desk.0.borrow_mut().accounts[0].provider_name = Some("Outlook".into());
+    h.gmail
+        .fail_next(mailrs_gmail::GmailError::RateLimited { retry_after: None });
+    let problem = h
+        .run(
+            "rename_label",
+            json!({"account": ME, "label": "Kites", "new_name": "Trips"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(problem, "Outlook asked Penguin Mail to wait");
 }

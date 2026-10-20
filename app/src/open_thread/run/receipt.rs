@@ -13,7 +13,10 @@ use crate::open_thread::OpenThread;
 pub enum ReceiptCard {
     Hidden,
     /// `to` asked to know when `message_id` was read.
-    Asked { message_id: String, to: String },
+    Asked {
+        message_id: String,
+        to: String,
+    },
     /// The answer is on its way.
     Working,
 }
@@ -44,7 +47,8 @@ impl ThreadRun {
         if self.receipt_working() {
             return;
         }
-        let Some(Some((message_id, to))) = wanted.on_screen(|_| self.find(OpenThread::asks_receipt))
+        let Some(Some((message_id, to))) =
+            wanted.on_screen(|_| self.find(OpenThread::asks_receipt))
         else {
             return;
         };
@@ -60,7 +64,9 @@ impl ThreadRun {
             return;
         };
         // The answer may have gone out while the store was read.
-        let answered_here = self.thread(|open| open.receipt_answered_here(&message_id)).unwrap_or(false);
+        let answered_here = self
+            .thread(|open| open.receipt_answered_here(&message_id))
+            .unwrap_or(false);
         if !answered && !answered_here && !self.receipt_working() {
             wanted.on_screen(|effects| effects.receipt_card(ReceiptCard::Asked { message_id, to }));
         }
@@ -70,7 +76,8 @@ impl ThreadRun {
     /// Anyone can send a report naming anyone, so one that answers nothing
     /// the person sent stays the mail it is.
     async fn reports(&self, wanted: &Want<'_>) {
-        let Some(Some(unchecked)) = wanted.on_screen(|_| self.thread(OpenThread::unchecked_reports))
+        let Some(Some(unchecked)) =
+            wanted.on_screen(|_| self.thread(OpenThread::unchecked_reports))
         else {
             return;
         };
@@ -130,14 +137,19 @@ impl ThreadRun {
                 let answered = wanted
                     .wait(|effects| effects.receipt_answered(account_id, message_id))
                     .await;
-                let (card, said) = match (answered, wanted.on_screen(|_| self.find(OpenThread::asks_receipt))) {
+                let (card, said) = match (
+                    answered,
+                    wanted.on_screen(|_| self.find(OpenThread::asks_receipt)),
+                ) {
                     (Some(Ok(false)), Some(Some((message_id, to)))) => (
                         ReceiptCard::Asked { message_id, to },
                         gettext("The receipt was not sent, and you can try again: {reason}"),
                     ),
                     _ => (
                         ReceiptCard::Hidden,
-                        gettext("The receipt may have gone out, so Penguin Mail will not send it again: {reason}"),
+                        gettext(
+                            "The receipt may have gone out, so Penguin Mail will not send it again: {reason}",
+                        ),
                     ),
                 };
                 wanted.on_screen(|effects| effects.receipt_card(card));

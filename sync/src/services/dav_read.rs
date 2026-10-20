@@ -47,13 +47,21 @@ impl Reads {
         let serial = self.next;
         self.by_collection.insert(
             collection.to_string(),
-            Pending { serial, queue: hrefs.into(), removed, token },
+            Pending {
+                serial,
+                queue: hrefs.into(),
+                removed,
+                token,
+            },
         );
         serial
     }
 
     pub(super) fn take(&mut self, collection: &str, serial: u64, batch: usize) -> Option<Taken> {
-        let pending = self.by_collection.get_mut(collection).filter(|p| p.serial == serial)?;
+        let pending = self
+            .by_collection
+            .get_mut(collection)
+            .filter(|p| p.serial == serial)?;
         let count = batch.min(pending.queue.len());
         let hrefs: Vec<String> = pending.queue.drain(..count).collect();
         let removed = std::mem::take(&mut pending.removed);
@@ -62,7 +70,12 @@ impl Reads {
         if last {
             self.by_collection.remove(collection);
         }
-        Some(Taken { hrefs, removed, last, token })
+        Some(Taken {
+            hrefs,
+            removed,
+            last,
+            token,
+        })
     }
 }
 
@@ -102,28 +115,56 @@ mod tests {
             "sync:t".into(),
         );
         let first = reads.take("/cal/", serial, 2).unwrap();
-        assert_eq!((first.hrefs.len(), first.removed.len(), first.last), (2, 1, false));
+        assert_eq!(
+            (first.hrefs.len(), first.removed.len(), first.last),
+            (2, 1, false)
+        );
         let rest = reads.take("/cal/", serial, 10).unwrap();
         assert!(rest.last && rest.removed.is_empty());
-        assert!(reads.take("/cal/", serial, 10).is_none(), "a finished read is gone");
+        assert!(
+            reads.take("/cal/", serial, 10).is_none(),
+            "a finished read is gone"
+        );
     }
 
     #[test]
     fn a_new_read_of_a_collection_replaces_the_old_one() {
         let mut reads = Reads::default();
-        let old = reads.start("/cal/", vec!["/cal/a.ics".into()], Vec::new(), String::new());
-        reads.start("/cal/", vec!["/cal/b.ics".into()], Vec::new(), String::new());
+        let old = reads.start(
+            "/cal/",
+            vec!["/cal/a.ics".into()],
+            Vec::new(),
+            String::new(),
+        );
+        reads.start(
+            "/cal/",
+            vec!["/cal/b.ics".into()],
+            Vec::new(),
+            String::new(),
+        );
         assert!(reads.take("/cal/", old, 10).is_none());
     }
 
     #[test]
     fn a_refused_login_is_recorded_and_held_for_a_new_password() {
         let refused = Mutex::new(None);
-        assert!(matches!(backend(DavError::Unauthorized, &refused), BackendError::NeedsReauth));
-        assert!(refused.lock().unwrap().is_some());
-        assert!(matches!(backend(DavError::InvalidSyncToken, &refused), BackendError::StateLost));
         assert!(matches!(
-            backend(DavError::Http { status: 502, detail: "bad gateway".into() }, &refused),
+            backend(DavError::Unauthorized, &refused),
+            BackendError::NeedsReauth
+        ));
+        assert!(refused.lock().unwrap().is_some());
+        assert!(matches!(
+            backend(DavError::InvalidSyncToken, &refused),
+            BackendError::StateLost
+        ));
+        assert!(matches!(
+            backend(
+                DavError::Http {
+                    status: 502,
+                    detail: "bad gateway".into()
+                },
+                &refused
+            ),
             BackendError::Offline(_)
         ));
     }

@@ -50,6 +50,7 @@ mail-builder.workspace = true
 mail-parser.workspace = true
 notify-rust.workspace = true
 pulldown-cmark.workspace = true
+psl.workspace = true
 rand.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
@@ -74,6 +75,7 @@ objc2-app-kit.workspace = true
 objc2-core-graphics.workspace = true
 objc2-foundation.workspace = true
 objc2-quartz-core.workspace = true
+objc2-user-notifications.workspace = true
 objc2-web-kit.workspace = true
 
 [dev-dependencies]
@@ -82,12 +84,16 @@ tempfile.workspace = true
 # Paused time for the tests of timed coalescing, as sync's tests use.
 tokio = { workspace = true, features = ["test-util"] }
 wiremock.workspace = true
+# The tray regression uses a private bus and a host that reads its signals.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 # The kind of package a build is for; see src/packaging.rs. A plain build
 # is the .deb or the tarball.
 [features]
+packaging-appimage = []
 packaging-rpm = []
 packaging-arch = []
+packaging-nix = []
 # Also moves the Google refresh tokens, the IMAP passwords and the
 # assistant's API keys and MCP tokens from the desktop keyring to the
 # Secret portal; see gmail/src/secret_portal.rs.

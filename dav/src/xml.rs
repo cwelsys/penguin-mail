@@ -53,6 +53,10 @@ pub struct Props {
     pub principal: Option<String>,
     pub calendar_home: Option<String>,
     pub addressbook_home: Option<String>,
+    /// The `mailto:` entries of `calendar-user-address-set`, lower-cased
+    /// and without the scheme: the addresses invitations name the
+    /// principal by. Its other entries are URLs of the principal itself.
+    pub addresses: Vec<String>,
     /// `calendar-timezone`: a VCALENDAR holding one VTIMEZONE.
     pub timezone: Option<String>,
     /// `supported-report-set` lists `sync-collection`.
@@ -60,11 +64,17 @@ pub struct Props {
 }
 
 fn options<'a>() -> ParsingOptions<'a> {
-    ParsingOptions { allow_dtd: false, nodes_limit: MOST_NODES, ..ParsingOptions::default() }
+    ParsingOptions {
+        allow_dtd: false,
+        nodes_limit: MOST_NODES,
+        ..ParsingOptions::default()
+    }
 }
 
 fn is(node: Node, namespace: &str, name: &str) -> bool {
-    node.is_element() && node.tag_name().name() == name && node.tag_name().namespace() == Some(namespace)
+    node.is_element()
+        && node.tag_name().name() == name
+        && node.tag_name().namespace() == Some(namespace)
 }
 
 fn child<'a, 'i>(node: Node<'a, 'i>, namespace: &str, name: &str) -> Option<Node<'a, 'i>> {
@@ -72,7 +82,11 @@ fn child<'a, 'i>(node: Node<'a, 'i>, namespace: &str, name: &str) -> Option<Node
 }
 
 fn text(node: Node) -> Option<String> {
-    let text: String = node.descendants().filter(Node::is_text).filter_map(|t| t.text()).collect();
+    let text: String = node
+        .descendants()
+        .filter(Node::is_text)
+        .filter_map(|t| t.text())
+        .collect();
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_string())
 }
@@ -82,16 +96,31 @@ fn status_code(node: Node) -> Option<u16> {
     text(node)?.split_whitespace().nth(1)?.parse().ok()
 }
 
+/// The address a `mailto:` URL names, lower-cased; `None` for any other
+/// URL.
+fn mailto(href: &str) -> Option<String> {
+    let (scheme, address) = href.split_once(':')?;
+    let address = address.trim();
+    (scheme.eq_ignore_ascii_case("mailto") && !address.is_empty())
+        .then(|| address.to_ascii_lowercase())
+}
+
 fn href_in(node: Node) -> Option<String> {
-    child(node, DAV, "href").and_then(text).map(|href| crate::ids::canonical_href(&href))
+    child(node, DAV, "href")
+        .and_then(text)
+        .map(|href| crate::ids::canonical_href(&href))
 }
 
 /// Reads a 207 answer.
 pub fn parse_multistatus(body: &str) -> Result<Multistatus, DavError> {
-    let doc = Document::parse_with_options(body, options()).map_err(|err| DavError::Parse(err.to_string()))?;
+    let doc = Document::parse_with_options(body, options())
+        .map_err(|err| DavError::Parse(err.to_string()))?;
     let root = doc.root_element();
     if !is(root, DAV, "multistatus") {
-        return Err(DavError::Parse(format!("expected a multistatus, found {}", root.tag_name().name())));
+        return Err(DavError::Parse(format!(
+            "expected a multistatus, found {}",
+            root.tag_name().name()
+        )));
     }
     let mut out = Multistatus::default();
     for node in root.children().filter(Node::is_element) {
@@ -111,7 +140,9 @@ fn response(node: Node) -> DavResponse {
         props: Props::default(),
     };
     for propstat in node.children().filter(|c| is(*c, DAV, "propstat")) {
-        let ok = child(propstat, DAV, "status").and_then(status_code).is_some_and(|s| (200..300).contains(&s));
+        let ok = child(propstat, DAV, "status")
+            .and_then(status_code)
+            .is_some_and(|s| (200..300).contains(&s));
         if let (true, Some(prop)) = (ok, child(propstat, DAV, "prop")) {
             read_props(prop, &mut read.props);
         }
@@ -121,7 +152,10 @@ fn response(node: Node) -> DavResponse {
 
 fn read_props(prop: Node, props: &mut Props) {
     for p in prop.children().filter(Node::is_element) {
-        let (ns, name) = (p.tag_name().namespace().unwrap_or_default(), p.tag_name().name());
+        let (ns, name) = (
+            p.tag_name().namespace().unwrap_or_default(),
+            p.tag_name().name(),
+        );
         match (ns, name) {
             (DAV, "displayname") => props.displayname = text(p),
             (APPLE, "calendar-color") => props.color = text(p),
@@ -151,6 +185,14 @@ fn read_props(prop: Node, props: &mut Props) {
             (DAV, "current-user-principal") => props.principal = href_in(p),
             (CALDAV, "calendar-home-set") => props.calendar_home = href_in(p),
             (CARDDAV, "addressbook-home-set") => props.addressbook_home = href_in(p),
+            (CALDAV, "calendar-user-address-set") => {
+                props.addresses = p
+                    .children()
+                    .filter(|c| is(*c, DAV, "href"))
+                    .filter_map(text)
+                    .filter_map(|href| mailto(&href))
+                    .collect();
+            }
             (CALDAV, "calendar-timezone") => props.timezone = text(p),
             (DAV, "supported-report-set") => {
                 props.reports_sync = p.descendants().any(|d| is(d, DAV, "sync-collection"));
@@ -167,12 +209,17 @@ pub fn precondition(body: &str) -> Option<String> {
     if !is(root, DAV, "error") {
         return None;
     }
-    root.children().find(Node::is_element).map(|c| c.tag_name().name().to_string())
+    root.children()
+        .find(Node::is_element)
+        .map(|c| c.tag_name().name().to_string())
 }
 
 /// Text escaped for an XML element.
 fn escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// The request bodies.
@@ -188,7 +235,7 @@ pub mod body {
     pub fn homes() -> &'static str {
         r#"<?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CR="urn:ietf:params:xml:ns:carddav">
-<D:prop><C:calendar-home-set/><CR:addressbook-home-set/></D:prop></D:propfind>"#
+<D:prop><C:calendar-home-set/><CR:addressbook-home-set/><C:calendar-user-address-set/></D:prop></D:propfind>"#
     }
 
     pub fn collections() -> &'static str {
@@ -222,11 +269,16 @@ pub mod body {
     /// Every event's etag, those overlapping `range` when given. An end
     /// that is not a date (`i64::MAX`) leaves the range open.
     pub fn calendar_query(range: Option<(EpochMillis, EpochMillis)>) -> String {
-        let stamp = |at: EpochMillis| chrono::DateTime::from_timestamp_millis(at).map(|at| at.format("%Y%m%dT%H%M%SZ").to_string());
+        let stamp = |at: EpochMillis| {
+            chrono::DateTime::from_timestamp_millis(at)
+                .map(|at| at.format("%Y%m%dT%H%M%SZ").to_string())
+        };
         let range = range
             .and_then(|(from, to)| {
                 let start = format!(r#" start="{}""#, stamp(from)?);
-                let end = stamp(to).map(|end| format!(r#" end="{end}""#)).unwrap_or_default();
+                let end = stamp(to)
+                    .map(|end| format!(r#" end="{end}""#))
+                    .unwrap_or_default();
                 Some(format!("<C:time-range{start}{end}/>"))
             })
             .unwrap_or_default();
@@ -260,15 +312,33 @@ pub mod body {
     }
 
     pub fn calendar_multiget(hrefs: &[String]) -> String {
-        multiget("C:calendar-multiget", r#"xmlns:C="urn:ietf:params:xml:ns:caldav""#, "<C:calendar-data/>", hrefs)
+        multiget(
+            "C:calendar-multiget",
+            r#"xmlns:C="urn:ietf:params:xml:ns:caldav""#,
+            "<C:calendar-data/>",
+            hrefs,
+        )
     }
 
     pub fn addressbook_multiget(hrefs: &[String]) -> String {
-        multiget("CR:addressbook-multiget", r#"xmlns:CR="urn:ietf:params:xml:ns:carddav""#, "<CR:address-data/>", hrefs)
+        multiget(
+            "CR:addressbook-multiget",
+            r#"xmlns:CR="urn:ietf:params:xml:ns:carddav""#,
+            "<CR:address-data/>",
+            hrefs,
+        )
     }
 
     fn multiget(element: &str, namespace: &str, data: &str, hrefs: &[String]) -> String {
-        let listed: String = hrefs.iter().map(|h| format!("<D:href>{}</D:href>", escape(&crate::ids::encode_path(&crate::ids::path_of(h))))).collect();
+        let listed: String = hrefs
+            .iter()
+            .map(|h| {
+                format!(
+                    "<D:href>{}</D:href>",
+                    escape(&crate::ids::encode_path(&crate::ids::path_of(h)))
+                )
+            })
+            .collect();
         format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
 <{element} xmlns:D="DAV:" {namespace}><D:prop><D:getetag/>{data}</D:prop>{listed}</{element}>"#
@@ -292,7 +362,10 @@ mod tests {
     #[test]
     fn a_sync_collection_answer_lists_changes_removals_and_the_token() {
         let read = parse_multistatus(SYNC).unwrap();
-        assert_eq!(read.sync_token.as_deref(), Some("http://radicale.org/ns/sync/abc"));
+        assert_eq!(
+            read.sync_token.as_deref(),
+            Some("http://radicale.org/ns/sync/abc")
+        );
         assert_eq!(read.responses[0].props.etag.as_deref(), Some("\"1\""));
         assert_eq!(read.responses[1].status, Some(404));
     }
@@ -331,7 +404,36 @@ mod tests {
         assert!(props.can_write);
         assert!(props.reports_sync);
         assert_eq!(props.getctag.as_deref(), Some("ctag-9"));
-        assert_eq!(props.timezone, None, "a property the server did not have stays empty");
+        assert_eq!(
+            props.timezone, None,
+            "a property the server did not have stays empty"
+        );
+    }
+
+    #[test]
+    fn a_principal_names_its_mailto_addresses_and_no_others() {
+        let homes = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response><d:href>/principals/users/robin/</d:href>
+    <d:propstat><d:prop>
+      <c:calendar-home-set><d:href>/calendars/robin/</d:href></c:calendar-home-set>
+      <c:calendar-user-address-set>
+        <d:href>mailto:Robin@Example.org</d:href>
+        <d:href>/principals/users/robin/</d:href>
+        <d:href>MAILTO:second@example.org</d:href>
+      </c:calendar-user-address-set>
+    </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let read = parse_multistatus(homes).unwrap();
+        assert_eq!(
+            read.responses[0].props.addresses,
+            ["robin@example.org", "second@example.org"]
+        );
+        let bare = parse_multistatus(COLLECTIONS).unwrap();
+        assert!(
+            bare.responses[0].props.addresses.is_empty(),
+            "a principal that names none has none"
+        );
     }
 
     #[test]
@@ -342,14 +444,18 @@ mod tests {
 
     #[test]
     fn a_document_type_declaration_is_refused() {
-        let body = r#"<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><multistatus xmlns="DAV:"/>"#;
+        let body =
+            r#"<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><multistatus xmlns="DAV:"/>"#;
         assert!(parse_multistatus(body).is_err());
     }
 
     #[test]
     fn an_open_ended_range_has_a_start_only() {
         let q = body::calendar_query(Some((0, i64::MAX)));
-        assert!(q.contains(r#"<C:time-range start="19700101T000000Z"/>"#), "{q}");
+        assert!(
+            q.contains(r#"<C:time-range start="19700101T000000Z"/>"#),
+            "{q}"
+        );
     }
 
     #[test]
@@ -359,8 +465,14 @@ mod tests {
 
     #[test]
     fn a_multiget_names_a_resource_on_another_host_by_its_path() {
-        let asked = ["https://p1-contacts.example.com:443/me/card/a b.vcf".to_string(), "/me/card/c.vcf".to_string()];
+        let asked = [
+            "https://p1-contacts.example.com:443/me/card/a b.vcf".to_string(),
+            "/me/card/c.vcf".to_string(),
+        ];
         let q = body::addressbook_multiget(&asked);
-        assert!(q.contains("<D:href>/me/card/a%20b.vcf</D:href><D:href>/me/card/c.vcf</D:href>"), "{q}");
+        assert!(
+            q.contains("<D:href>/me/card/a%20b.vcf</D:href><D:href>/me/card/c.vcf</D:href>"),
+            "{q}"
+        );
     }
 }

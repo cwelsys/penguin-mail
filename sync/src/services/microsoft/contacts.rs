@@ -42,7 +42,11 @@ fn lost<T>(parsed: serde_json::Result<T>) -> Result<T, BackendError> {
 
 fn person_of(c: &GraphContact) -> Person {
     let name = c.display_name.clone().or_else(|| {
-        let joined = [c.given_name.as_deref(), c.surname.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        let joined = [c.given_name.as_deref(), c.surname.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
         (!joined.is_empty()).then_some(joined)
     });
     let phone = c
@@ -53,7 +57,11 @@ fn person_of(c: &GraphContact) -> Person {
     Person {
         resource: c.id.clone(),
         name,
-        emails: c.email_addresses.iter().filter_map(|e| e.address.clone()).collect(),
+        emails: c
+            .email_addresses
+            .iter()
+            .filter_map(|e| e.address.clone())
+            .collect(),
         photo_url: Some(format!("{PHOTO_PREFIX}{}", c.id)),
         organization: c.company_name.clone(),
         phone,
@@ -73,7 +81,10 @@ fn body_of(fields: &ContactFields) -> Value {
     }
     if let Some(phones) = &fields.phones {
         body.insert("mobilePhone".into(), json!(phones.first()));
-        body.insert("businessPhones".into(), json!(phones.iter().skip(1).collect::<Vec<_>>()));
+        body.insert(
+            "businessPhones".into(),
+            json!(phones.iter().skip(1).collect::<Vec<_>>()),
+        );
     }
     if let Some(company) = &fields.organization {
         body.insert("companyName".into(), json!(company));
@@ -86,7 +97,13 @@ impl<G: GraphApi> Microsoft<G> {
     /// the list, then the others.
     async fn contact_folder_ids(&self) -> Result<Vec<String>, BackendError> {
         let err = |e| self.service_error(Service::Contacts, e);
-        let mut ids: Vec<String> = self.graph.default_contact_folder().await.map_err(err)?.into_iter().collect();
+        let mut ids: Vec<String> = self
+            .graph
+            .default_contact_folder()
+            .await
+            .map_err(err)?
+            .into_iter()
+            .collect();
         let others = self.graph.contact_folders().await.map_err(err)?;
         for folder in others {
             if !ids.contains(&folder.id) {
@@ -121,10 +138,18 @@ impl<G: GraphApi> ContactsService for Microsoft<G> {
                 }
                 if folders.is_empty() {
                     let sync = json!(SyncState::default()).to_string();
-                    return Ok(ConnectionsPage { next_sync_token: Some(sync), ..ConnectionsPage::default() });
+                    return Ok(ConnectionsPage {
+                        next_sync_token: Some(sync),
+                        ..ConnectionsPage::default()
+                    });
                 }
                 let at = folders.remove(0);
-                PageState { folders, at, link: None, done: BTreeMap::new() }
+                PageState {
+                    folders,
+                    at,
+                    link: None,
+                    done: BTreeMap::new(),
+                }
             }
         };
         let link = state.link.clone().or_else(|| known.get(&state.at).cloned());
@@ -153,7 +178,12 @@ impl<G: GraphApi> ContactsService for Microsoft<G> {
             state.done.insert(state.at.clone(), delta);
             state.link = None;
             if state.folders.is_empty() {
-                next_sync_token = Some(json!(SyncState { folders: std::mem::take(&mut state.done) }).to_string());
+                next_sync_token = Some(
+                    json!(SyncState {
+                        folders: std::mem::take(&mut state.done)
+                    })
+                    .to_string(),
+                );
             } else {
                 state.at = state.folders.remove(0);
             }
@@ -161,11 +191,18 @@ impl<G: GraphApi> ContactsService for Microsoft<G> {
         if next_sync_token.is_none() {
             next_page_token = Some(json!(state).to_string());
         }
-        Ok(ConnectionsPage { people, deleted, next_page_token, next_sync_token })
+        Ok(ConnectionsPage {
+            people,
+            deleted,
+            next_page_token,
+            next_sync_token,
+        })
     }
 
     async fn contact_photo(&self, url: &str) -> Result<Vec<u8>, BackendError> {
-        let id = url.strip_prefix(PHOTO_PREFIX).ok_or(BackendError::NotFound)?;
+        let id = url
+            .strip_prefix(PHOTO_PREFIX)
+            .ok_or(BackendError::NotFound)?;
         let photo = self
             .graph
             .contact_photo(id, PHOTO_LIMIT)
@@ -183,7 +220,11 @@ impl<G: GraphApi> ContactsService for Microsoft<G> {
         Ok(person_of(&made))
     }
 
-    async fn update_contact(&self, resource: &str, fields: &ContactFields) -> Result<Person, BackendError> {
+    async fn update_contact(
+        &self,
+        resource: &str,
+        fields: &ContactFields,
+    ) -> Result<Person, BackendError> {
         let err = |e| self.service_error(Service::Contacts, e);
         let mut body = body_of(fields);
         // Outlook.com rebuilds a display name a change leaves out, from the

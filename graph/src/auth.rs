@@ -164,7 +164,10 @@ impl std::fmt::Debug for Tokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tokens")
             .field("access", &self.access)
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<hidden>"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<hidden>"),
+            )
             .field("tenant", &self.id_token.as_ref().map(|id| id.tenant))
             .finish_non_exhaustive()
     }
@@ -672,8 +675,15 @@ mod hidden_tests {
 
     #[test]
     fn debug_output_leaves_out_tokens_the_verifier_and_the_username() {
-        let access = AccessToken { token: "EwB.access".into(), expires_at: Instant::now(), granted: None };
-        let id_token = IdToken { tenant: Tenant::Personal, username: Some("dana@outlook.com".into()) };
+        let access = AccessToken {
+            token: "EwB.access".into(),
+            expires_at: Instant::now(),
+            granted: None,
+        };
+        let id_token = IdToken {
+            tenant: Tenant::Personal,
+            username: Some("dana@outlook.com".into()),
+        };
         let tokens = Tokens {
             access: access.clone(),
             refresh_token: Some("M.C5.refresh".into()),

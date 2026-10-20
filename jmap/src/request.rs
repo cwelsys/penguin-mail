@@ -42,7 +42,10 @@ impl Default for Request {
 
 impl Request {
     pub fn new() -> Request {
-        Request { using: BTreeSet::from([CORE]), calls: Vec::new() }
+        Request {
+            using: BTreeSet::from([CORE]),
+            calls: Vec::new(),
+        }
     }
 
     /// Adds a call that needs `capability`, and answers its id.
@@ -74,7 +77,11 @@ impl Request {
     }
 
     pub fn body(&self) -> Value {
-        let calls: Vec<Value> = self.calls.iter().map(|(name, args, id)| json!([name, args, id])).collect();
+        let calls: Vec<Value> = self
+            .calls
+            .iter()
+            .map(|(name, args, id)| json!([name, args, id]))
+            .collect();
         json!({ "using": self.using().collect::<Vec<_>>(), "methodCalls": calls })
     }
 }
@@ -98,13 +105,18 @@ pub struct Response {
 impl Response {
     pub fn parse(bytes: &[u8]) -> Result<Response, JmapError> {
         let wire: Wire = serde_json::from_slice(bytes).map_err(|e| decode("the answer", &e))?;
-        Ok(Response { session_state: wire.session_state, answers: wire.method_responses })
+        Ok(Response {
+            session_state: wire.session_state,
+            answers: wire.method_responses,
+        })
     }
 
     /// Whether an answer to call `id` named `name`, or an error in its
     /// place, is still there to take.
     pub fn answered(&self, id: &CallId, name: &str) -> bool {
-        self.answers.iter().any(|(n, _, i)| *i == id.0 && (n == name || n == "error"))
+        self.answers
+            .iter()
+            .any(|(n, _, i)| *i == id.0 && (n == name || n == "error"))
     }
 
     /// The `name` answer to call `id`, or the error the server put in its
@@ -118,7 +130,9 @@ impl Response {
         let (answered, args, _) = self.answers.remove(at);
         if answered == "error" {
             return Err(method_error(
-                args.get("type").and_then(Value::as_str).unwrap_or("serverFail"),
+                args.get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("serverFail"),
                 args.get("description").and_then(Value::as_str),
             ));
         }
@@ -147,11 +161,18 @@ mod tests {
     fn calls_get_ids_in_order_and_a_back_reference_names_one() {
         let mut request = Request::new();
         let query = request.call(MAIL, "Email/query", json!({"accountId": "A1"}));
-        request.call(MAIL, "Email/get", json!({"accountId": "A1", "#ids": query.result_of("Email/query", "/ids")}));
+        request.call(
+            MAIL,
+            "Email/get",
+            json!({"accountId": "A1", "#ids": query.result_of("Email/query", "/ids")}),
+        );
         let body = request.body();
         assert_eq!(body["methodCalls"][0][2], "c0");
         assert_eq!(body["methodCalls"][1][0], "Email/get");
-        assert_eq!(body["methodCalls"][1][1]["#ids"], json!({"resultOf": "c0", "name": "Email/query", "path": "/ids"}));
+        assert_eq!(
+            body["methodCalls"][1][1]["#ids"],
+            json!({"resultOf": "c0", "name": "Email/query", "path": "/ids"})
+        );
         assert_eq!(body["using"], json!([CORE, MAIL]));
     }
 
@@ -162,7 +183,12 @@ mod tests {
         assert_eq!(response.session_state, "s1");
         let ids: serde_json::Value = response.take(&CallId("c0".into()), "Email/query").unwrap();
         assert_eq!(ids["ids"][0], "M1");
-        assert!(response.take::<serde_json::Value>(&CallId("c0".into()), "Email/query").is_err(), "taken once");
+        assert!(
+            response
+                .take::<serde_json::Value>(&CallId("c0".into()), "Email/query")
+                .is_err(),
+            "taken once"
+        );
     }
 
     #[test]
@@ -181,7 +207,9 @@ mod tests {
         let mut response = Response::parse(text).unwrap();
         let set: serde_json::Value = response.take(&CallId("c1".into()), "Email/set").unwrap();
         assert!(set["updated"].get("M1").is_some());
-        let submission: serde_json::Value = response.take(&CallId("c1".into()), "EmailSubmission/set").unwrap();
+        let submission: serde_json::Value = response
+            .take(&CallId("c1".into()), "EmailSubmission/set")
+            .unwrap();
         assert_eq!(submission["created"]["s"]["id"], "S1");
     }
 

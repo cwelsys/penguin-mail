@@ -55,9 +55,9 @@ dependencies = [
 
 [[package]]
 name = "ammonia"
-version = "4.2.3"
+version = "4.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061e83b03c2681c18a6787d956e355c74e0b98ba7ba3d69b0822ade1e6f1d716"
+checksum = "1f45dfa685e1ec33b1bf1a3b93b8047cbdbef41b6040deebbe6bea7720a45574"
 dependencies = [
  "cssparser",
  "html5ever",
@@ -2401,7 +2401,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2435,7 +2435,9 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation",
  "objc2-quartz-core",
+ "objc2-user-notifications",
  "objc2-web-kit",
+ "psl",
  "pulldown-cmark",
  "rand 0.10.3",
  "reqwest",
@@ -2453,11 +2455,12 @@ dependencies = [
  "url",
  "webkit6",
  "wiremock",
+ "zbus",
 ]
 
 [[package]]
 name = "mailrs-ai"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "async-channel 2.5.0",
  "base64 0.23.1",
@@ -2474,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-cli"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -2492,7 +2495,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-dav"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "calcard",
@@ -2515,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-discover"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "futures",
  "hickory-resolver",
@@ -2535,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-domain"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -2549,7 +2552,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-gmail"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2572,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-graph"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2591,7 +2594,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-imap"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "async-imap",
  "base64 0.23.1",
@@ -2614,7 +2617,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-jmap"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2636,7 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-mime"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "encoding_rs",
@@ -2647,7 +2650,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-pgp"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "libc",
  "mail-builder",
@@ -2658,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-pop3"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "mailrs-discover",
@@ -2673,7 +2676,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-sieve"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2691,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-smime"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "mail-builder",
  "mailrs-pgp",
@@ -2702,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-store"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "chrono",
  "mailrs-domain",
@@ -2714,11 +2717,12 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "mailrs-sync"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "async-channel 2.5.0",
  "base64 0.23.1",
@@ -2756,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "mailrs-testmail"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "rand 0.10.3",
  "reqwest",
@@ -3244,6 +3248,18 @@ dependencies = [
  "bitflags",
  "objc2",
  "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-user-notifications"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
+dependencies = [
+ "bitflags",
+ "block2",
+ "objc2",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -3961,9 +3977,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",

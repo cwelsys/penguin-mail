@@ -8,9 +8,9 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::glib;
 use mailrs_domain::{Account, AccountId, Provider};
-use mailrs_sync::{Offers, Permitted};
 use mailrs_sync::hidden::HiddenAddress;
 use mailrs_sync::masked::{MaskedAddress, MaskedState};
+use mailrs_sync::{Offers, Permitted};
 
 use crate::app::App;
 use crate::permission::Permission;
@@ -109,14 +109,18 @@ pub fn present(
         .transition_type(gtk::StackTransitionType::Crossfade)
         .vhomogeneous(false)
         .build();
-    let accounts = with_rules(app.accounts(), &offers);
+    let accounts = with_rules(app.mail_accounts(), &offers);
     let masked: Vec<Account> = accounts
         .iter()
         .filter(|a| offers(a.id).masked_email)
         .cloned()
         .collect();
     let list = adw::PreferencesGroup::builder()
-        .description(if masked.is_empty() { about() } else { about_masked() })
+        .description(if masked.is_empty() {
+            about()
+        } else {
+            about_masked()
+        })
         .build();
     stack.add_named(&fitted(&list), Some("list"));
     let add = gtk::Button::builder()
@@ -189,10 +193,7 @@ fn created_on(ts: mailrs_domain::EpochMillis) -> String {
                 &gettext("Created {date}"),
                 &[(
                     "date",
-                    &crate::format::day_month(
-                        when.date_naive(),
-                        chrono::Local::now().date_naive(),
-                    ),
+                    &crate::format::day_month(when.date_naive(), chrono::Local::now().date_naive()),
                 )],
             )
             // One line holds the whole date, however the subtitle wraps.
@@ -258,9 +259,14 @@ impl Dialog {
     /// over it at the full height. The dialog measures its content once
     /// when it opens, so each change of the list asks again.
     fn fit(&self) {
-        let on_list = self.nav.visible_page().is_some_and(|page| page == self.home);
+        let on_list = self
+            .nav
+            .visible_page()
+            .is_some_and(|page| page == self.home);
         let height = match self.dialog.child() {
-            Some(content) if on_list => content.measure(gtk::Orientation::Vertical, CONTENT_WIDTH).1,
+            Some(content) if on_list => {
+                content.measure(gtk::Orientation::Vertical, CONTENT_WIDTH).1
+            }
             _ => FULL_HEIGHT,
         };
         self.dialog.set_content_height(height);
@@ -322,7 +328,9 @@ impl Dialog {
                 return;
             }
             this.list.remove(&loading);
-            this.shown.borrow_mut().retain(|row| row != loading.upcast_ref::<gtk::Widget>());
+            this.shown
+                .borrow_mut()
+                .retain(|row| row != loading.upcast_ref::<gtk::Widget>());
             let mut rows = listed;
             for (account, addresses) in read {
                 match addresses {
@@ -519,12 +527,20 @@ impl Dialog {
             };
             switch.set_sensitive(false);
             let id = id.clone();
-            let state = if active { MaskedState::Enabled } else { MaskedState::Disabled };
+            let state = if active {
+                MaskedState::Enabled
+            } else {
+                MaskedState::Disabled
+            };
             glib::spawn_future_local(async move {
                 match this.app.set_masked_state(account_id, &id, state).await {
-                    Ok(()) if active => this.toast(&gettext("Mail to this address reaches you again")),
+                    Ok(()) if active => {
+                        this.toast(&gettext("Mail to this address reaches you again"))
+                    }
                     Ok(()) => this.toast(&gettext("Mail to this address is now dropped")),
-                    Err(err) => this.failed(&gettext("Could not change the address: {reason}"), &err),
+                    Err(err) => {
+                        this.failed(&gettext("Could not change the address: {reason}"), &err)
+                    }
                 }
                 this.reload();
             });
@@ -563,7 +579,11 @@ impl Dialog {
             if !question.ask(&this.dialog).await {
                 return;
             }
-            match this.app.set_masked_state(account_id, &id, MaskedState::Deleted).await {
+            match this
+                .app
+                .set_masked_state(account_id, &id, MaskedState::Deleted)
+                .await
+            {
                 Ok(()) => this.toast(&gettext("Address deleted")),
                 Err(err) => this.failed(&gettext("Could not delete the address: {reason}"), &err),
             }
@@ -682,7 +702,9 @@ impl Dialog {
             .css_classes(["suggested-action"])
             .build();
         // The back button is the way out, as the mockup draws it.
-        let header = adw::HeaderBar::builder().show_end_title_buttons(false).build();
+        let header = adw::HeaderBar::builder()
+            .show_end_title_buttons(false)
+            .build();
         header.pack_end(&create);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
@@ -717,7 +739,11 @@ impl Dialog {
             if this.makes_masked(selected) {
                 let site = site_entry.text().to_string();
                 glib::spawn_future_local(async move {
-                    match this.app.create_masked_address(chosen.id, &site, &text).await {
+                    match this
+                        .app
+                        .create_masked_address(chosen.id, &site, &text)
+                        .await
+                    {
                         Ok(masked) => {
                             this.reload();
                             this.show_created(
@@ -884,11 +910,25 @@ mod tests {
     #[test]
     fn an_account_with_masked_email_alone_takes_new_addresses() {
         let offers = |id| match id {
-            2 => Offers { rules: false, labels: false, masked_email: true, ..Offers::EVERYTHING },
-            _ => Offers { rules: false, ..Offers::EVERYTHING },
+            2 => Offers {
+                rules: false,
+                labels: false,
+                masked_email: true,
+                ..Offers::EVERYTHING
+            },
+            _ => Offers {
+                rules: false,
+                ..Offers::EVERYTHING
+            },
         };
-        let accounts = vec![account(1, "a@example.com"), account(2, "dana@fastmail.example")];
-        let kept: Vec<String> = with_rules(accounts, offers).into_iter().map(|a| a.email).collect();
+        let accounts = vec![
+            account(1, "a@example.com"),
+            account(2, "dana@fastmail.example"),
+        ];
+        let kept: Vec<String> = with_rules(accounts, offers)
+            .into_iter()
+            .map(|a| a.email)
+            .collect();
         assert_eq!(kept, ["dana@fastmail.example"]);
     }
 
@@ -906,26 +946,41 @@ mod tests {
 
     #[test]
     fn a_masked_row_names_the_site_then_the_note() {
-        assert_eq!(masked_details(&masked(MaskedState::Enabled, "Rail pass")), "railhop.example · Rail pass");
+        assert_eq!(
+            masked_details(&masked(MaskedState::Enabled, "Rail pass")),
+            "railhop.example · Rail pass"
+        );
     }
 
     #[test]
     fn a_masked_row_skips_an_empty_note() {
-        assert_eq!(masked_details(&masked(MaskedState::Enabled, "")), "railhop.example");
+        assert_eq!(
+            masked_details(&masked(MaskedState::Enabled, "")),
+            "railhop.example"
+        );
     }
 
     #[test]
     fn a_disabled_masked_row_says_its_mail_is_dropped() {
-        assert!(masked_details(&masked(MaskedState::Disabled, "")).ends_with("Off: mail to it is dropped"));
+        assert!(
+            masked_details(&masked(MaskedState::Disabled, ""))
+                .ends_with("Off: mail to it is dropped")
+        );
     }
 
     #[test]
     fn a_pending_masked_row_says_it_waits_for_mail() {
-        assert!(masked_details(&masked(MaskedState::Pending, "")).ends_with("Waiting for its first message"));
+        assert!(
+            masked_details(&masked(MaskedState::Pending, ""))
+                .ends_with("Waiting for its first message")
+        );
     }
 
     #[test]
     fn a_long_address_may_break_only_before_its_domain() {
-        assert_eq!(breakable("tern.quill@fastmail.example"), "tern.quill\u{200b}@fastmail.example");
+        assert_eq!(
+            breakable("tern.quill@fastmail.example"),
+            "tern.quill\u{200b}@fastmail.example"
+        );
     }
 }

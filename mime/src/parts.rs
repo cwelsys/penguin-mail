@@ -73,7 +73,10 @@ pub fn numbered(parent: &str, i: usize) -> String {
 /// A Content-ID with its angle brackets trimmed off, the way both the
 /// raw reader and a server's BODYSTRUCTURE store one.
 pub fn content_id(id: &str) -> String {
-    id.trim().trim_start_matches('<').trim_end_matches('>').to_string()
+    id.trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_string()
 }
 
 impl Parts {
@@ -115,7 +118,9 @@ impl Parts {
 /// The body the window shows for a message with these parts.
 pub fn body(parts: &Parts) -> MessageBody {
     let mut body = MessageBody {
-        list_unsubscribe: parts.header("List-Unsubscribe").map(|v| v.trim().to_string()),
+        list_unsubscribe: parts
+            .header("List-Unsubscribe")
+            .map(|v| v.trim().to_string()),
         one_click_unsubscribe: parts
             .header("List-Unsubscribe-Post")
             .is_some_and(|v| v.contains("One-Click")),
@@ -204,7 +209,12 @@ fn message_file_name(part: &Part) -> String {
         .map(|c| if matches!(c, '/' | '\\') { '-' } else { c })
         .collect();
     let words: Vec<&str> = subject.split_whitespace().collect();
-    let stem: String = words.join(" ").trim_matches('.').chars().take(100).collect();
+    let stem: String = words
+        .join(" ")
+        .trim_matches('.')
+        .chars()
+        .take(100)
+        .collect();
     match stem.trim() {
         "" => "message.eml".to_string(),
         stem => format!("{stem}.eml"),
@@ -291,7 +301,9 @@ fn attachment_name(name: &str, mime: &str, content_id: Option<&str>) -> String {
 /// with the structure path (`mailrs_gmail::structure::text_by_reference`),
 /// which needs the same rule to know which by-reference part to fetch.
 pub fn is_calendar(mime: &str, filename: &str) -> bool {
-    mime == "text/calendar" || mime == "application/ics" || filename.to_ascii_lowercase().ends_with(".ics")
+    mime == "text/calendar"
+        || mime == "application/ics"
+        || filename.to_ascii_lowercase().ends_with(".ics")
 }
 
 /// Which wrapper the message arrived in and which standard wrote it, read
@@ -302,10 +314,15 @@ fn protection(top: &Part) -> Option<Protection> {
     let protocol = top.protocol.as_deref();
     match top.mime_type.as_str() {
         "multipart/signed" => wrapped(protocol, &children, Protection::Signed, PGP_SIGNATURE)
-            .or_else(|| wrapped(protocol, &children, Protection::SmimeSigned, PKCS7_SIGNATURE)),
-        "multipart/encrypted" => {
-            wrapped(protocol, &children, Protection::Encrypted, PGP_ENCRYPTED)
-        }
+            .or_else(|| {
+                wrapped(
+                    protocol,
+                    &children,
+                    Protection::SmimeSigned,
+                    PKCS7_SIGNATURE,
+                )
+            }),
+        "multipart/encrypted" => wrapped(protocol, &children, Protection::Encrypted, PGP_ENCRYPTED),
         // The blob shapes of S/MIME. The `x-` names are the ones mail
         // clients sent before the media types were registered.
         "application/pkcs7-mime" | "application/x-pkcs7-mime" => {

@@ -29,8 +29,16 @@ use crate::unsubscribe_page::{Adviser, Browser, PageBrowser, model_adviser};
 
 impl MainWindow {
     /// Runs one tool call from the assistant.
-    pub(super) async fn run_tool(self: &Rc<Self>, name: &str, input: Value) -> ToolOutcome {
-        self.tools().run(name, input).await
+    pub(super) async fn run_tool(
+        self: &Rc<Self>,
+        name: &str,
+        input: Value,
+        picked_files: std::sync::Arc<[PathBuf]>,
+    ) -> ToolOutcome {
+        self.tools()
+            .with_picked_files(picked_files)
+            .run(name, input)
+            .await
     }
 
     /// The tools, with this window behind both ports.
@@ -86,7 +94,10 @@ impl Desk for Ports {
 
     fn default_account(&self) -> Option<AccountId> {
         let app = self.0.app.upgrade()?;
-        app.default_account(self.0.account_in_view())
+        app.account_for(
+            crate::settings::AccountUse::Assistant,
+            self.0.account_in_view(),
+        )
     }
 
     fn downloads(&self) -> PathBuf {

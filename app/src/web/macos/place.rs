@@ -88,13 +88,15 @@ pub(super) struct Float {
 /// it when the anchor leaves the screen, and taking the keyboard with it.
 pub(super) fn follow(inner: &Rc<Inner>) {
     let weak = Rc::downgrade(inner);
-    inner.anchor.add_tick_callback(move |_, _| match weak.upgrade() {
-        Some(inner) => {
-            place(&inner);
-            glib::ControlFlow::Continue
-        }
-        None => glib::ControlFlow::Break,
-    });
+    inner
+        .anchor
+        .add_tick_callback(move |_, _| match weak.upgrade() {
+            Some(inner) => {
+                place(&inner);
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
     let weak = Rc::downgrade(inner);
     inner.anchor.connect_unmap(move |_| {
         if let Some(inner) = weak.upgrade() {
@@ -217,7 +219,9 @@ fn place(inner: &Rc<Inner>) {
     if !anchor.is_mapped() {
         return;
     }
-    let Some(native) = anchor.native() else { return };
+    let Some(native) = anchor.native() else {
+        return;
+    };
     let Some(window) = native.surface().as_ref().and_then(ns_window) else {
         return;
     };

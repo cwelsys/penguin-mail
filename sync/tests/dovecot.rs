@@ -16,9 +16,8 @@ use mailrs_domain::{AccountId, ChangeEvent, Target};
 use mailrs_imap::{ImapClient, Login, SmtpClient};
 use mailrs_store::{Db, accounts};
 use mailrs_sync::{
-    AccountServices, AccountSync, DEFAULT_BODY_CACHE_BYTES, EngineConfig, ImapSettings, MailBackend,
-    SyncEngine,
-    TriageAction,
+    AccountServices, AccountSync, DEFAULT_BODY_CACHE_BYTES, EngineConfig, ImapSettings,
+    MailBackend, SyncEngine, TriageAction,
 };
 use mailrs_testmail::{Certs, Dovecot, Mailpit, Profile, Submission};
 use rusqlite::OptionalExtension;
@@ -402,7 +401,8 @@ impl<'a> Run<'a> {
         self.a_body_opens().await;
         self.another_clients_changes_arrive().await;
         self.a_move_elsewhere_takes_mail_out_of_the_inbox().await;
-        self.mail_marked_deleted_elsewhere_leaves_and_comes_back().await;
+        self.mail_marked_deleted_elsewhere_leaves_and_comes_back()
+            .await;
         self.flags_reach_the_server().await;
         self.a_move_keeps_the_message_its_id().await;
         self.archive_files_the_thread().await;
@@ -934,7 +934,13 @@ impl<'a> Run<'a> {
     }
 
     async fn storage_comes_from_the_quota_root(&self) {
-        let storage = self.sync.services().mail.storage().await.expect("a storage answer");
+        let storage = self
+            .sync
+            .services()
+            .mail
+            .storage()
+            .await
+            .expect("a storage answer");
         match self.profile {
             Profile::Full | Profile::Sieve => {
                 let storage = storage.expect("Dovecot reports the 1 GiB quota");

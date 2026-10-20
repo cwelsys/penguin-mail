@@ -455,7 +455,12 @@ impl FakeImap {
         self.with(|s| {
             s.mailboxes
                 .get(mailbox)
-                .map(|m| m.messages.values().map(|msg| String::from_utf8_lossy(&msg.raw).into_owned()).collect())
+                .map(|m| {
+                    m.messages
+                        .values()
+                        .map(|msg| String::from_utf8_lossy(&msg.raw).into_owned())
+                        .collect()
+                })
                 .unwrap_or_default()
         })
     }
@@ -476,7 +481,8 @@ impl FakeImap {
         f: impl FnOnce(&mut ImapState) -> Result<T, ImapError>,
     ) -> Result<T, ImapError> {
         self.with(|s| {
-            let names = |m: &str| line == m || line.strip_prefix(m).is_some_and(|r| r.starts_with(' '));
+            let names =
+                |m: &str| line == m || line.strip_prefix(m).is_some_and(|r| r.starts_with(' '));
             let aimed = s.aimed.iter().position(|(m, _)| names(m));
             let mut later = None;
             for (at, (m, pass, _)) in s.aimed_later.iter_mut().enumerate() {
@@ -617,7 +623,6 @@ impl ImapApi for FakeImap {
                 .count() as u32)
         })
     }
-
 
     /// The real client answers from what the server said at sign-in, so
     /// this is no server call: it is not logged and uses up no planned

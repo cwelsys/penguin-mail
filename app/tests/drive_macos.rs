@@ -19,15 +19,26 @@ fn the_driver_preserves_failure_and_limits_the_watchdog_to_its_child() {
     std::fs::copy(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/drive-macos.sh"),
         root.join("scripts/drive-macos.sh"),
-    ).unwrap();
+    )
+    .unwrap();
     executable(&root.join("bin/cargo"), "#!/bin/sh\nexit 0\n");
     executable(&root.join("bin/sleep"), "#!/bin/sh\nexec /bin/sleep 0.2\n");
     std::fs::write(root.join("steps.txt"), "quit\n").unwrap();
-    let run = || Command::new("sh")
-        .arg(root.join("scripts/drive-macos.sh"))
-        .arg(root.join("steps.txt"))
-        .env("PATH", format!("{}:{}", root.join("bin").display(), std::env::var("PATH").unwrap()))
-        .output().unwrap();
+    let run = || {
+        Command::new("sh")
+            .arg(root.join("scripts/drive-macos.sh"))
+            .arg(root.join("steps.txt"))
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    root.join("bin").display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .output()
+            .unwrap()
+    };
     let app = root.join("target/debug/penguin-mail");
     executable(&app, "#!/bin/sh\necho drive: done\nexit 0\n");
     assert!(run().status.success());

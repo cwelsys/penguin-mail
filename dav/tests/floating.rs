@@ -13,8 +13,14 @@ use mailrs_domain::calendar::{Event, expand, local};
 const NOW: i64 = 1_790_000_000_000;
 
 fn at(zone: Tz, m: u32, d: u32, h: u32) -> EpochMillis {
-    let naive = NaiveDate::from_ymd_opt(2026, m, d).unwrap().and_hms_opt(h, 0, 0).unwrap();
-    zone.from_local_datetime(&naive).single().unwrap().timestamp_millis()
+    let naive = NaiveDate::from_ymd_opt(2026, m, d)
+        .unwrap()
+        .and_hms_opt(h, 0, 0)
+        .unwrap();
+    zone.from_local_datetime(&naive)
+        .single()
+        .unwrap()
+        .timestamp_millis()
 }
 
 /// A weekly 09:00 swim on Wednesdays from 21 October, past the night the
@@ -32,13 +38,21 @@ fn floating() -> String {
 }
 
 fn read(text: &str) -> Event {
-    read_resource(text, "/cal/home/", "/cal/home/swim.ics", "e1", &[]).unwrap().events.remove(0)
+    read_resource(text, "/cal/home/", "/cal/home/swim.ics", "e1", &[])
+        .unwrap()
+        .events
+        .remove(0)
 }
 
 fn hours(zone: Tz, event: &Event) -> Vec<u32> {
     expand(event, at(zone, 10, 1, 0), at(zone, 12, 1, 0))
         .iter()
-        .map(|(start, _)| DateTime::from_timestamp_millis(*start).unwrap().with_timezone(&zone).hour())
+        .map(|(start, _)| {
+            DateTime::from_timestamp_millis(*start)
+                .unwrap()
+                .with_timezone(&zone)
+                .hour()
+        })
         .collect()
 }
 
@@ -51,8 +65,14 @@ fn a_floating_start_reads_as_that_clock_time_here() {
 
 #[test]
 fn a_floating_series_repeats_at_its_clock_time_across_the_change() {
-    assert_eq!(local::pinned(Lisbon, || hours(Lisbon, &read(&floating()))), vec![9, 9, 9]);
-    assert_eq!(local::pinned(New_York, || hours(New_York, &read(&floating()))), vec![9, 9, 9]);
+    assert_eq!(
+        local::pinned(Lisbon, || hours(Lisbon, &read(&floating()))),
+        vec![9, 9, 9]
+    );
+    assert_eq!(
+        local::pinned(New_York, || hours(New_York, &read(&floating()))),
+        vec![9, 9, 9]
+    );
 }
 
 #[test]
@@ -60,7 +80,10 @@ fn a_floating_exclusion_leaves_out_its_occurrence() {
     let text = swim("DTSTART:20261021T090000", "EXDATE:20261028T090000\r\n");
     let starts = local::pinned(Lisbon, || {
         let event = read(&text);
-        expand(&event, at(Lisbon, 10, 1, 0), at(Lisbon, 12, 1, 0)).into_iter().map(|(s, _)| s).collect::<Vec<_>>()
+        expand(&event, at(Lisbon, 10, 1, 0), at(Lisbon, 12, 1, 0))
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<Vec<_>>()
     });
     assert_eq!(starts, vec![at(Lisbon, 10, 21, 9), at(Lisbon, 11, 4, 9)]);
 }
@@ -93,7 +116,11 @@ fn a_new_event_with_no_zone_is_written_floating() {
 
 #[test]
 fn cancelling_a_floating_occurrence_writes_a_floating_exdate() {
-    let written = local::pinned(Lisbon, || cancel_occurrence(&floating(), at(Lisbon, 10, 28, 9), NOW).unwrap().unwrap());
+    let written = local::pinned(Lisbon, || {
+        cancel_occurrence(&floating(), at(Lisbon, 10, 28, 9), NOW)
+            .unwrap()
+            .unwrap()
+    });
     assert!(written.contains("EXDATE:20261028T090000\r\n"), "{written}");
 }
 
@@ -106,9 +133,14 @@ fn a_utc_start_stays_utc() {
 
 #[test]
 fn a_zoned_start_stays_in_its_zone() {
-    let event = local::pinned(New_York, || read(&swim("DTSTART;TZID=Europe/Lisbon:20261021T090000", "")));
+    let event = local::pinned(New_York, || {
+        read(&swim("DTSTART;TZID=Europe/Lisbon:20261021T090000", ""))
+    });
     assert_eq!(event.zone, "Europe/Lisbon");
-    assert_eq!(local::pinned(New_York, || hours(Lisbon, &event)), vec![9, 9, 9]);
+    assert_eq!(
+        local::pinned(New_York, || hours(Lisbon, &event)),
+        vec![9, 9, 9]
+    );
 }
 
 fn once(start: &str) -> String {
@@ -122,7 +154,11 @@ fn once(start: &str) -> String {
 fn a_floating_time_the_clocks_repeat_takes_the_first() {
     // 01:30 comes twice in Lisbon on 25 October 2026: first in summer time.
     let event = local::pinned(Lisbon, || read(&once("DTSTART:20261025T013000")));
-    let utc = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap().and_hms_opt(0, 30, 0).unwrap().and_utc();
+    let utc = NaiveDate::from_ymd_opt(2026, 10, 25)
+        .unwrap()
+        .and_hms_opt(0, 30, 0)
+        .unwrap()
+        .and_utc();
     assert_eq!(event.start, utc.timestamp_millis());
 }
 
@@ -131,6 +167,10 @@ fn a_floating_time_the_clocks_skip_moves_forward_by_the_gap() {
     // Lisbon skips 01:00 to 02:00 on 29 March 2026, so 01:30 is 02:30
     // summer time, which is 01:30 UTC (RFC 5545 section 3.3.5).
     let event = local::pinned(Lisbon, || read(&once("DTSTART:20260329T013000")));
-    let utc = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap().and_hms_opt(1, 30, 0).unwrap().and_utc();
+    let utc = NaiveDate::from_ymd_opt(2026, 3, 29)
+        .unwrap()
+        .and_hms_opt(1, 30, 0)
+        .unwrap()
+        .and_utc();
     assert_eq!(event.start, utc.timestamp_millis());
 }

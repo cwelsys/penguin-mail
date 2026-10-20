@@ -176,9 +176,10 @@ uses a tool from outside the app, and it is off until you pick a model.
   back the memory the window used.
 - **Apple Mail's shortcuts on Linux** with Ctrl in place of Command, plus Gmail's
   single keys.
-- **American English, British English, French, German, Spanish, European
-  Portuguese, Traditional Chinese (Taiwan) and Vietnamese**, chosen in Preferences,
-  with the window's controls named for screen readers.
+- **American English, British English, French, German, Indonesian, Italian,
+  Japanese, Korean, Polish, Russian, Spanish, European Portuguese, Simplified
+  Chinese, Traditional Chinese (Taiwan), Turkish and Vietnamese**, chosen in
+  Preferences, with the window's controls named for screen readers.
 
 ## Screenshots
 
@@ -370,6 +371,10 @@ signing and encryption use your own keys.
 
 [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source) has the steps, and
 how to build the Flatpak yourself.
+
+With Nix, `nix run github:c9dev/penguin-mail -- --demo` runs the app on
+sample mail. See [the Nix guide](docs/nix.md) for installation and account
+sign-in.
 
 ### First run
 

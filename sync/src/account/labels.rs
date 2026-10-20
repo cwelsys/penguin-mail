@@ -23,7 +23,10 @@ impl AccountSync {
 
     /// Brings the stored mailboxes in line with `remote`, the server's
     /// listing.
-    pub(crate) async fn store_listing(&self, remote: Vec<RemoteMailbox>) -> Result<bool, SyncError> {
+    pub(crate) async fn store_listing(
+        &self,
+        remote: Vec<RemoteMailbox>,
+    ) -> Result<bool, SyncError> {
         let account_id = self.account_id;
         // A store-only account's listing is a read of the store, and its
         // folders change only through the person, who stores each change
@@ -37,9 +40,10 @@ impl AccountSync {
                 let stored = mailboxes::listed(c, account_id)?;
                 if local {
                     let mut changed = false;
-                    for mailbox in remote.iter().filter(|r| {
-                        r.role.is_some() && stored.iter().all(|s| s.id != r.id)
-                    }) {
+                    for mailbox in remote
+                        .iter()
+                        .filter(|r| r.role.is_some() && stored.iter().all(|s| s.id != r.id))
+                    {
                         mailboxes::upsert(c, account_id, mailbox)?;
                         changed = true;
                     }
@@ -61,7 +65,9 @@ impl AccountSync {
                     }
                 }
                 for mailbox in remote.iter().filter(|r| !stored.contains(r)) {
-                    moved |= stored.iter().any(|s| s.id == mailbox.id && s.name != mailbox.name);
+                    moved |= stored
+                        .iter()
+                        .any(|s| s.id == mailbox.id && s.name != mailbox.name);
                     mailboxes::upsert(c, account_id, mailbox)?;
                     changed = true;
                 }
@@ -83,9 +89,14 @@ impl AccountSync {
     /// whose folder is gone. A failure leaves the script as it was: the
     /// next change tries again, and the folder change itself stands.
     async fn follow_folders(&self, moved: &[(String, String)]) {
-        let Some(rules) = &self.services.rules else { return };
+        let Some(rules) = &self.services.rules else {
+            return;
+        };
         if rules.follow_folders(moved).await.is_err() {
-            tracing::warn!(account = self.account_id, "the rules could not follow a folder change");
+            tracing::warn!(
+                account = self.account_id,
+                "the rules could not follow a folder change"
+            );
         }
     }
 
@@ -169,11 +180,7 @@ impl AccountSync {
                     Some(mailbox) => mailbox.clone(),
                     None => continue,
                 },
-                None => {
-                    self.mail
-                        .rename_mailbox(&child.id, &child_name)
-                        .await?
-                }
+                None => self.mail.rename_mailbox(&child.id, &child_name).await?,
             };
             moved.push((child.id.clone(), mailbox.id.clone()));
             renamed.push(mailbox);
@@ -186,10 +193,12 @@ impl AccountSync {
         // A folder's id is its name, so the order names it anew.
         let order: Vec<String> = order
             .iter()
-            .map(|sibling| match moved.iter().find(|(from, _)| from == sibling) {
-                Some((_, to)) => to.clone(),
-                None => sibling.clone(),
-            })
+            .map(
+                |sibling| match moved.iter().find(|(from, _)| from == sibling) {
+                    Some((_, to)) => to.clone(),
+                    None => sibling.clone(),
+                },
+            )
             .collect();
         self.db
             .write(move |c| {

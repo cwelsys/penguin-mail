@@ -45,7 +45,10 @@ pub struct Theme {
 /// out, so a setting cannot close the string or the rule it sits in.
 pub fn css_family(gtk_font_name: &str) -> String {
     let description = gtk::pango::FontDescription::from_string(gtk_font_name);
-    let family = description.family().map(|f| f.to_string()).unwrap_or_default();
+    let family = description
+        .family()
+        .map(|f| f.to_string())
+        .unwrap_or_default();
     let clean: String = family
         .chars()
         .filter(|c| !matches!(c, '"' | '\'' | '{' | '}' | ';' | '<' | '>' | '\\'))
@@ -174,6 +177,7 @@ pub fn head(conversation: &Head, theme: &Theme) -> String {
          style-src 'unsafe-inline'{remote}; img-src data: mailrs-cid:{remote}; font-src data:{remote}\">"
     );
     let _ = write!(html, "<style>{}</style></head><body>", page_css(theme));
+    html.push_str("<div id=\"mailrs-link-preview\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\" hidden></div>");
     let subject = if conversation.subject.trim().is_empty() {
         gettext("(no subject)")
     } else {
@@ -251,7 +255,8 @@ pub fn face<'a>(photos: &'a Photos, address: &str, earlier: &[&str]) -> Option<F
 /// one before.
 /// The message whose source a "View Source" link on the page asks for.
 pub fn source_of(uri: &str) -> Option<&str> {
-    uri.strip_prefix("mailrs:source/").filter(|id| !id.is_empty())
+    uri.strip_prefix("mailrs:source/")
+        .filter(|id| !id.is_empty())
 }
 
 pub fn article(view: &MessageView, me: &[String], face: Option<Face>) -> String {
@@ -385,7 +390,13 @@ fn render_body(html: &mut String, view: &MessageView) {
             fill(
                 &gettext("{date}, {time}"),
                 &[
-                    ("date", &crate::format::day_month(at.date_naive(), chrono::Local::now().date_naive())),
+                    (
+                        "date",
+                        &crate::format::day_month(
+                            at.date_naive(),
+                            chrono::Local::now().date_naive(),
+                        ),
+                    ),
                     ("time", &crate::clock_format::time_text(at.time())),
                 ],
             )
@@ -421,6 +432,23 @@ fn render_body(html: &mut String, view: &MessageView) {
             );
         }
         BodyState::Loaded(body) => {
+            let suspicious = match &view.sanitized {
+                Some(clean) => crate::link_safety::suspicious_html(clean.html),
+                None => body
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| crate::link_safety::suspicious_html(&render_text(text))),
+            };
+            if suspicious {
+                let _ = write!(
+                    html,
+                    "<aside class=\"link-warning\" role=\"note\"><strong>{}</strong><p>{}</p></aside>",
+                    escape(&gettext("Possible phishing links")),
+                    escape(&gettext(
+                        "This message contains potentially deceptive links. Check the destination before opening them."
+                    )),
+                );
+            }
             if let Some(clean) = &view.sanitized {
                 // Mail's styles reach its own shadow host (`:host`), and a
                 // host moved up the page would paint over the sender row
@@ -916,9 +944,17 @@ pub(crate) fn page_palette(dark: bool) -> PagePalette {
 }
 
 fn page_css(theme: &Theme) -> String {
-    let PagePalette { bg, fg, dim, card, line, hover, surface } = page_palette(theme.dark);
+    let PagePalette {
+        bg,
+        fg,
+        dim,
+        card,
+        line,
+        hover,
+        surface,
+    } = page_palette(theme.dark);
     format!(
-        ":root{{color-scheme:{scheme};--bg:{bg};--fg:{fg};--dim:{dim};--card:{card};--line:{line};--hover:{hover};--surface:{surface};--accent:{accent};--accent-text:{accent_text}{font}}}\
+        ":root{{color-scheme:{scheme};--bg:{bg};--fg:{fg};--dim:{dim};--card:{card};--line:{line};--hover:{hover};--surface:{surface};--accent:{accent};--accent-text:{accent_text};--caution:{caution}{font}}}\
 html{{background:var(--bg)}}\
 body{{margin:0 auto;max-width:{PAGE_MAX_WIDTH}px;padding:20px {PAGE_SIDE}px 64px;color:var(--fg);\
 font:15px/1.5 var(--ui-font,\"Adwaita Sans\"),Cantarell,system-ui,sans-serif;-webkit-font-smoothing:antialiased}}\
@@ -994,6 +1030,16 @@ opacity 180ms cubic-bezier(0.23,1,0.32,1)}}\
 border:1px solid var(--line);overflow:hidden;margin-left:0}}\
 .html{{background:#fff}}\
 .body-frame{{contain:paint;margin:14px 0 2px}}.body-frame>.html{{margin:0}}\
+.link-warning{{margin:14px 0;padding:12px 14px;border-radius:10px;background:color-mix(in srgb,var(--caution) 9%,var(--bg));border:1px solid var(--line);font-size:13px}}\
+.link-warning strong{{color:var(--caution)}}\
+.link-warning p{{margin:3px 0 0;color:var(--fg)}}\
+#mailrs-link-preview{{position:fixed;bottom:0;right:0;z-index:1000;box-sizing:border-box;max-width:min(640px,100%);width:max-content;padding:7px 12px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-bottom:0;border-right:0;border-radius:8px 0 0 0;font-size:12px;line-height:1.4;pointer-events:none;text-align:left;direction:ltr;unicode-bidi:isolate}}\
+#mailrs-link-preview[hidden]{{display:none}}\
+#mailrs-link-preview strong,#mailrs-link-preview span,#mailrs-link-preview small{{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\
+#mailrs-link-preview span{{color:var(--dim)}}\
+#mailrs-link-preview small{{font-size:12px;white-space:normal;max-width:50ch}}\
+#mailrs-link-preview.caution small{{color:var(--caution);font-weight:600}}\
+@media print{{#mailrs-link-preview{{display:none}}}}\
 .html.plain{{background:none;border:none;padding:0;border-radius:0}}\
 .status{{color:var(--dim);font-style:italic}}\
 .unreadable{{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}}\
@@ -1018,6 +1064,7 @@ color:inherit;text-decoration:none;min-width:0}}\
 .clip{{width:16px;height:16px;flex:none;background:var(--dim);-webkit-mask:url(\"{CLIP}\") center/contain no-repeat}}\
 @media (max-width:{PAGE_NARROW}px){{body{{padding:18px {PAGE_NARROW_SIDE}px 40px}}.body,.attachments{{margin-left:0}}.thread h1{{font-size:20px}}\
 .address{{display:none}}.message{{padding:14px 8px 16px;margin:0 -8px}}.chev{{display:none}}}}",
+        caution = if theme.dark { "#f8e45c" } else { "#8f5902" },
         fold = FOLD_MS,
         trimmed = TRIMMED_CSS,
         receipts = receipt::css(theme.dark),
@@ -1055,7 +1102,10 @@ mod tests {
     #[test]
     fn a_body_keeps_its_columns_and_its_own_width() {
         assert!(!HTML_BODY_CSS.contains("anywhere"), "{HTML_BODY_CSS}");
-        assert!(HTML_BODY_CSS.contains("table{max-width:100%}"), "{HTML_BODY_CSS}");
+        assert!(
+            HTML_BODY_CSS.contains("table{max-width:100%}"),
+            "{HTML_BODY_CSS}"
+        );
     }
 
     /// A picture's width limit is the message's width, not its cell's.
@@ -1148,7 +1198,10 @@ mod tests {
     fn a_font_name_cannot_break_out_of_the_stylesheet() {
         let family = css_family("Evil\";}body{x:<y\\ 11");
         let inside = &family[1..family.len() - 1];
-        assert!(!inside.contains(['"', '}', '{', ';', '<', '\\']), "{family}");
+        assert!(
+            !inside.contains(['"', '}', '{', ';', '<', '\\']),
+            "{family}"
+        );
     }
 
     #[test]
@@ -1158,7 +1211,10 @@ mod tests {
             ..theme()
         });
         assert!(css.contains("--ui-font:\"Ubuntu Sans\""), "{css}");
-        assert!(css.contains("font:15px/1.5 var(--ui-font,\"Adwaita Sans\")"), "{css}");
+        assert!(
+            css.contains("font:15px/1.5 var(--ui-font,\"Adwaita Sans\")"),
+            "{css}"
+        );
     }
 
     #[test]
@@ -1214,11 +1270,7 @@ mod tests {
         page_with(subject, views, &HashMap::new())
     }
 
-    fn page_with(
-        subject: &str,
-        views: Vec<MessageView>,
-        photos: &Photos,
-    ) -> String {
+    fn page_with(subject: &str, views: Vec<MessageView>, photos: &Photos) -> String {
         let me = ["me@example.com".to_string()];
         render(
             &Conversation {
@@ -1348,12 +1400,19 @@ mod tests {
     #[test]
     fn every_kind_of_stop_tab_reaches_in_the_page_shows_a_focus_ring() {
         let css = page_css(&theme());
-        for stop in ["a:focus-visible", "summary:focus-visible", ".event-slot:focus-visible"] {
+        for stop in [
+            "a:focus-visible",
+            "summary:focus-visible",
+            ".event-slot:focus-visible",
+        ] {
             assert!(css.contains(stop), "no ring for {stop}");
         }
         // An HTML body sits in a shadow root the page's rules do not
         // reach, so its links need a ring of their own.
-        assert!(HTML_BODY_CSS.contains("a:focus-visible"), "no ring for links in an HTML body");
+        assert!(
+            HTML_BODY_CSS.contains("a:focus-visible"),
+            "no ring for links in an HTML body"
+        );
     }
 
     /// WebKit sizes a plain `1fr` track from a cache that a change of the
@@ -1833,14 +1892,26 @@ mod tests {
         );
         // The recipients sit outside the summary, so a click on them
         // selects text rather than opening or shutting the panel.
-        assert!(html.contains("<div class=\"line to\"><span class=\"recipients\">"), "{html}");
+        assert!(
+            html.contains("<div class=\"line to\"><span class=\"recipients\">"),
+            "{html}"
+        );
         assert!(html.contains("<details><summary class=\"more\">"), "{html}");
         // The line sits above the header's toggle layer, so a press on it
         // or on the table never reaches the toggle.
-        assert!(html.contains(".line.to{position:relative"), "the line is lifted over the toggle");
+        assert!(
+            html.contains(".line.to{position:relative"),
+            "the line is lifted over the toggle"
+        );
         // A collapsed message opens from anywhere on its card.
-        assert!(html.contains(".message{position:relative"), "the card holds the toggle");
-        assert!(html.contains(".expanded .header{position:relative}"), "an open message toggles from its header only");
+        assert!(
+            html.contains(".message{position:relative"),
+            "the card holds the toggle"
+        );
+        assert!(
+            html.contains(".expanded .header{position:relative}"),
+            "an open message toggles from its header only"
+        );
     }
 
     #[test]
@@ -1864,7 +1935,10 @@ mod tests {
         // recipients passes through to it; only Details and its table
         // keep presses of their own.
         assert!(html.contains(".expanded .toggle{inset:-16px -12px -10px;cursor:pointer}"));
-        assert!(html.contains("pointer-events:none}"), "the recipients pass presses through");
+        assert!(
+            html.contains("pointer-events:none}"),
+            "the recipients pass presses through"
+        );
         assert!(html.contains(".line.to details{pointer-events:auto}"));
     }
 
@@ -2204,7 +2278,10 @@ mod tests {
         };
         let no_thumbs = HashMap::new();
         let page = page("Read: Rota", vec![receipt_view(&one, &body, &no_thumbs)]);
-        assert!(page.contains("Read by <strong>tomas@allotment.example</strong> on "), "{page}");
+        assert!(
+            page.contains("Read by <strong>tomas@allotment.example</strong> on "),
+            "{page}"
+        );
         assert!(!page.contains("Your message was shown."));
     }
 
@@ -2221,19 +2298,29 @@ mod tests {
         };
         let no_thumbs = HashMap::new();
         let page = page("Read: Rota", vec![receipt_view(&one, &body, &no_thumbs)]);
-        assert!(page.contains("Deleted by <strong>tomas@allotment.example</strong> without being read"), "{page}");
+        assert!(
+            page.contains("Deleted by <strong>tomas@allotment.example</strong> without being read"),
+            "{page}"
+        );
     }
 
     #[test]
     fn an_address_in_a_receipt_line_is_escaped() {
         let one = meta("m1", "Tomas", &[]);
         let body = MessageBody {
-            read_report: Some(ReadReport { by: "<b>x</b>@y".into(), displayed: true, original: None }),
+            read_report: Some(ReadReport {
+                by: "<b>x</b>@y".into(),
+                displayed: true,
+                original: None,
+            }),
             ..MessageBody::default()
         };
         let no_thumbs = HashMap::new();
         let page = page("Read", vec![receipt_view(&one, &body, &no_thumbs)]);
-        assert!(page.contains("<strong>&lt;b&gt;x&lt;/b&gt;@y</strong>"), "{page}");
+        assert!(
+            page.contains("<strong>&lt;b&gt;x&lt;/b&gt;@y</strong>"),
+            "{page}"
+        );
     }
 
     /// A body that could not be drawn offers its source, so the person can
@@ -2246,7 +2333,10 @@ mod tests {
         let mut view = receipt_view(&one, &body, &no_thumbs);
         view.body = BodyState::Unreadable;
         let page = page("Rota", vec![view]);
-        assert!(page.contains("This message could not be displayed"), "{page}");
+        assert!(
+            page.contains("This message could not be displayed"),
+            "{page}"
+        );
         assert!(page.contains("href=\"mailrs:source/m/1\""), "{page}");
         assert_eq!(source_of("mailrs:source/m/1"), Some("m/1"));
         assert_eq!(source_of("mailrs:source/"), None);
@@ -2254,27 +2344,81 @@ mod tests {
     }
 
     #[test]
-    fn the_receipt_card_names_who_would_hear_and_offers_both_answers() {
+    fn deceptive_links_get_a_warning_outside_the_messages_styles() {
         let one = meta("m1", "Ann", &[]);
-        let body = MessageBody { text: Some("Hi".into()), ..MessageBody::default() };
+        let body = MessageBody::default();
         let no_thumbs = HashMap::new();
         let mut view = receipt_view(&one, &body, &no_thumbs);
-        view.receipt = Some(Receipt::Asked { to: "ann@example.com", working: false });
+        view.sanitized = Some(Sanitized {
+            html: "<a href=\"https://evil.example\">https://bank.example</a>",
+            paints: true,
+            history: None,
+        });
+        let page = page("Rota", vec![view]);
+        let warning = page
+            .find("class=\"link-warning\"")
+            .expect("a deceptive link warns the reader");
+        assert!(warning < page.find("<template shadowrootmode").unwrap());
+        assert!(page.contains("Check the destination before opening them."));
+    }
+
+    #[test]
+    fn ordinary_links_have_a_preview_without_a_phishing_warning() {
+        let one = meta("m1", "Ann", &[]);
+        let body = MessageBody::default();
+        let no_thumbs = HashMap::new();
+        let mut view = receipt_view(&one, &body, &no_thumbs);
+        view.sanitized = Some(Sanitized {
+            html: "<a href=\"https://example.com/read\">Read more</a>",
+            paints: true,
+            history: None,
+        });
+        let page = page("Reading", vec![view]);
+        assert!(page.contains("id=\"mailrs-link-preview\""));
+        assert!(!page.contains("class=\"link-warning\""));
+    }
+
+    #[test]
+    fn the_receipt_card_names_who_would_hear_and_offers_both_answers() {
+        let one = meta("m1", "Ann", &[]);
+        let body = MessageBody {
+            text: Some("Hi".into()),
+            ..MessageBody::default()
+        };
+        let no_thumbs = HashMap::new();
+        let mut view = receipt_view(&one, &body, &no_thumbs);
+        view.receipt = Some(Receipt::Asked {
+            to: "ann@example.com",
+            working: false,
+        });
         let page = page("Rota", vec![view]);
         assert!(page.contains("Read receipt requested"), "{page}");
-        assert!(page.contains("Sending a receipt tells ann@example.com that you opened this message."), "{page}");
-        let send = page.find("href=\"mailrs:receipt/send/m1\"").expect("Send Receipt");
-        let decline = page.find("href=\"mailrs:receipt/decline/m1\"").expect("Don't Send");
+        assert!(
+            page.contains("Sending a receipt tells ann@example.com that you opened this message."),
+            "{page}"
+        );
+        let send = page
+            .find("href=\"mailrs:receipt/send/m1\"")
+            .expect("Send Receipt");
+        let decline = page
+            .find("href=\"mailrs:receipt/decline/m1\"")
+            .expect("Don't Send");
         assert!(send < decline, "Send Receipt comes first");
     }
 
     #[test]
     fn a_receipt_card_at_work_has_nothing_to_press() {
         let one = meta("m1", "Ann", &[]);
-        let body = MessageBody { text: Some("Hi".into()), ..MessageBody::default() };
+        let body = MessageBody {
+            text: Some("Hi".into()),
+            ..MessageBody::default()
+        };
         let no_thumbs = HashMap::new();
         let mut view = receipt_view(&one, &body, &no_thumbs);
-        view.receipt = Some(Receipt::Asked { to: "ann@example.com", working: true });
+        view.receipt = Some(Receipt::Asked {
+            to: "ann@example.com",
+            working: true,
+        });
         let page = page("Rota", vec![view]);
         assert!(!page.contains("mailrs:receipt/"), "{page}");
         assert!(page.contains("aria-disabled=\"true\""), "{page}");
@@ -2287,28 +2431,52 @@ mod tests {
     #[test]
     fn every_html_body_sits_in_a_frame_mail_cannot_style() {
         let one = meta("m1", "Ann", &[]);
-        let body = MessageBody { html: Some("<p>Hi</p>".into()), ..MessageBody::default() };
+        let body = MessageBody {
+            html: Some("<p>Hi</p>".into()),
+            ..MessageBody::default()
+        };
         let no_thumbs = HashMap::new();
         let mut view = receipt_view(&one, &body, &no_thumbs);
-        view.sanitized = Some(Sanitized { html: "<p>Hi</p>", paints: false, history: None });
+        view.sanitized = Some(Sanitized {
+            html: "<p>Hi</p>",
+            paints: false,
+            history: None,
+        });
         let page = page("Hi", vec![view]);
         let hosts = page.matches("<div class=\"body html").count();
         assert_eq!(hosts, 1, "{page}");
-        assert_eq!(page.matches("<div class=\"body-frame\"><div class=\"body html").count(), hosts, "{page}");
+        assert_eq!(
+            page.matches("<div class=\"body-frame\"><div class=\"body html")
+                .count(),
+            hosts,
+            "{page}"
+        );
         assert!(page.contains(".body-frame{contain:paint"), "{page}");
     }
 
     #[test]
     fn a_receipt_answer_names_its_message() {
         let one = meta("m/1", "Ann", &[]);
-        let body = MessageBody { text: Some("Hi".into()), ..MessageBody::default() };
+        let body = MessageBody {
+            text: Some("Hi".into()),
+            ..MessageBody::default()
+        };
         let no_thumbs = HashMap::new();
         let mut view = receipt_view(&one, &body, &no_thumbs);
-        view.receipt = Some(Receipt::Asked { to: "ann@example.com", working: false });
+        view.receipt = Some(Receipt::Asked {
+            to: "ann@example.com",
+            working: false,
+        });
         let page = page("Rota", vec![view]);
         assert!(page.contains("href=\"mailrs:receipt/send/m/1\""), "{page}");
-        assert_eq!(receipt::answer_of("mailrs:receipt/send/m/1"), Some(("m/1", true)));
-        assert_eq!(receipt::answer_of("mailrs:receipt/decline/m1"), Some(("m1", false)));
+        assert_eq!(
+            receipt::answer_of("mailrs:receipt/send/m/1"),
+            Some(("m/1", true))
+        );
+        assert_eq!(
+            receipt::answer_of("mailrs:receipt/decline/m1"),
+            Some(("m1", false))
+        );
         assert_eq!(receipt::answer_of("mailrs:receipt/send/"), None);
         assert_eq!(receipt::answer_of("mailrs:receipt/send"), None);
     }

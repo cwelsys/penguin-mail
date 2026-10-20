@@ -33,5 +33,9 @@ pub fn session_on(base: &str, limits: Value) -> Value {
 }
 
 pub fn client(server: &MockServer) -> JmapClient {
-    JmapClient::new(&format!("{}/jmap/session", server.uri()), Auth::Bearer("token-1".into())).unwrap()
+    JmapClient::new(
+        &format!("{}/jmap/session", server.uri()),
+        Auth::Bearer("token-1".into()),
+    )
+    .unwrap()
 }

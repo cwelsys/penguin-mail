@@ -123,13 +123,14 @@ impl App {
         // are the list's, and the composer's path would read them as
         // Markdown and send an HTML part beside them.
         let message_id = crate::compose::new_message_id(&draft.from.email);
-        let raw = crate::compose::build_request(&draft, now_millis() / 1000, &message_id)
-            .map_err(|err| {
+        let raw = crate::compose::build_request(&draft, now_millis() / 1000, &message_id).map_err(
+            |err| {
                 fill(
                     &gettext("Could not build the message: {reason}"),
                     &[("reason", &err)],
                 )
-            })?;
+            },
+        )?;
         let outbox = self.core.outbox();
         let message = queued(&draft, raw, now_millis());
         let posted = self
@@ -321,7 +322,10 @@ impl App {
                     return this.reopen(draft, &said);
                 }
             };
-            let posted = this.core.call(async move { outbox.schedule(item).await }).await;
+            let posted = this
+                .core
+                .call(async move { outbox.schedule(item).await })
+                .await;
             match posted {
                 Ok(Posted::Refused(problem)) => this.reopen(
                     draft,

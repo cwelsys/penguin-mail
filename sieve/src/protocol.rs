@@ -39,7 +39,12 @@ pub(crate) fn status(line: &str) -> Option<Status> {
     };
     let literal = literal(rest);
     let text = strings(rest).0.into_iter().next().unwrap_or_default();
-    Some(Status { kind, code, text, literal })
+    Some(Status {
+        kind,
+        code,
+        text,
+        literal,
+    })
 }
 
 /// The quoted strings on a line, unescaped, and the atoms beside them.
@@ -123,7 +128,10 @@ mod tests {
         let refused = status("NO {37}").unwrap();
         assert_eq!((refused.kind, refused.literal), (Kind::No, Some(37)));
         let coded = status("NO (QUOTA) {5+}").unwrap();
-        assert_eq!((coded.code.as_deref(), coded.literal), (Some("QUOTA"), Some(5)));
+        assert_eq!(
+            (coded.code.as_deref(), coded.literal),
+            (Some("QUOTA"), Some(5))
+        );
         assert_eq!(status("NO \"x\"").unwrap().literal, None);
     }
 

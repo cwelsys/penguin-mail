@@ -24,9 +24,16 @@ fn a_workspace_account_stores_out_of_office_and_focus_time_with_their_declines()
 
 #[test]
 fn a_personal_google_account_stores_only_events() {
-    for address in ["dana@gmail.com", "Dana.Reyes@GMAIL.com", "old@googlemail.com"] {
+    for address in [
+        "dana@gmail.com",
+        "Dana.Reyes@GMAIL.com",
+        "old@googlemail.com",
+    ] {
         let offers = google(address);
-        assert!(!offers.out_of_office && !offers.focus_time && !offers.declines, "{address}");
+        assert!(
+            !offers.out_of_office && !offers.focus_time && !offers.declines,
+            "{address}"
+        );
     }
 }
 
@@ -39,8 +46,14 @@ fn a_domain_that_only_ends_like_gmail_is_workspace() {
 fn a_microsoft_account_stores_out_of_office_without_focus_time_or_declines() {
     let offers = AccountServices::fake_microsoft(Arc::new(FakeGraph::new())).offers();
     assert!(offers.out_of_office);
-    assert!(!offers.focus_time, "Outlook has no focus time entry to write");
-    assert!(!offers.declines, "showAs keeps no decline choice or message");
+    assert!(
+        !offers.focus_time,
+        "Outlook has no focus time entry to write"
+    );
+    assert!(
+        !offers.declines,
+        "showAs keeps no decline choice or message"
+    );
 }
 
 fn imap_settings(address: &str) -> ImapSettings {
@@ -60,7 +73,9 @@ fn a_caldav_account_stores_only_events_whatever_its_address() {
     let services = AccountServices::imap(imap, smtp, settings);
     let mail = services.mail.clone();
     let dav = Arc::new(crate::AnyDav::from(Arc::new(FakeDav::new())));
-    let offers = services.with_calendar(AnyCalendar::Dav(CalDav::new(dav, mail, vec![]))).offers();
+    let offers = services
+        .with_calendar(AnyCalendar::Dav(CalDav::new(dav, mail, vec![])))
+        .offers();
     assert!(offers.calendar);
     assert!(!offers.out_of_office && !offers.focus_time && !offers.declines);
 }
@@ -69,12 +84,19 @@ fn a_caldav_account_stores_only_events_whatever_its_address() {
 fn only_google_subscribes_to_calendars_by_address_or_adds_holidays() {
     assert!(google("dana@gmail.com").subscriptions);
     let outlook = AccountServices::fake_microsoft(Arc::new(FakeGraph::new())).offers();
-    assert!(outlook.calendar_list, "Outlook makes, renames and deletes calendars");
-    assert!(!outlook.subscriptions, "Graph has no call to subscribe or unsubscribe");
+    assert!(
+        outlook.calendar_list,
+        "Outlook makes, renames and deletes calendars"
+    );
+    assert!(
+        !outlook.subscriptions,
+        "Graph has no call to subscribe or unsubscribe"
+    );
 }
 
 #[test]
 fn an_account_with_no_calendar_stores_no_types() {
-    let offers = AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::new())).offers();
+    let offers =
+        AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::new())).offers();
     assert!(!offers.out_of_office && !offers.focus_time && !offers.declines);
 }

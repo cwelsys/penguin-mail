@@ -45,17 +45,29 @@ pub async fn find_jmap<N: Net>(net: &N, address: &str) -> Option<JmapFound> {
     let table = Table::built_in();
     let listed = |entry: &crate::table::Entry, source| {
         let jmap = entry.jmap.as_ref()?;
-        Some(JmapFound { session_url: jmap.session.clone(), source, confirm: false, provider: entry.jmap_provider() })
+        Some(JmapFound {
+            session_url: jmap.session.clone(),
+            source,
+            confirm: false,
+            provider: entry.jmap_provider(),
+        })
     };
     if let Some(entry) = table.by_domain(&domain) {
         return listed(entry, Source::Table);
     }
-    let hosts = tokio::time::timeout(STEP_LIMIT, net.mx(&domain)).await.unwrap_or_default();
+    let hosts = tokio::time::timeout(STEP_LIMIT, net.mx(&domain))
+        .await
+        .unwrap_or_default();
     if let Some(entry) = table.by_mx(&hosts) {
         return listed(entry, Source::Mx);
     }
-    let records = tokio::time::timeout(STEP_LIMIT, net.srv(&format!("_jmap._tcp.{domain}"))).await.unwrap_or_default();
-    if records.iter().any(|r| r.target.trim_end_matches('.').is_empty()) {
+    let records = tokio::time::timeout(STEP_LIMIT, net.srv(&format!("_jmap._tcp.{domain}")))
+        .await
+        .unwrap_or_default();
+    if records
+        .iter()
+        .any(|r| r.target.trim_end_matches('.').is_empty())
+    {
         // A target of "." says the domain offers no JMAP.
         return None;
     }
@@ -63,9 +75,17 @@ pub async fn find_jmap<N: Net>(net: &N, address: &str) -> Option<JmapFound> {
         return Some(found);
     }
     let url = format!("https://{domain}/.well-known/jmap");
-    let target = tokio::time::timeout(STEP_LIMIT, net.locate(&url)).await.ok().flatten()?;
+    let target = tokio::time::timeout(STEP_LIMIT, net.locate(&url))
+        .await
+        .ok()
+        .flatten()?;
     let confirm = leaves_domain(&target, &domain);
-    Some(JmapFound { session_url: target, source: Source::WellKnown, confirm, provider: None })
+    Some(JmapFound {
+        session_url: target,
+        source: Source::WellKnown,
+        confirm,
+        provider: None,
+    })
 }
 
 /// Whether `url` names a host outside `domain`. An unparseable URL counts
@@ -81,13 +101,26 @@ async fn from_srv<N: Net>(net: &N, mut records: Vec<SrvRecord>, domain: &str) ->
     records.sort_by(|a, b| a.priority.cmp(&b.priority).then(b.weight.cmp(&a.weight)));
     let best = records.into_iter().find(|r| r.port != 0)?;
     let target = host(&best.target)?;
-    let port = if best.port == 443 { String::new() } else { format!(":{}", best.port) };
+    let port = if best.port == 443 {
+        String::new()
+    } else {
+        format!(":{}", best.port)
+    };
     let well_known = format!("https://{target}{port}/.well-known/jmap");
     // The session lives where the well-known URL leads; when it answers
     // nothing now, the sign-in tries the well-known URL itself.
-    let session_url = tokio::time::timeout(STEP_LIMIT, net.locate(&well_known)).await.ok().flatten().unwrap_or(well_known);
+    let session_url = tokio::time::timeout(STEP_LIMIT, net.locate(&well_known))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(well_known);
     let confirm = !is_within(&target, domain) || leaves_domain(&session_url, domain);
-    Some(JmapFound { session_url, source: Source::Srv, confirm, provider: None })
+    Some(JmapFound {
+        session_url,
+        source: Source::Srv,
+        confirm,
+        provider: None,
+    })
 }
 
 #[cfg(test)]
@@ -106,7 +139,10 @@ mod tests {
         let provider = found.provider.unwrap();
         assert_eq!(provider.name, "Fastmail");
         assert_eq!(provider.token_plan_above.as_deref(), Some("Basic"));
-        assert_eq!(provider.token_access, ["Email", "Email submission", "Contacts", "Masked Email"]);
+        assert_eq!(
+            provider.token_access,
+            ["Email", "Email submission", "Contacts", "Masked Email"]
+        );
         assert_eq!(provider.imap_host.as_deref(), Some("imap.fastmail.com"));
         assert!(net.requests().is_empty());
     }
@@ -125,9 +161,17 @@ mod tests {
         let net = FakeNet::default()
             .answer_srv(
                 "_jmap._tcp.example.org",
-                vec![SrvRecord { priority: 0, weight: 1, port: 443, target: "mail.example.org.".into() }],
+                vec![SrvRecord {
+                    priority: 0,
+                    weight: 1,
+                    port: 443,
+                    target: "mail.example.org.".into(),
+                }],
             )
-            .locate_at("https://mail.example.org/.well-known/jmap", "https://mail.example.org/jmap/session");
+            .locate_at(
+                "https://mail.example.org/.well-known/jmap",
+                "https://mail.example.org/jmap/session",
+            );
         let found = find_jmap(&net, "me@example.org").await.unwrap();
         assert_eq!(found.session_url, "https://mail.example.org/jmap/session");
         assert_eq!(found.source, Source::Srv);
@@ -138,10 +182,18 @@ mod tests {
     async fn an_srv_target_outside_the_domain_needs_a_yes() {
         let net = FakeNet::default().answer_srv(
             "_jmap._tcp.example.org",
-            vec![SrvRecord { priority: 0, weight: 1, port: 8443, target: "jmap.hoster.net.".into() }],
+            vec![SrvRecord {
+                priority: 0,
+                weight: 1,
+                port: 8443,
+                target: "jmap.hoster.net.".into(),
+            }],
         );
         let found = find_jmap(&net, "me@example.org").await.unwrap();
-        assert_eq!(found.session_url, "https://jmap.hoster.net:8443/.well-known/jmap");
+        assert_eq!(
+            found.session_url,
+            "https://jmap.hoster.net:8443/.well-known/jmap"
+        );
         assert!(found.confirm);
     }
 
@@ -150,9 +202,17 @@ mod tests {
         let net = FakeNet::default()
             .answer_srv(
                 "_jmap._tcp.example.org",
-                vec![SrvRecord { priority: 0, weight: 1, port: 443, target: "mail.example.org.".into() }],
+                vec![SrvRecord {
+                    priority: 0,
+                    weight: 1,
+                    port: 443,
+                    target: "mail.example.org.".into(),
+                }],
             )
-            .locate_at("https://mail.example.org/.well-known/jmap", "https://other.net/session");
+            .locate_at(
+                "https://mail.example.org/.well-known/jmap",
+                "https://other.net/session",
+            );
         let found = find_jmap(&net, "me@example.org").await.unwrap();
         assert_eq!(found.session_url, "https://other.net/session");
         assert!(found.confirm);
@@ -160,7 +220,10 @@ mod tests {
 
     #[tokio::test]
     async fn the_domains_well_known_url_is_tried_last() {
-        let net = FakeNet::default().locate_at("https://example.org/.well-known/jmap", "https://example.org/jmap/session");
+        let net = FakeNet::default().locate_at(
+            "https://example.org/.well-known/jmap",
+            "https://example.org/jmap/session",
+        );
         let found = find_jmap(&net, "me@example.org").await.unwrap();
         assert_eq!(found.session_url, "https://example.org/jmap/session");
         assert_eq!(found.source, Source::WellKnown);
@@ -169,15 +232,29 @@ mod tests {
 
     #[tokio::test]
     async fn a_well_known_redirect_to_another_domain_needs_a_yes() {
-        let net = FakeNet::default().locate_at("https://example.org/.well-known/jmap", "https://jmap.hoster.net/session");
+        let net = FakeNet::default().locate_at(
+            "https://example.org/.well-known/jmap",
+            "https://jmap.hoster.net/session",
+        );
         assert!(find_jmap(&net, "me@example.org").await.unwrap().confirm);
     }
 
     #[tokio::test]
     async fn an_srv_dot_target_says_there_is_no_jmap() {
         let net = FakeNet::default()
-            .answer_srv("_jmap._tcp.example.org", vec![SrvRecord { priority: 0, weight: 0, port: 0, target: ".".into() }])
-            .locate_at("https://example.org/.well-known/jmap", "https://example.org/jmap/session");
+            .answer_srv(
+                "_jmap._tcp.example.org",
+                vec![SrvRecord {
+                    priority: 0,
+                    weight: 0,
+                    port: 0,
+                    target: ".".into(),
+                }],
+            )
+            .locate_at(
+                "https://example.org/.well-known/jmap",
+                "https://example.org/jmap/session",
+            );
         assert_eq!(find_jmap(&net, "me@example.org").await, None);
     }
 
@@ -194,20 +271,34 @@ mod tests {
     #[test]
     fn the_table_names_fastmail_s_jmap_facts_by_provider_name() {
         let fastmail = jmap_named("Fastmail").unwrap();
-        assert_eq!(fastmail.token_lacks, ["urn:ietf:params:jmap:vacationresponse"]);
+        assert_eq!(
+            fastmail.token_lacks,
+            ["urn:ietf:params:jmap:vacationresponse"]
+        );
         assert!(jmap_named("iCloud Mail").is_none());
     }
 
     #[test]
     fn the_table_names_the_scopes_a_fastmail_sign_in_asks_for() {
         let fastmail = jmap_named("Fastmail").unwrap();
-        assert!(fastmail.oauth_scopes.contains(&"offline_access".to_string()));
-        assert!(fastmail.oauth_scopes.contains(&"urn:ietf:params:oauth:scope:mail".to_string()));
+        assert!(
+            fastmail
+                .oauth_scopes
+                .contains(&"offline_access".to_string())
+        );
+        assert!(
+            fastmail
+                .oauth_scopes
+                .contains(&"urn:ietf:params:oauth:scope:mail".to_string())
+        );
     }
 
     #[test]
     fn the_table_names_fastmail_s_session_by_provider_name() {
-        assert_eq!(crate::jmap_session_named("Fastmail").as_deref(), Some("https://api.fastmail.com/jmap/session"));
+        assert_eq!(
+            crate::jmap_session_named("Fastmail").as_deref(),
+            Some("https://api.fastmail.com/jmap/session")
+        );
         assert!(crate::jmap_session_named("iCloud Mail").is_none());
     }
 }

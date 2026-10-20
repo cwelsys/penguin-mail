@@ -48,10 +48,24 @@ use objc2_foundation::{NSPoint, NSString};
 enum Step {
     Wait(u64),
     Window(String),
-    Resize { width: f64, height: f64 },
-    Click { x: f64, y: f64, right: bool },
-    Scroll { x: f64, y: f64, dy: i32 },
-    Key { name: String, modifiers: Vec<String> },
+    Resize {
+        width: f64,
+        height: f64,
+    },
+    Click {
+        x: f64,
+        y: f64,
+        right: bool,
+    },
+    Scroll {
+        x: f64,
+        y: f64,
+        dy: i32,
+    },
+    Key {
+        name: String,
+        modifiers: Vec<String>,
+    },
     Type(String),
     Shot(String),
     CheckMenu,
@@ -73,50 +87,63 @@ fn parse(script: &str) -> Result<Vec<Step>, String> {
         let rest = rest.trim();
         let numbers = || -> Result<Vec<f64>, String> {
             rest.split_whitespace()
-                .map(|n| n.parse::<f64>().map_err(|_| format!("line {}: {n} is no number", number + 1)))
+                .map(|n| {
+                    n.parse::<f64>()
+                        .map_err(|_| format!("line {}: {n} is no number", number + 1))
+                })
                 .collect()
         };
-        let step = match word {
-            "wait" => Step::Wait(numbers()?.first().copied().unwrap_or(0.0) as u64),
-            "window" => Step::Window(rest.to_string()),
-            "resize" => match numbers()?[..] {
-                [width, height] => Step::Resize { width, height },
-                _ => return Err(format!("line {}: resize takes a width and a height", number + 1)),
-            },
-            "click" | "rclick" => match numbers()?[..] {
-                [x, y] => Step::Click {
-                    x,
-                    y,
-                    right: word == "rclick",
+        let step =
+            match word {
+                "wait" => Step::Wait(numbers()?.first().copied().unwrap_or(0.0) as u64),
+                "window" => Step::Window(rest.to_string()),
+                "resize" => match numbers()?[..] {
+                    [width, height] => Step::Resize { width, height },
+                    _ => {
+                        return Err(format!(
+                            "line {}: resize takes a width and a height",
+                            number + 1
+                        ));
+                    }
                 },
-                _ => return Err(format!("line {}: {word} takes x and y", number + 1)),
-            },
-            "scroll" => match numbers()?[..] {
-                [x, y, dy] => Step::Scroll { x, y, dy: dy as i32 },
-                _ => return Err(format!("line {}: scroll takes x, y and dy", number + 1)),
-            },
-            "key" => {
-                let mut words = rest.split_whitespace().map(str::to_string);
-                let Some(name) = words.next() else {
-                    return Err(format!("line {}: key takes a name", number + 1));
-                };
-                Step::Key {
-                    name,
-                    modifiers: words.collect(),
+                "click" | "rclick" => match numbers()?[..] {
+                    [x, y] => Step::Click {
+                        x,
+                        y,
+                        right: word == "rclick",
+                    },
+                    _ => return Err(format!("line {}: {word} takes x and y", number + 1)),
+                },
+                "scroll" => match numbers()?[..] {
+                    [x, y, dy] => Step::Scroll {
+                        x,
+                        y,
+                        dy: dy as i32,
+                    },
+                    _ => return Err(format!("line {}: scroll takes x, y and dy", number + 1)),
+                },
+                "key" => {
+                    let mut words = rest.split_whitespace().map(str::to_string);
+                    let Some(name) = words.next() else {
+                        return Err(format!("line {}: key takes a name", number + 1));
+                    };
+                    Step::Key {
+                        name,
+                        modifiers: words.collect(),
+                    }
                 }
-            }
-            "type" => Step::Type(rest.to_string()),
-            "shot" => Step::Shot(rest.to_string()),
-            "check-menu" => Step::CheckMenu,
-            "check-dock" => Step::CheckDock(rest.parse().map_err(|_| {
-                format!("line {}: check-dock takes an unread count", number + 1)
-            })?),
-            "action" => Step::Action(rest.to_string()),
-            "check-web" => Step::CheckWeb(rest.to_string()),
-            "log" => Step::Log(rest.to_string()),
-            "quit" => Step::Quit,
-            _ => return Err(format!("line {}: no step called {word}", number + 1)),
-        };
+                "type" => Step::Type(rest.to_string()),
+                "shot" => Step::Shot(rest.to_string()),
+                "check-menu" => Step::CheckMenu,
+                "check-dock" => Step::CheckDock(rest.parse().map_err(|_| {
+                    format!("line {}: check-dock takes an unread count", number + 1)
+                })?),
+                "action" => Step::Action(rest.to_string()),
+                "check-web" => Step::CheckWeb(rest.to_string()),
+                "log" => Step::Log(rest.to_string()),
+                "quit" => Step::Quit,
+                _ => return Err(format!("line {}: no step called {word}", number + 1)),
+            };
         steps.push(step);
     }
     Ok(steps)
@@ -148,16 +175,60 @@ fn key_of(name: &str) -> Option<(u16, String)> {
         return None;
     };
     const CODES: &[(char, u16)] = &[
-        ('a', 0), ('s', 1), ('d', 2), ('f', 3), ('h', 4), ('g', 5), ('z', 6), ('x', 7),
-        ('c', 8), ('v', 9), ('b', 11), ('q', 12), ('w', 13), ('e', 14), ('r', 15),
-        ('y', 16), ('t', 17), ('1', 18), ('2', 19), ('3', 20), ('4', 21), ('6', 22),
-        ('5', 23), ('=', 24), ('9', 25), ('7', 26), ('-', 27), ('8', 28), ('0', 29),
-        (']', 30), ('o', 31), ('u', 32), ('[', 33), ('i', 34), ('p', 35), ('l', 37),
-        ('j', 38), ('\'', 39), ('k', 40), (';', 41), ('\\', 42), (',', 43), ('/', 44),
-        ('n', 45), ('m', 46), ('.', 47), ('`', 50), (' ', 49),
+        ('a', 0),
+        ('s', 1),
+        ('d', 2),
+        ('f', 3),
+        ('h', 4),
+        ('g', 5),
+        ('z', 6),
+        ('x', 7),
+        ('c', 8),
+        ('v', 9),
+        ('b', 11),
+        ('q', 12),
+        ('w', 13),
+        ('e', 14),
+        ('r', 15),
+        ('y', 16),
+        ('t', 17),
+        ('1', 18),
+        ('2', 19),
+        ('3', 20),
+        ('4', 21),
+        ('6', 22),
+        ('5', 23),
+        ('=', 24),
+        ('9', 25),
+        ('7', 26),
+        ('-', 27),
+        ('8', 28),
+        ('0', 29),
+        (']', 30),
+        ('o', 31),
+        ('u', 32),
+        ('[', 33),
+        ('i', 34),
+        ('p', 35),
+        ('l', 37),
+        ('j', 38),
+        ('\'', 39),
+        ('k', 40),
+        (';', 41),
+        ('\\', 42),
+        (',', 43),
+        ('/', 44),
+        ('n', 45),
+        ('m', 46),
+        ('.', 47),
+        ('`', 50),
+        (' ', 49),
     ];
     let lower = c.to_ascii_lowercase();
-    let code = CODES.iter().find(|(key, _)| *key == lower).map(|(_, code)| *code)?;
+    let code = CODES
+        .iter()
+        .find(|(key, _)| *key == lower)
+        .map(|(_, code)| *code)?;
     Some((code, c.to_string()))
 }
 
@@ -283,36 +354,70 @@ impl Driver {
             }
             Step::CheckWeb(url) => crate::web::check_macos(&url).await,
             Step::Action(name) => {
-                let app = gio::Application::default().unwrap().downcast::<gtk::Application>().unwrap();
+                let app = gio::Application::default()
+                    .unwrap()
+                    .downcast::<gtk::Application>()
+                    .unwrap();
                 let window = app.active_window().expect("GTK tracks the active window");
-                gtk::prelude::WidgetExt::activate_action(&window, &name, None).expect("the action exists");
+                gtk::prelude::WidgetExt::activate_action(&window, &name, None)
+                    .expect("the action exists");
                 glib::timeout_future(pause).await;
             }
             Step::CheckDock(unread) => {
                 let native = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
-                let label = native.dockTile().badgeLabel().map(|label| label.to_string());
-                assert_eq!(label, (unread > 0).then(|| unread.to_string()), "Dock unread count");
+                let label = native
+                    .dockTile()
+                    .badgeLabel()
+                    .map(|label| label.to_string());
+                assert_eq!(
+                    label,
+                    (unread > 0).then(|| unread.to_string()),
+                    "Dock unread count"
+                );
                 eprintln!("drive: Dock unread count is {unread}");
             }
             Step::Log(words) => eprintln!("drive: {words}"),
             Step::CheckMenu => {
                 let native = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
-                let menu = native.mainMenu().expect("the application owns a native menu");
+                let menu = native
+                    .mainMenu()
+                    .expect("the application owns a native menu");
                 let app_menu = menu.itemArray().firstObject().unwrap().submenu().unwrap();
-                let settings = app_menu.itemArray().iter()
+                let settings = app_menu
+                    .itemArray()
+                    .iter()
                     .find(|item| item.keyEquivalent().to_string() == ",")
                     .expect("Settings has the Command-comma shortcut");
-                assert!(settings.keyEquivalentModifierMask().contains(NSEventModifierFlags::Command));
-                let app = gio::Application::default().unwrap().downcast::<gtk::Application>().unwrap();
-                let window = app.active_window().expect("GTK tracks the active window")
-                    .downcast::<adw::Window>().unwrap();
+                assert!(
+                    settings
+                        .keyEquivalentModifierMask()
+                        .contains(NSEventModifierFlags::Command)
+                );
+                let app = gio::Application::default()
+                    .unwrap()
+                    .downcast::<gtk::Application>()
+                    .unwrap();
+                let window = app
+                    .active_window()
+                    .expect("GTK tracks the active window")
+                    .downcast::<adw::Window>()
+                    .unwrap();
                 assert!(app.is_action_enabled("preferences"));
                 assert!(window.visible_dialog().is_none());
                 app_menu.performActionForItemAtIndex(app_menu.indexOfItem(&settings));
                 glib::timeout_future(Duration::from_millis(400)).await;
-                let dialog = window.visible_dialog().expect("the native menu opens Settings");
-                assert!(dialog.is::<adw::PreferencesDialog>());
+                let dialog = window
+                    .visible_dialog()
+                    .expect("the native menu opens Settings");
+                assert!(dialog.has_css_class("mail-preferences"));
+                app_menu.performActionForItemAtIndex(app_menu.indexOfItem(&settings));
+                glib::timeout_future(Duration::from_millis(400)).await;
                 dialog.close();
+                glib::timeout_future(Duration::from_millis(600)).await;
+                assert!(
+                    window.visible_dialog().is_none(),
+                    "a second Settings press opens no second dialog"
+                );
                 eprintln!("drive: native Settings menu and Command-comma passed");
             }
             Step::Quit => {
@@ -325,7 +430,9 @@ impl Driver {
     /// Where a point from the window's top left is in the window's own
     /// coordinates, which run from its bottom left.
     fn at(window: &NSWindow, x: f64, y: f64) -> NSPoint {
-        let height = window.contentView().map_or(0.0, |view| view.frame().size.height);
+        let height = window
+            .contentView()
+            .map_or(0.0, |view| view.frame().size.height);
         NSPoint::new(x, height - y)
     }
 
@@ -347,7 +454,8 @@ impl Driver {
 
     fn scroll(&mut self, x: f64, y: f64, dy: i32) {
         let Some(window) = self.target() else { return };
-        let Some(event) = CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Pixel, 1, dy, 0, 0)
+        let Some(event) =
+            CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Pixel, 1, dy, 0, 0)
         else {
             return;
         };
@@ -359,10 +467,7 @@ impl Driver {
                 .unwrap_or(screen);
             main.frame().size.height
         });
-        CGEvent::set_location(
-            Some(&event),
-            NSPoint::new(on_screen.x, top - on_screen.y),
-        );
+        CGEvent::set_location(Some(&event), NSPoint::new(on_screen.x, top - on_screen.y));
         let number = i64::try_from(window.windowNumber()).unwrap_or_default();
         // The window under the pointer, as the window server would say.
         CGEvent::set_integer_value_field(Some(&event), CGEventField(91), number);
@@ -445,10 +550,25 @@ mod tests {
             steps,
             vec![
                 Step::Wait(500),
-                Step::Click { x: 528.0, y: 350.0, right: false },
-                Step::Click { x: 10.0, y: 20.0, right: true },
-                Step::Scroll { x: 700.0, y: 400.0, dy: -300 },
-                Step::Key { name: "f".into(), modifiers: vec!["cmd".into(), "shift".into()] },
+                Step::Click {
+                    x: 528.0,
+                    y: 350.0,
+                    right: false
+                },
+                Step::Click {
+                    x: 10.0,
+                    y: 20.0,
+                    right: true
+                },
+                Step::Scroll {
+                    x: 700.0,
+                    y: 400.0,
+                    dy: -300
+                },
+                Step::Key {
+                    name: "f".into(),
+                    modifiers: vec!["cmd".into(), "shift".into()]
+                },
                 Step::Type("Lisbon".into()),
                 Step::Shot("open".into()),
                 Step::CheckMenu,

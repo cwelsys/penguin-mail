@@ -29,7 +29,10 @@ pub fn path_of(part_id: &str, root_is_multipart: bool) -> String {
     }
     part_id
         .split('.')
-        .map(|n| n.parse::<usize>().map_or_else(|_| n.to_string(), |i| (i + 1).to_string()))
+        .map(|n| {
+            n.parse::<usize>()
+                .map_or_else(|_| n.to_string(), |i| (i + 1).to_string())
+        })
         .collect::<Vec<_>>()
         .join(".")
 }
@@ -72,8 +75,11 @@ pub fn text_by_reference(payload: &MessagePart) -> Vec<(String, String)> {
     every(payload, false, &mut |part| {
         let mime = part.mime_type.to_ascii_lowercase();
         let is_file = !part.filename.is_empty()
-            || find_header(part, "Content-Disposition")
-                .is_some_and(|d| d.trim_start().to_ascii_lowercase().starts_with("attachment"));
+            || find_header(part, "Content-Disposition").is_some_and(|d| {
+                d.trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("attachment")
+            });
         let wanted = mime == "text/calendar"
             || (!has_text_calendar && mailrs_mime::is_calendar(&mime, &part.filename))
             || ((mime == "text/plain" || mime == "text/html") && !is_file);
@@ -98,7 +104,9 @@ pub fn handles(payload: &MessagePart) -> Vec<(String, String)> {
 }
 
 fn is_multipart(part: &MessagePart) -> bool {
-    part.mime_type.to_ascii_lowercase().starts_with("multipart/")
+    part.mime_type
+        .to_ascii_lowercase()
+        .starts_with("multipart/")
 }
 
 fn is_message(part: &MessagePart) -> bool {
@@ -136,7 +144,11 @@ fn forwarded_subject(part: &MessagePart) -> Option<String> {
         return None;
     }
     find_header(part, "Subject")
-        .or_else(|| part.parts.first().and_then(|child| find_header(child, "Subject")))
+        .or_else(|| {
+            part.parts
+                .first()
+                .and_then(|child| find_header(child, "Subject"))
+        })
         .map(str::to_string)
 }
 
@@ -154,15 +166,26 @@ fn convert(part: &MessagePart, root_multipart: bool) -> Part {
         protocol: param(content_type, "protocol").map(str::to_string),
         smime_type: param(content_type, "smime-type").map(str::to_string),
         filename: Some(part.filename.clone()).filter(|f| !f.is_empty()),
-        content_id: find_header(part, "Content-ID")
-            .map(|v| v.trim().trim_start_matches('<').trim_end_matches('>').to_string()),
+        content_id: find_header(part, "Content-ID").map(|v| {
+            v.trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_string()
+        }),
         subject: forwarded_subject(part),
-        attachment: find_header(part, "Content-Disposition")
-            .is_some_and(|d| d.trim_start().to_ascii_lowercase().starts_with("attachment")),
+        attachment: find_header(part, "Content-Disposition").is_some_and(|d| {
+            d.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("attachment")
+        }),
         size: data.as_ref().map_or(part.body.size, |d| d.len() as i64),
         data,
         children: match has_children(part) {
-            true => part.parts.iter().map(|c| convert(c, root_multipart)).collect(),
+            true => part
+                .parts
+                .iter()
+                .map(|c| convert(c, root_multipart))
+                .collect(),
             false => Vec::new(),
         },
     }

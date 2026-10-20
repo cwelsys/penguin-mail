@@ -218,7 +218,11 @@ impl Completion {
 pub fn picked_text(text: &str, chosen: &str) -> String {
     let (start, _) = current_token(text);
     let head = text[..start].trim_end();
-    if head.is_empty() { format!("{chosen}, ") } else { format!("{head} {chosen}, ") }
+    if head.is_empty() {
+        format!("{chosen}, ")
+    } else {
+        format!("{head} {chosen}, ")
+    }
 }
 
 /// Whether typing goes to `entry`. Its inner text widget holds the focus.
@@ -325,7 +329,10 @@ mod tests {
 
     #[test]
     fn a_pick_replaces_the_word_being_typed() {
-        assert_eq!(picked_text("Lo", "Love <love@example.com>"), "Love <love@example.com>, ");
+        assert_eq!(
+            picked_text("Lo", "Love <love@example.com>"),
+            "Love <love@example.com>, "
+        );
     }
 
     #[test]

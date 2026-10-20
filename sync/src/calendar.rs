@@ -27,7 +27,9 @@ use mailrs_domain::{AccountId, EpochMillis};
 use mailrs_store::Db;
 use mailrs_store::calendar as store;
 
-use crate::calendar_copy::event_change::{self, Changed, Choice, Edit, EventChange, Question, Undo};
+use crate::calendar_copy::event_change::{
+    self, Changed, Choice, Edit, EventChange, Question, Undo,
+};
 use crate::calendar_copy::{CalendarCopy, new_event_id};
 use crate::{Accounts, AnyCalendar, BackendError, CalendarService, Permitted, Spot, SyncError};
 use mailrs_domain::invitation::Invitation;
@@ -63,8 +65,11 @@ pub fn writable_named<'a>(
         .iter()
         .filter(|c| c.name.trim().to_lowercase() == lower)
         .collect();
-    let writable: Vec<&model::Calendar> =
-        named.iter().copied().filter(|c| c.access.can_write()).collect();
+    let writable: Vec<&model::Calendar> = named
+        .iter()
+        .copied()
+        .filter(|c| c.access.can_write())
+        .collect();
     match (writable.as_slice(), named.first()) {
         ([one], _) => Ok(*one),
         ([], Some(read_only)) => Err(NoPick::ReadOnly(read_only.name.clone())),
@@ -107,7 +112,8 @@ impl<A: Accounts> Calendar<A> {
         from: EpochMillis,
         to: EpochMillis,
     ) -> Result<Permitted<Vec<model::Occurrence>>, SyncError> {
-        self.occurrences(account_id, from, to, store::CalendarScope::All).await
+        self.occurrences(account_id, from, to, store::CalendarScope::All)
+            .await
     }
 
     /// The stretches of at least `length` inside `windows` that no busy
@@ -126,12 +132,18 @@ impl<A: Accounts> Calendar<A> {
         ) else {
             return Ok(Permitted::Done(Vec::new()));
         };
-        let occurrences = match self.occurrences(account_id, from, to, store::CalendarScope::Owned).await? {
+        let occurrences = match self
+            .occurrences(account_id, from, to, store::CalendarScope::Owned)
+            .await?
+        {
             Permitted::Done(occurrences) => occurrences,
             Permitted::NeedsPermission => return Ok(Permitted::NeedsPermission),
         };
-        let busy: Vec<(EpochMillis, EpochMillis)> =
-            occurrences.iter().filter(|o| o.event.blocks_time()).map(|o| (o.start, o.end)).collect();
+        let busy: Vec<(EpochMillis, EpochMillis)> = occurrences
+            .iter()
+            .filter(|o| o.event.blocks_time())
+            .map(|o| (o.start, o.end))
+            .collect();
         Ok(Permitted::Done(free_slots(&busy, windows, length)))
     }
 
@@ -154,7 +166,10 @@ impl<A: Accounts> Calendar<A> {
         if let Permitted::NeedsPermission = self.ready(account_id).await? {
             return Ok(Permitted::NeedsPermission);
         }
-        let list = self.db.read(move |c| store::calendars(c, account_id)).await?;
+        let list = self
+            .db
+            .read(move |c| store::calendars(c, account_id))
+            .await?;
         Ok(Permitted::Done(list))
     }
 
@@ -193,7 +208,9 @@ impl<A: Accounts> Calendar<A> {
             }
         }
         let (rows, now) = (saved.clone(), crate::now_millis());
-        self.db.write(move |c| store::save_events(c, account_id, &rows, now)).await?;
+        self.db
+            .write(move |c| store::save_events(c, account_id, &rows, now))
+            .await?;
         let spots = saved
             .iter()
             .map(|event| Spot {
@@ -204,7 +221,11 @@ impl<A: Accounts> Calendar<A> {
                 outdated: None,
             })
             .collect();
-        Ok(Permitted::Done(Added { calendar: target.name, spots, skipped }))
+        Ok(Permitted::Done(Added {
+            calendar: target.name,
+            spots,
+            skipped,
+        }))
     }
 
     /// Puts a new event made of `edit` on `calendar`, or the primary
@@ -222,12 +243,22 @@ impl<A: Accounts> Calendar<A> {
         }
         let event = self.new_event(account_id, calendar, edit).await?;
         let change = EventChange::New(event.clone());
-        let choice = Choice { scope: None, notify: model::Notify::Guests };
-        if let Permitted::NeedsPermission = self.copy.change(account_id, change, choice, Undo::Skip).await? {
+        let choice = Choice {
+            scope: None,
+            notify: model::Notify::Guests,
+        };
+        if let Permitted::NeedsPermission = self
+            .copy
+            .change(account_id, change, choice, Undo::Skip)
+            .await?
+        {
             return Ok(Permitted::NeedsPermission);
         }
         self.copy.send_soon(account_id);
-        Ok(Permitted::Done(model::Event { pending: true, ..event }))
+        Ok(Permitted::Done(model::Event {
+            pending: true,
+            ..event
+        }))
     }
 
     /// Changes what `edit` sets on event `id`, through the copy's queue,
@@ -255,7 +286,10 @@ impl<A: Accounts> Calendar<A> {
         steps
             .into_iter()
             .find_map(|step| match step {
-                Step::Save(event) => Some(Permitted::Done(model::Event { pending: true, ..event })),
+                Step::Save(event) => Some(Permitted::Done(model::Event {
+                    pending: true,
+                    ..event
+                })),
                 _ => None,
             })
             .ok_or(SyncError::Backend(BackendError::NotFound))
@@ -265,7 +299,11 @@ impl<A: Accounts> Calendar<A> {
     /// cancellation to its guests when the window would send one. An
     /// occurrence id names one occurrence of a series, which the queue
     /// cancels alone (see [`Self::update`]).
-    pub async fn delete(&self, account_id: AccountId, id: &str) -> Result<Permitted<()>, SyncError> {
+    pub async fn delete(
+        &self,
+        account_id: AccountId,
+        id: &str,
+    ) -> Result<Permitted<()>, SyncError> {
         if let Permitted::NeedsPermission = self.ready(account_id).await? {
             return Ok(Permitted::NeedsPermission);
         }
@@ -286,7 +324,10 @@ impl<A: Accounts> Calendar<A> {
         edit: Option<&EventEdit>,
     ) -> Result<Question, SyncError> {
         let (change, _) = self.change_of(account_id, id, edit).await?;
-        Ok(event_change::confirmation(&change, self.always_mails(account_id)?))
+        Ok(event_change::confirmation(
+            &change,
+            self.always_mails(account_id)?,
+        ))
     }
 
     /// Writes the assistant's change of event `id` and starts a send. The
@@ -299,11 +340,16 @@ impl<A: Accounts> Calendar<A> {
         edit: Option<&EventEdit>,
     ) -> Result<Permitted<Changed>, SyncError> {
         let (change, scope) = self.change_of(account_id, id, edit).await?;
-        let notify = match event_change::confirmation(&change, self.always_mails(account_id)?).guests_hear() {
+        let notify = match event_change::confirmation(&change, self.always_mails(account_id)?)
+            .guests_hear()
+        {
             true => model::Notify::Guests,
             false => model::Notify::Nobody,
         };
-        let written = self.copy.change(account_id, change, Choice { scope, notify }, Undo::Skip).await?;
+        let written = self
+            .copy
+            .change(account_id, change, Choice { scope, notify }, Undo::Skip)
+            .await?;
         if let Permitted::Done(_) = written {
             self.copy.send_soon(account_id);
         }
@@ -321,12 +367,22 @@ impl<A: Accounts> Calendar<A> {
     ) -> Result<(EventChange, Option<RepeatScope>), SyncError> {
         let found = {
             let id = id.to_string();
-            self.db.read(move |c| store::find_event(c, account_id, &id)).await?
+            self.db
+                .read(move |c| store::find_event(c, account_id, &id))
+                .await?
         };
         let (occurrence, scope) = match found {
             Some(event) => {
                 let (start, end) = (event.start, event.end);
-                (model::Occurrence { account_id, event: Arc::new(event), start, end }, None)
+                (
+                    model::Occurrence {
+                        account_id,
+                        event: Arc::new(event),
+                        start,
+                        end,
+                    },
+                    None,
+                )
             }
             None => match self.occurrence(account_id, id).await? {
                 Some(occurrence) => (occurrence, Some(RepeatScope::This)),
@@ -345,13 +401,23 @@ impl<A: Accounts> Calendar<A> {
         let mut edited = before.clone();
         edit.apply(&mut edited);
         let how = seen_by_guests(&before, &edited);
-        Ok((EventChange::Edit { occurrence, edited, how }, scope))
+        Ok((
+            EventChange::Edit {
+                occurrence,
+                edited,
+                how,
+            },
+            scope,
+        ))
     }
 
     /// Whether the account mails the guests of every change, as Graph
     /// does.
     fn always_mails(&self, account_id: AccountId) -> Result<bool, SyncError> {
-        let services = self.accounts.services(account_id).ok_or(SyncError::UnknownAccount(account_id))?;
+        let services = self
+            .accounts
+            .services(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?;
         Ok(!services.offers().quiet_changes)
     }
 
@@ -367,7 +433,11 @@ impl<A: Accounts> Calendar<A> {
         if let Permitted::NeedsPermission = self.ready(account_id).await? {
             return Ok(Permitted::NeedsPermission);
         }
-        Ok(Permitted::Done(self.copy.occurrences(&[account_id], from, to, scope).await?))
+        Ok(Permitted::Done(
+            self.copy
+                .occurrences(&[account_id], from, to, scope)
+                .await?,
+        ))
     }
 
     /// Waits for the copy's first read of the account when it has none
@@ -382,22 +452,36 @@ impl<A: Accounts> Calendar<A> {
     /// [`model::Occurrence::id`] writes it), with the series as its event.
     /// `None` when `id` is not in that form, names no series in the copy,
     /// or names a start the series never reaches.
-    async fn occurrence(&self, account_id: AccountId, id: &str) -> Result<Option<model::Occurrence>, SyncError> {
+    async fn occurrence(
+        &self,
+        account_id: AccountId,
+        id: &str,
+    ) -> Result<Option<model::Occurrence>, SyncError> {
         let Some((series_id, start)) = model::split_occurrence_id(id) else {
             return Ok(None);
         };
         let series = {
             let series_id = series_id.to_string();
-            self.db.read(move |c| store::find_event(c, account_id, &series_id)).await?
+            self.db
+                .read(move |c| store::find_event(c, account_id, &series_id))
+                .await?
         };
         let Some(series) = series.filter(|s| !s.rules.is_empty()) else {
             return Ok(None);
         };
-        if !model::expand(&series, start, start + 1).iter().any(|&(at, _)| at == start) {
+        if !model::expand(&series, start, start + 1)
+            .iter()
+            .any(|&(at, _)| at == start)
+        {
             return Ok(None);
         }
         let end = start + (series.end - series.start);
-        Ok(Some(model::Occurrence { account_id, event: Arc::new(series), start, end }))
+        Ok(Some(model::Occurrence {
+            account_id,
+            event: Arc::new(series),
+            start,
+            end,
+        }))
     }
 
     /// The neutral event a fresh `create` writes: on `calendar`, or the
@@ -430,20 +514,34 @@ impl<A: Accounts> Calendar<A> {
     /// `SyncError::NoCalendar`. The no-primary fallback serves a copy that
     /// could not read the calendar list, whose provider still takes
     /// `primary` as the primary calendar's name.
-    async fn target(&self, account_id: AccountId, calendar: Option<&str>) -> Result<model::Calendar, SyncError> {
-        let calendars = self.db.read(move |c| store::calendars(c, account_id)).await?;
+    async fn target(
+        &self,
+        account_id: AccountId,
+        calendar: Option<&str>,
+    ) -> Result<model::Calendar, SyncError> {
+        let calendars = self
+            .db
+            .read(move |c| store::calendars(c, account_id))
+            .await?;
         let found = match calendar {
             Some(id) => calendars.into_iter().find(|c| c.id == id),
-            None => Some(calendars.into_iter().find(|c| c.primary).unwrap_or_else(|| model::Calendar {
-                id: "primary".to_string(),
-                primary: true,
-                access: model::Access::Owner,
-                ..model::Calendar::default()
-            })),
+            None => Some(
+                calendars
+                    .into_iter()
+                    .find(|c| c.primary)
+                    .unwrap_or_else(|| model::Calendar {
+                        id: "primary".to_string(),
+                        primary: true,
+                        access: model::Access::Owner,
+                        ..model::Calendar::default()
+                    }),
+            ),
         };
         match found {
             Some(calendar) if calendar.access.can_write() => Ok(calendar),
-            _ => Err(SyncError::NoCalendar(calendar.unwrap_or("primary").to_string())),
+            _ => Err(SyncError::NoCalendar(
+                calendar.unwrap_or("primary").to_string(),
+            )),
         }
     }
 
@@ -460,7 +558,8 @@ impl<A: Accounts> Calendar<A> {
 /// guests see it. Every field a tool sets is one the guests see, so a
 /// field counts only when its value differs.
 fn seen_by_guests(before: &model::Event, after: &model::Event) -> Edit {
-    let moves = (before.start, before.end, before.all_day) != (after.start, after.end, after.all_day);
+    let moves =
+        (before.start, before.end, before.all_day) != (after.start, after.end, after.all_day);
     let guests = event_change::adds_guests(&before.guests, &after.guests)
         || event_change::adds_guests(&after.guests, &before.guests);
     let seen = moves
@@ -468,7 +567,11 @@ fn seen_by_guests(before: &model::Event, after: &model::Event) -> Edit {
         || before.title != after.title
         || before.place != after.place
         || before.description != after.description;
-    Edit { moves, seen, ..Edit::default() }
+    Edit {
+        moves,
+        seen,
+        ..Edit::default()
+    }
 }
 
 /// Refuses a change to a birthday or a working location, which only

@@ -81,8 +81,22 @@ fn message(account_id: i64, n: i64) -> MessageMeta {
         id: format!("m{n}"),
         thread_id: format!("t{}", n / 3),
         rfc822_msgid: Some(format!("<m{n}@example.org>")),
-        from: Some(if sent { Address { name: None, email: "me@example.com".into() } } else { person(n % 3_000) }),
-        to: vec![if sent { person(n % 700) } else { Address { name: None, email: "me@example.com".into() } }],
+        from: Some(if sent {
+            Address {
+                name: None,
+                email: "me@example.com".into(),
+            }
+        } else {
+            person(n % 3_000)
+        }),
+        to: vec![if sent {
+            person(n % 700)
+        } else {
+            Address {
+                name: None,
+                email: "me@example.com".into(),
+            }
+        }],
         cc: vec![person(n % 50)],
         subject: format!("Subject {n}"),
         date: START - n * 60_000,
@@ -123,36 +137,81 @@ fn calendar_and_contact_reads_on_a_generated_store() {
     calendar::save_calendars(&conn, id, &[calendar_named("primary")]).unwrap();
     let events: Vec<Event> = (0..5_000).map(event).collect();
     let tx = conn.transaction().unwrap();
-    time("save 500 events", || calendar::save_events(&tx, id, &events[..500], 1).unwrap());
+    time("save 500 events", || {
+        calendar::save_events(&tx, id, &events[..500], 1).unwrap()
+    });
     calendar::save_events(&tx, id, &events, 1).unwrap();
     for chunk in (0..50_000).collect::<Vec<i64>>().chunks(1_000) {
         let changes: Vec<Change> = chunk
             .iter()
-            .map(|&n| Change::Upsert { meta: Box::new(message(id, n)), generation: 1 })
+            .map(|&n| Change::Upsert {
+                meta: Box::new(message(id, n)),
+                generation: 1,
+            })
             .collect();
         messages::apply(&tx, id, &changes).unwrap();
     }
     tx.commit().unwrap();
 
     time("a week of occurrences", || {
-        calendar::occurrences(&conn, &[id], START, START + 7 * 24 * HOUR, CalendarScope::Shown).unwrap()
+        calendar::occurrences(
+            &conn,
+            &[id],
+            START,
+            START + 7 * 24 * HOUR,
+            CalendarScope::Shown,
+        )
+        .unwrap()
     });
     time("a month of occurrences", || {
-        calendar::occurrences(&conn, &[id], START, START + 30 * 24 * HOUR, CalendarScope::Shown).unwrap()
+        calendar::occurrences(
+            &conn,
+            &[id],
+            START,
+            START + 30 * 24 * HOUR,
+            CalendarScope::Shown,
+        )
+        .unwrap()
     });
-    time("invitations waiting", || calendar::waiting(&conn, &[id], START, 50).unwrap());
-    time("search events", || calendar::search(&conn, &[id], "event 1", START, CalendarScope::Shown, 50).unwrap());
-    time("events by uid", || calendar::with_uid(&conn, id, "e4000@EXAMPLE.com", START, START + 400 * 24 * HOUR).unwrap());
-    time("series by uid", || calendar::series_with_uid(&conn, id, "e4000@example.com").unwrap());
+    time("invitations waiting", || {
+        calendar::waiting(&conn, &[id], START, 50).unwrap()
+    });
+    time("search events", || {
+        calendar::search(&conn, &[id], "event 1", START, CalendarScope::Shown, 50).unwrap()
+    });
+    time("events by uid", || {
+        calendar::with_uid(
+            &conn,
+            id,
+            "e4000@EXAMPLE.com",
+            START,
+            START + 400 * 24 * HOUR,
+        )
+        .unwrap()
+    });
+    time("series by uid", || {
+        calendar::series_with_uid(&conn, id, "e4000@example.com").unwrap()
+    });
     // The store's writer counts new mail into the kept tally when idle;
     // each step below does what it would, then reads.
     time("contacts, every message counted again", || {
-        conn.execute("UPDATE contact_marks SET stale = 1", []).unwrap();
+        conn.execute("UPDATE contact_marks SET stale = 1", [])
+            .unwrap();
         contacts::catch_up(&conn).unwrap();
     });
-    time("contacts, nothing new", || contacts::suggestions(&conn).unwrap());
+    time("contacts, nothing new", || {
+        contacts::suggestions(&conn).unwrap()
+    });
     let put = |meta: MessageMeta| {
-        messages::apply(&conn, id, &[Change::Upsert { meta: Box::new(meta), generation: 1 }]).unwrap();
+        messages::apply(
+            &conn,
+            id,
+            &[Change::Upsert {
+                meta: Box::new(meta),
+                generation: 1,
+            }],
+        )
+        .unwrap();
         contacts::catch_up(&conn).unwrap();
         contacts::suggestions(&conn).unwrap()
     };
@@ -166,9 +225,12 @@ fn calendar_and_contact_reads_on_a_generated_store() {
         sent += 10;
         put(message(id, sent))
     });
-    time("contacts after a Sent message read again", || put(message(id, 0)));
+    time("contacts after a Sent message read again", || {
+        put(message(id, 0))
+    });
     time("contacts while the kept tally is stale", || {
-        conn.execute("UPDATE contact_marks SET stale = 1", []).unwrap();
+        conn.execute("UPDATE contact_marks SET stale = 1", [])
+            .unwrap();
         contacts::suggestions(&conn).unwrap()
     });
 }

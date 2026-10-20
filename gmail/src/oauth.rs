@@ -18,7 +18,9 @@ use crate::GmailError;
 
 /// The most a token endpoint's answer may take; a real one is a few hundred bytes.
 const TOKEN_LIMIT: usize = 64 << 10;
-use crate::calendar::{CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE};
+use crate::calendar::{
+    CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE,
+};
 use crate::people::{CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE};
 
 /// Read, send, and organize mail. Sign-in no longer asks for this one on
@@ -125,17 +127,26 @@ mod granted_tests {
     fn granted_scopes_parse_and_cover_the_narrower_ones() {
         let granted = Granted::parse(DELETE_SCOPE);
         assert!(granted.has(DELETE_SCOPE));
-        assert!(granted.has(GMAIL_SCOPE), "mail.google.com covers gmail.modify");
+        assert!(
+            granted.has(GMAIL_SCOPE),
+            "mail.google.com covers gmail.modify"
+        );
         assert!(!granted.has(SETTINGS_SCOPE));
 
         let contacts = Granted::parse(CONTACTS_WRITE_SCOPE);
-        assert!(contacts.has(CONTACTS_SCOPE), "contacts covers contacts.readonly");
+        assert!(
+            contacts.has(CONTACTS_SCOPE),
+            "contacts covers contacts.readonly"
+        );
     }
 
     #[test]
     fn granted_scopes_write_back_sorted() {
         let granted = Granted::parse(&format!("{SETTINGS_SCOPE} {GMAIL_SCOPE}"));
-        assert_eq!(granted.to_scope(), format!("{GMAIL_SCOPE} {SETTINGS_SCOPE}"));
+        assert_eq!(
+            granted.to_scope(),
+            format!("{GMAIL_SCOPE} {SETTINGS_SCOPE}")
+        );
     }
 }
 
@@ -429,7 +440,9 @@ impl LoopbackListener {
 fn finished(outcome: &Option<Result<String, GmailError>>) -> Finished {
     match outcome {
         Some(Ok(_)) => Finished::Signed,
-        Some(Err(GmailError::OAuth(reason))) if reason.ends_with("access_denied") => Finished::Denied,
+        Some(Err(GmailError::OAuth(reason))) if reason.ends_with("access_denied") => {
+            Finished::Denied
+        }
         Some(Err(_)) => Finished::Failed,
         None => Finished::Nothing,
     }
@@ -495,8 +508,15 @@ mod build_client_tests {
 
     #[test]
     fn debug_output_leaves_out_tokens_and_the_verifier() {
-        let access = AccessToken { token: "ya29.access".into(), expires_at: Instant::now(), granted: None };
-        let tokens = Tokens { access: access.clone(), refresh_token: "1//refresh".into() };
+        let access = AccessToken {
+            token: "ya29.access".into(),
+            expires_at: Instant::now(),
+            granted: None,
+        };
+        let tokens = Tokens {
+            access: access.clone(),
+            refresh_token: "1//refresh".into(),
+        };
         let authorized = crate::Authorized {
             email: "dana@gmail.com".into(),
             refresh_token: "1//refresh".into(),
@@ -517,9 +537,13 @@ mod finished_tests {
     #[test]
     fn an_outcome_picks_the_shared_page() {
         assert_eq!(finished(&Some(Ok("code".into()))), Finished::Signed);
-        let denied = Some(Err(GmailError::OAuth("Google returned access_denied".into())));
+        let denied = Some(Err(GmailError::OAuth(
+            "Google returned access_denied".into(),
+        )));
         assert_eq!(finished(&denied), Finished::Denied);
-        let odd = Some(Err(GmailError::OAuth("Google returned <script>x</script>".into())));
+        let odd = Some(Err(GmailError::OAuth(
+            "Google returned <script>x</script>".into(),
+        )));
         assert_eq!(finished(&odd), Finished::Failed);
         assert_eq!(finished(&None), Finished::Nothing);
     }

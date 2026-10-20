@@ -19,12 +19,12 @@ pub(super) fn cancel_result(cancelled: &Cancelled, reopened: usize) -> Value {
     if reopened > 0 {
         result["opened_in_composer"] = json!(reopened);
         result["note"] = json!(
-            "Gmail was out of reach, so those messages are open in a composer for the user to save."
+            "The server was out of reach, so those messages are open in a composer for the user to save."
         );
     }
     if kept > 0 {
         result["note"] = json!(
-            "Gmail is out of reach and some messages could not be reopened, so they stay in Send Later."
+            "The server is out of reach and some messages could not be reopened, so they stay in Send Later."
         );
     }
     if kept + cancelled.still_held > 0 {
@@ -37,7 +37,8 @@ pub(super) fn cancel_result(cancelled: &Cancelled, reopened: usize) -> Value {
     }
     if cancelled.already_sent > 0 {
         result["already_sent"] = json!(cancelled.already_sent);
-        result["note_sent"] = json!("The server had already sent those messages; they are in Sent.");
+        result["note_sent"] =
+            json!("The server had already sent those messages; they are in Sent.");
     }
     if cancelled.cancelled_elsewhere > 0 {
         result["canceled_elsewhere"] = json!(cancelled.cancelled_elsewhere);
@@ -162,7 +163,7 @@ impl<A: Accounts> Tools<A> {
             if !still.is_empty() {
                 result["still_waiting"] = json!(still);
                 result["note"] = json!(
-                    "Gmail could not be reached for those, so they wait in the Outbox and go on their own."
+                    "The server could not be reached for those, so they wait in the Outbox and go on their own."
                 );
             }
             if !refused.is_empty() {
@@ -172,9 +173,11 @@ impl<A: Accounts> Tools<A> {
         }))
     }
 
-    /// Cancels Send Later. What Gmail holds goes back to Drafts; a message
-    /// Gmail never had and cannot take now opens in a composer, as Cancel
-    /// Send in the window does, since this computer holds its only copy.
+    /// Cancels Send Later. What the server holds goes back to Drafts; a
+    /// message the server never had and cannot take now opens in a composer,
+    /// as Cancel Send in the window does, since this computer holds its
+    /// only copy. A cancel can cover more than one account, so the note
+    /// says "the server".
     pub(super) async fn cancel_send<'a>(&'a self, input: &'a Value) -> Result<Plan<'a>, String> {
         let (targets, named) = self.queued(input).await?;
         let scheduled: Vec<Queued> = named.into_iter().filter(|m| m.problem.is_none()).collect();

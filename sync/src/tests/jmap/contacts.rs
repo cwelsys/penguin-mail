@@ -9,7 +9,12 @@ use crate::{AnyContacts, ContactsService};
 
 async fn contacts() -> (super::Harness, AnyContacts) {
     let h = over(FakeJmap::new().with_capability(CONTACTS)).await;
-    let contacts = h.sync.services().contacts.clone().expect("the session offers contacts");
+    let contacts = h
+        .sync
+        .services()
+        .contacts
+        .clone()
+        .expect("the session offers contacts");
     (h, contacts)
 }
 
@@ -20,31 +25,54 @@ async fn a_first_read_brings_every_card_and_then_changes_alone() {
     let page = contacts.connections(None, None).await.unwrap();
     assert_eq!(page.people[0].name.as_deref(), Some("Ada Lovelace"));
     assert_eq!(page.people[0].emails, ["ada@example.com"]);
-    let token = page.next_sync_token.expect("a sync token after the last page");
+    let token = page
+        .next_sync_token
+        .expect("a sync token after the last page");
     let grace = h.fake.add_card("Grace Hopper", "grace@example.com");
     let changed = contacts.connections(None, Some(&token)).await.unwrap();
-    assert_eq!(changed.people.iter().map(|p| p.resource.clone()).collect::<Vec<_>>(), [grace]);
+    assert_eq!(
+        changed
+            .people
+            .iter()
+            .map(|p| p.resource.clone())
+            .collect::<Vec<_>>(),
+        [grace]
+    );
 }
 
 #[tokio::test]
 async fn a_card_added_during_a_long_read_comes_in_the_next_changes() {
     let (h, contacts) = contacts().await;
     for i in 0..201 {
-        h.fake.add_card(&format!("Person {i}"), &format!("p{i}@example.com"));
+        h.fake
+            .add_card(&format!("Person {i}"), &format!("p{i}@example.com"));
     }
     let first = contacts.connections(None, None).await.unwrap();
     assert_eq!(first.people.len(), 200);
     let late = h.fake.add_card("Late", "late@example.com");
-    let rest = contacts.connections(first.next_page_token.as_deref(), None).await.unwrap();
-    let token = rest.next_sync_token.expect("the read ends on the second page");
+    let rest = contacts
+        .connections(first.next_page_token.as_deref(), None)
+        .await
+        .unwrap();
+    let token = rest
+        .next_sync_token
+        .expect("the read ends on the second page");
     let changed = contacts.connections(None, Some(&token)).await.unwrap();
-    assert!(changed.people.iter().any(|p| p.resource == late), "the sync token must predate the card added mid-read");
+    assert!(
+        changed.people.iter().any(|p| p.resource == late),
+        "the sync token must predate the card added mid-read"
+    );
 }
 
 #[tokio::test]
 async fn a_new_contact_goes_into_the_default_book() {
     let (h, contacts) = contacts().await;
-    let fields = ContactFields { name: Some("Ada".into()), emails: Some(vec!["ada@example.com".into()]), phones: Some(vec!["+44 20".into()]), organization: Some("Engines".into()) };
+    let fields = ContactFields {
+        name: Some("Ada".into()),
+        emails: Some(vec!["ada@example.com".into()]),
+        phones: Some(vec!["+44 20".into()]),
+        organization: Some("Engines".into()),
+    };
     let made = contacts.create_contact(&fields).await.unwrap();
     assert_eq!(made.organization.as_deref(), Some("Engines"));
     assert_eq!(made.phone.as_deref(), Some("+44 20"));
@@ -57,7 +85,10 @@ async fn a_new_contact_goes_into_the_default_book() {
 async fn an_edit_changes_only_the_fields_it_names() {
     let (h, contacts) = contacts().await;
     let id = h.fake.add_card("Ada", "ada@example.com");
-    let fields = ContactFields { organization: Some("Engines".into()), ..ContactFields::default() };
+    let fields = ContactFields {
+        organization: Some("Engines".into()),
+        ..ContactFields::default()
+    };
     let changed = contacts.update_contact(&id, &fields).await.unwrap();
     assert_eq!(changed.name.as_deref(), Some("Ada"));
     assert_eq!(changed.emails, ["ada@example.com"]);
@@ -67,10 +98,18 @@ async fn an_edit_changes_only_the_fields_it_names() {
 #[tokio::test]
 async fn a_forgotten_state_asks_for_a_whole_read() {
     let (h, contacts) = contacts().await;
-    let token = contacts.connections(None, None).await.unwrap().next_sync_token.unwrap();
+    let token = contacts
+        .connections(None, None)
+        .await
+        .unwrap()
+        .next_sync_token
+        .unwrap();
     h.fake.add_card("Ada", "ada@example.com");
     h.fake.forget_changes();
-    assert!(matches!(contacts.connections(None, Some(&token)).await, Err(crate::BackendError::StateLost)));
+    assert!(matches!(
+        contacts.connections(None, Some(&token)).await,
+        Err(crate::BackendError::StateLost)
+    ));
 }
 
 /// A card made elsewhere, with more than an edit can see: a split name,
@@ -99,18 +138,33 @@ async fn adding_an_email_keeps_everything_else_on_the_card() {
     let (h, contacts) = contacts().await;
     let id = rich_card(&h);
     let fields = ContactFields {
-        emails: Some(vec!["ada@work.example".into(), "ada@home.example".into(), "ada@new.example".into()]),
+        emails: Some(vec![
+            "ada@work.example".into(),
+            "ada@home.example".into(),
+            "ada@new.example".into(),
+        ]),
         ..ContactFields::default()
     };
     contacts.update_contact(&id, &fields).await.unwrap();
     let card = h.fake.with(|s| s.cards["K9"].clone());
     assert_eq!(card["name"]["components"][1]["value"], "Lovelace", "{card}");
     assert_eq!(card["emails"]["work"]["contexts"]["work"], true, "{card}");
-    assert_eq!(card["emails"]["home"]["contexts"]["private"], true, "{card}");
-    let addresses: Vec<&str> = card["emails"].as_object().unwrap().values().filter_map(|e| e["address"].as_str()).collect();
+    assert_eq!(
+        card["emails"]["home"]["contexts"]["private"], true,
+        "{card}"
+    );
+    let addresses: Vec<&str> = card["emails"]
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|e| e["address"].as_str())
+        .collect();
     assert!(addresses.contains(&"ada@new.example"), "{card}");
     assert_eq!(card["phones"]["p2"]["number"], "+351 910 000 000", "{card}");
-    assert_eq!(card["organizations"]["o1"]["units"][0]["name"], "Research", "{card}");
+    assert_eq!(
+        card["organizations"]["o1"]["units"][0]["name"], "Research",
+        "{card}"
+    );
 }
 
 #[tokio::test]
@@ -130,17 +184,31 @@ async fn an_edit_removes_and_renames_only_what_it_was_shown() {
     // The edit saw only the first phone; the mobile it never saw stays.
     assert!(card["phones"].get("p1").is_none(), "{card}");
     assert_eq!(card["phones"]["p2"]["features"]["mobile"], true, "{card}");
-    let numbers: Vec<&str> = card["phones"].as_object().unwrap().values().filter_map(|p| p["number"].as_str()).collect();
+    let numbers: Vec<&str> = card["phones"]
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|p| p["number"].as_str())
+        .collect();
     assert!(numbers.contains(&"+351 220 000 000"), "{card}");
-    assert_eq!(card["organizations"]["o1"]["name"], "Difference Engines", "{card}");
-    assert_eq!(card["organizations"]["o1"]["units"][0]["name"], "Research", "{card}");
+    assert_eq!(
+        card["organizations"]["o1"]["name"], "Difference Engines",
+        "{card}"
+    );
+    assert_eq!(
+        card["organizations"]["o1"]["units"][0]["name"], "Research",
+        "{card}"
+    );
 }
 
 #[tokio::test]
 async fn an_unchanged_name_keeps_its_parts() {
     let (h, contacts) = contacts().await;
     let id = rich_card(&h);
-    let fields = ContactFields { name: Some("Ada Lovelace".into()), ..ContactFields::default() };
+    let fields = ContactFields {
+        name: Some("Ada Lovelace".into()),
+        ..ContactFields::default()
+    };
     contacts.update_contact(&id, &fields).await.unwrap();
     let card = h.fake.with(|s| s.cards["K9"].clone());
     assert_eq!(card["name"]["components"][0]["value"], "Ada", "{card}");

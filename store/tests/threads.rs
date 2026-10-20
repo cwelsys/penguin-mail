@@ -398,10 +398,21 @@ fn a_thread_whose_message_carried_an_invitation_says_so() {
         .into_iter()
         .map(|t| (t.id, t.invitation))
         .collect();
-    assert_eq!(marked, [("ta2".to_string(), true), ("ta1".to_string(), false)]);
+    assert_eq!(
+        marked,
+        [("ta2".to_string(), true), ("ta1".to_string(), false)]
+    );
     let messages = threads::list_messages(&conn, &inbox, 0, 10).unwrap();
-    assert!(messages.iter().any(|m| m.message_id.as_deref() == Some("a2") && m.invitation));
-    assert!(messages.iter().any(|m| m.message_id.as_deref() == Some("a1") && !m.invitation));
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.message_id.as_deref() == Some("a2") && m.invitation)
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.message_id.as_deref() == Some("a1") && !m.invitation)
+    );
 }
 
 #[test]
@@ -409,5 +420,10 @@ fn a_cancelled_invitation_leaves_no_mark() {
     let (conn, a, _) = two_accounts();
     invitation_in(&conn, a, "a2", true);
     let inbox = ThreadFilter::account(a, set("INBOX"));
-    assert!(threads::list_threads(&conn, &inbox, 0, 10).unwrap().iter().all(|t| !t.invitation));
+    assert!(
+        threads::list_threads(&conn, &inbox, 0, 10)
+            .unwrap()
+            .iter()
+            .all(|t| !t.invitation)
+    );
 }

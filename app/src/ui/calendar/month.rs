@@ -134,8 +134,12 @@ mod imp {
             match orientation {
                 gtk::Orientation::Vertical => {
                     let least = WEEKS as i32 * (heading + line);
-                    let wanted: i32 =
-                        self.needs.borrow().iter().map(|&n| heading + n.max(1) as i32 * line).sum();
+                    let wanted: i32 = self
+                        .needs
+                        .borrow()
+                        .iter()
+                        .map(|&n| heading + n.max(1) as i32 * line)
+                        .sum();
                     (least, wanted.max(least), -1, -1)
                 }
                 _ => {
@@ -145,7 +149,8 @@ mod imp {
                     }
                     for (item, place) in self.items.borrow().iter() {
                         let span = (place.end - place.start).max(1) as i32;
-                        let least = item.measure(gtk::Orientation::Horizontal, -1).0 + 2 * INSET as i32;
+                        let least =
+                            item.measure(gtk::Orientation::Horizontal, -1).0 + 2 * INSET as i32;
                         column = column.max((least + span - 1) / span);
                     }
                     (7 * column, 7 * column, -1, -1)
@@ -186,18 +191,38 @@ mod imp {
                 let (week, column) = (index / 7, index % 7);
                 let x = column_x(column);
                 let w = column_x(column + 1) - x;
-                allocate_at(cell, mirrored(x, w), tops[week] as f32, w, heights[week] as f32, baseline);
+                allocate_at(
+                    cell,
+                    mirrored(x, w),
+                    tops[week] as f32,
+                    w,
+                    heights[week] as f32,
+                    baseline,
+                );
             }
             for (item, place) in self.items.borrow().iter() {
                 let (left, w) = span_of(place);
                 let y = tops[place.week] + heading + place.line as i32 * line;
-                allocate_at(item, mirrored(left, w), y as f32, w, (line - LINE_GAP) as f32, baseline);
+                allocate_at(
+                    item,
+                    mirrored(left, w),
+                    y as f32,
+                    w,
+                    (line - LINE_GAP) as f32,
+                    baseline,
+                );
             }
 
             self.heights.replace(heights.clone());
-            let rows: Vec<usize> = heights.iter().map(|&h| layout::week_rows(h, heading, line)).collect();
-            let folds: Vec<Option<usize>> =
-                rows.iter().zip(&needs).map(|(&r, &n)| (r < n).then_some(r)).collect();
+            let rows: Vec<usize> = heights
+                .iter()
+                .map(|&h| layout::week_rows(h, heading, line))
+                .collect();
+            let folds: Vec<Option<usize>> = rows
+                .iter()
+                .zip(&needs)
+                .map(|(&r, &n)| (r < n).then_some(r))
+                .collect();
             let changed = folds != *self.built.borrow();
             if changed && let Some(f) = self.rows_changed.borrow().as_ref() {
                 f(rows);
@@ -263,7 +288,10 @@ impl MonthBody {
     fn add_item(&self, item: &impl IsA<gtk::Widget>, place: Place) {
         let next_week = self.imp().cells.borrow().get((place.week + 1) * 7).cloned();
         item.as_ref().insert_before(self, next_week.as_ref());
-        self.imp().items.borrow_mut().push((item.as_ref().clone(), place));
+        self.imp()
+            .items
+            .borrow_mut()
+            .push((item.as_ref().clone(), place));
     }
 
     fn set_lines(&self, needs: Vec<usize>, built: Vec<Option<usize>>) {
@@ -392,7 +420,8 @@ impl MonthGrid {
         let weak = Rc::downgrade(&this);
         drag.connect_drag_update(move |gesture, dx, dy| {
             let Some(grid) = weak.upgrade() else { return };
-            let threshold = gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
+            let threshold =
+                gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
             if grid.drag_event(gesture, dx, dy, threshold) {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
             }
@@ -400,7 +429,8 @@ impl MonthGrid {
         let weak = Rc::downgrade(&this);
         drag.connect_drag_end(move |_, dx, dy| {
             let Some(grid) = weak.upgrade() else { return };
-            let threshold = gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
+            let threshold =
+                gtk::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()) as f64;
             grid.release_cell(dx, dy, threshold);
             grid.drop_event();
         });
@@ -429,8 +459,13 @@ impl MonthGrid {
             .enumerate()
             .filter_map(|(i, place)| Some((range.first + Days::new(i as u64), place.clone()?)))
             .collect();
-        self.shown
-            .replace(Some((range, occurrences.to_vec(), calendars.clone(), working_hours, places)));
+        self.shown.replace(Some((
+            range,
+            occurrences.to_vec(),
+            calendars.clone(),
+            working_hours,
+            places,
+        )));
         self.rebuild();
     }
     /// Runs `f` with the date a day's own number was activated for.
@@ -450,11 +485,11 @@ impl MonthGrid {
     /// press never becomes a drag.
     fn press_cell(&self, x: f64, y: f64) {
         let picked = self.widget.pick(x, y, gtk::PickFlags::DEFAULT);
-        self.pressed_cell.set(
-            self.cells
-                .iter()
-                .position(|cell| picked.as_ref().is_some_and(|w| w == cell.upcast_ref::<gtk::Widget>())),
-        );
+        self.pressed_cell.set(self.cells.iter().position(|cell| {
+            picked
+                .as_ref()
+                .is_some_and(|w| w == cell.upcast_ref::<gtk::Widget>())
+        }));
     }
 
     /// The release after `press_cell`. Under `threshold`, the press
@@ -462,11 +497,15 @@ impl MonthGrid {
     /// it, the press was a drag, such as the swipe between months, which
     /// this leaves alone.
     fn release_cell(&self, dx: f64, dy: f64, threshold: f64) {
-        let Some(index) = self.pressed_cell.take() else { return };
+        let Some(index) = self.pressed_cell.take() else {
+            return;
+        };
         if !super::drag::is_click(dx, dy, threshold) {
             return;
         }
-        let Some(&day) = self.days.borrow().get(index) else { return };
+        let Some(&day) = self.days.borrow().get(index) else {
+            return;
+        };
         if let Some(f) = self.day_clicked.borrow().as_ref() {
             f(day);
         }
@@ -474,7 +513,10 @@ impl MonthGrid {
 
     /// Runs `f` when a drag of an event ends on another day: the event
     /// keeps its time and length and takes that day's date.
-    pub fn connect_moved(&self, f: impl Fn(&MonthGrid, &Occurrence, super::drag::Landing) + 'static) {
+    pub fn connect_moved(
+        &self,
+        f: impl Fn(&MonthGrid, &Occurrence, super::drag::Landing) + 'static,
+    ) {
         self.moved.replace(Some(Box::new(f)));
     }
 
@@ -514,7 +556,11 @@ impl MonthGrid {
                 .map(|(_, o, _)| o.clone())
         });
         let drag = found.and_then(|occurrence| {
-            let allowed = self.can_move.borrow().as_ref().is_some_and(|f| f(&occurrence));
+            let allowed = self
+                .can_move
+                .borrow()
+                .as_ref()
+                .is_some_and(|f| f(&occurrence));
             let from = self.cell_at(x, y)?;
             allowed.then(|| {
                 let key = key_of(&occurrence);
@@ -525,7 +571,13 @@ impl MonthGrid {
                     .filter(|(k, o, _)| *k == key && o.start == occurrence.start)
                     .map(|(_, _, w)| w.clone())
                     .collect();
-                MonthDrag { occurrence, blocks, from, started: false, landing: None }
+                MonthDrag {
+                    occurrence,
+                    blocks,
+                    from,
+                    started: false,
+                    landing: None,
+                }
             })
         });
         self.dragging.replace(drag);
@@ -540,7 +592,9 @@ impl MonthGrid {
             .borrow()
             .as_ref()
             .map(|d| (d.started, d.occurrence.clone(), d.from, d.blocks.clone()));
-        let Some((started, o, from, blocks)) = taken else { return false };
+        let Some((started, o, from, blocks)) = taken else {
+            return false;
+        };
         if !started {
             if super::drag::is_click(dx, dy, threshold) {
                 return false;
@@ -558,13 +612,23 @@ impl MonthGrid {
                 f(false);
             }
         }
-        let Some((x, y)) = gesture.start_point() else { return true };
+        let Some((x, y)) = gesture.start_point() else {
+            return true;
+        };
         let to = self.cell_at(x + dx, y + dy);
         let landing = to.and_then(|to| {
-            let zone = o.event.zone.parse().unwrap_or_else(|_| super::draft::local_zone());
+            let zone = o
+                .event
+                .zone
+                .parse()
+                .unwrap_or_else(|_| super::draft::local_zone());
             let days = to as i64 - from as i64;
             let (start, end) = super::drag::by_days(o.start, o.end, o.event.all_day, days, zone);
-            (days != 0).then_some(super::drag::Landing { start, end, all_day: o.event.all_day })
+            (days != 0).then_some(super::drag::Landing {
+                start,
+                end,
+                all_day: o.event.all_day,
+            })
         });
         if let Some(d) = self.dragging.borrow_mut().as_mut() {
             d.landing = landing;
@@ -573,7 +637,11 @@ impl MonthGrid {
         let covered = to.map(|_| {
             let first = self.days.borrow().first().copied();
             let (start, end) = landing.map_or((o.start, o.end), |l| (l.start, l.end));
-            let moved = Occurrence { start, end, ..o.clone() };
+            let moved = Occurrence {
+                start,
+                end,
+                ..o.clone()
+            };
             let (a, b) = first.map_or((0, 0), |first| grid_days(&moved, first, &chrono::Local));
             (a.max(0) as usize)..(b.clamp(0, (WEEKS * 7) as i64) as usize)
         });
@@ -585,8 +653,14 @@ impl MonthGrid {
     /// which asks before it writes; one that ends off the grid or back
     /// on its own day puts everything back.
     fn drop_event(&self) {
-        let taken = self.dragging.borrow().as_ref().map(|d| (d.started, d.landing, d.occurrence.clone()));
-        let Some((started, landing, o)) = taken else { return };
+        let taken = self
+            .dragging
+            .borrow()
+            .as_ref()
+            .map(|d| (d.started, d.landing, d.occurrence.clone()));
+        let Some((started, landing, o)) = taken else {
+            return;
+        };
         if !started {
             self.dragging.take();
             return;
@@ -664,7 +738,10 @@ impl MonthGrid {
     /// that has the keyboard focus, for the view to put the focus back
     /// after it rebuilds the month.
     pub fn first_block(&self) -> Option<gtk::Widget> {
-        self.blocks.borrow().first().map(|(_, _, widget)| widget.clone())
+        self.blocks
+            .borrow()
+            .first()
+            .map(|(_, _, widget)| widget.clone())
     }
 
     pub fn focused_key(&self) -> Option<EventKey> {
@@ -711,12 +788,16 @@ impl MonthGrid {
     }
 
     fn rebuild(self: &Rc<Self>) {
-        let Some((range, occurrences, calendars, working_hours, places)) = self.shown.borrow().clone() else {
+        let Some((range, occurrences, calendars, working_hours, places)) =
+            self.shown.borrow().clone()
+        else {
             return;
         };
         let today = chrono::Local::now().date_naive();
         let month = range.month();
-        let days: Vec<NaiveDate> = (0..(WEEKS * 7) as u64).map(|i| range.first + Days::new(i)).collect();
+        let days: Vec<NaiveDate> = (0..(WEEKS * 7) as u64)
+            .map(|i| range.first + Days::new(i))
+            .collect();
         self.days.replace(days.clone());
 
         for (index, &day) in days.iter().enumerate() {
@@ -765,7 +846,8 @@ impl MonthGrid {
             needs.push(need);
             built.push((fits < need).then_some(fits));
 
-            let columns: Vec<(usize, usize)> = entries.iter().map(|(_, _, s)| (s.start, s.end)).collect();
+            let columns: Vec<(usize, usize)> =
+                entries.iter().map(|(_, _, s)| (s.start, s.end)).collect();
             let (shown, more) = layout::fold_week(&columns, &lines, fits);
             for (((o, is_bar, segment), line), shown) in entries.iter().zip(&lines).zip(shown) {
                 if !shown {
@@ -774,7 +856,15 @@ impl MonthGrid {
                 let first_cell = week * 7 + segment.start;
                 let (colour, name) = calendar_of(o, &calendars);
                 let on_edit = edit_closure(self, (*o).clone());
-                let block = EventBlock::new(o, colour, name, true, Some(days[first_cell]), &chrono::Local, on_edit);
+                let block = EventBlock::new(
+                    o,
+                    colour,
+                    name,
+                    true,
+                    Some(days[first_cell]),
+                    &chrono::Local,
+                    on_edit,
+                );
                 if *is_bar {
                     name_bar(&block.widget, o, name);
                     block.widget.add_css_class("month-bar");
@@ -859,7 +949,12 @@ fn day_occurrences(occurrences: &[Occurrence], day: NaiveDate) -> Vec<&Occurrenc
 /// The date button a cell opens its day with: the number visible, the
 /// full date spoken, since "24" alone says nothing, today in the accent
 /// pill and a day outside `month` dimmed.
-fn day_heading(day: NaiveDate, today: NaiveDate, month: NaiveDate, place: Option<&str>) -> gtk::Button {
+fn day_heading(
+    day: NaiveDate,
+    today: NaiveDate,
+    month: NaiveDate,
+    place: Option<&str>,
+) -> gtk::Button {
     let label = gtk::Label::builder()
         .label(day.day().to_string())
         .css_classes(["date"])
@@ -880,7 +975,10 @@ fn day_heading(day: NaiveDate, today: NaiveDate, month: NaiveDate, place: Option
     if day.month() != month.month() || day.year() != month.year() {
         button.add_css_class("dimmed");
     }
-    crate::ui::name(&button, &super::kinds::heading_words(&words::full_date_words(day), place));
+    crate::ui::name(
+        &button,
+        &super::kinds::heading_words(&words::full_date_words(day), place),
+    );
     button
 }
 
@@ -957,7 +1055,10 @@ fn grid_days<Z: chrono::TimeZone>(o: &Occurrence, first: NaiveDate, zone: &Z) ->
         (start, date(o.end, false).max(start + Days::new(1)))
     } else {
         let start = date(o.start, true);
-        (start, date(o.end.saturating_sub(1).max(o.start), true) + Days::new(1))
+        (
+            start,
+            date(o.end.saturating_sub(1).max(o.start), true) + Days::new(1),
+        )
     };
     ((start - first).num_days(), (end - first).num_days())
 }
@@ -972,13 +1073,20 @@ mod tests {
     use super::*;
 
     fn at(d: u32, h: u32) -> EpochMillis {
-        Utc.with_ymd_and_hms(2026, 10, d, h, 0, 0).unwrap().timestamp_millis()
+        Utc.with_ymd_and_hms(2026, 10, d, h, 0, 0)
+            .unwrap()
+            .timestamp_millis()
     }
 
     fn occurrence(all_day: bool, start: EpochMillis, end: EpochMillis) -> Occurrence {
         Occurrence {
             account_id: 1,
-            event: Arc::new(Event { all_day, start, end, ..Event::default() }),
+            event: Arc::new(Event {
+                all_day,
+                start,
+                end,
+                ..Event::default()
+            }),
             start,
             end,
         }
@@ -991,26 +1099,45 @@ mod tests {
     #[test]
     fn an_all_day_event_covers_its_own_utc_dates() {
         // 2 to 4 October, the grid starting on 28 September.
-        assert_eq!(grid_days(&occurrence(true, at(2, 0), at(5, 0)), first(), &Utc), (4, 7));
+        assert_eq!(
+            grid_days(&occurrence(true, at(2, 0), at(5, 0)), first(), &Utc),
+            (4, 7)
+        );
     }
 
     #[test]
     fn a_timed_event_past_midnight_covers_both_days() {
-        assert_eq!(grid_days(&occurrence(false, at(2, 22), at(3, 2)), first(), &Utc), (4, 6));
+        assert_eq!(
+            grid_days(&occurrence(false, at(2, 22), at(3, 2)), first(), &Utc),
+            (4, 6)
+        );
     }
 
     #[test]
     fn a_timed_event_ending_at_midnight_stays_on_its_day() {
-        assert_eq!(grid_days(&occurrence(false, at(2, 22), at(3, 0)), first(), &Utc), (4, 5));
+        assert_eq!(
+            grid_days(&occurrence(false, at(2, 22), at(3, 0)), first(), &Utc),
+            (4, 5)
+        );
     }
 
     #[test]
     fn a_timed_event_of_no_length_still_takes_its_day() {
-        assert_eq!(grid_days(&occurrence(false, at(2, 9), at(2, 9)), first(), &Utc), (4, 5));
+        assert_eq!(
+            grid_days(&occurrence(false, at(2, 9), at(2, 9)), first(), &Utc),
+            (4, 5)
+        );
     }
 
     #[test]
     fn an_event_from_before_the_grid_counts_back_from_it() {
-        assert_eq!(grid_days(&occurrence(true, at(1, 0), at(3, 0)) , NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(), &Utc), (-1, 1));
+        assert_eq!(
+            grid_days(
+                &occurrence(true, at(1, 0), at(3, 0)),
+                NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+                &Utc
+            ),
+            (-1, 1)
+        );
     }
 }

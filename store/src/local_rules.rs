@@ -18,12 +18,16 @@ pub fn list(conn: &Connection, account_id: AccountId) -> Result<Vec<Filter>> {
     let mut stmt = conn.prepare(
         "SELECT id, filter FROM local_rules WHERE account_id = ?1 ORDER BY position, id",
     )?;
-    let rows = stmt.query_map([account_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    let rows = stmt.query_map([account_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
     let mut filters = Vec::new();
     for row in rows {
         let (id, text) = row?;
-        let mut filter: Filter = serde_json::from_str(&text)
-            .map_err(|_| StoreError::Corrupt { column: "local_rules.filter", value: text.clone() })?;
+        let mut filter: Filter = serde_json::from_str(&text).map_err(|_| StoreError::Corrupt {
+            column: "local_rules.filter",
+            value: text.clone(),
+        })?;
         filter.id = Some(id);
         filters.push(filter);
     }
@@ -32,12 +36,14 @@ pub fn list(conn: &Connection, account_id: AccountId) -> Result<Vec<Filter>> {
 
 /// Adds `filter`, which carries its id, after the account's other rules.
 pub fn add(conn: &Connection, account_id: AccountId, filter: &Filter) -> Result<()> {
-    let id = filter
-        .id
-        .clone()
-        .ok_or(StoreError::Corrupt { column: "local_rules.id", value: String::new() })?;
-    let text = serde_json::to_string(filter)
-        .map_err(|err| StoreError::Corrupt { column: "local_rules.filter", value: err.to_string() })?;
+    let id = filter.id.clone().ok_or(StoreError::Corrupt {
+        column: "local_rules.id",
+        value: String::new(),
+    })?;
+    let text = serde_json::to_string(filter).map_err(|err| StoreError::Corrupt {
+        column: "local_rules.filter",
+        value: err.to_string(),
+    })?;
     conn.execute(
         "INSERT OR REPLACE INTO local_rules (account_id, id, position, filter) VALUES (?1, ?2, \
          (SELECT COALESCE(MAX(position), -1) + 1 FROM local_rules WHERE account_id = ?1), ?3)",
@@ -48,18 +54,28 @@ pub fn add(conn: &Connection, account_id: AccountId, filter: &Filter) -> Result<
 
 /// Deletes rule `id`; `false` when the account had no such rule.
 pub fn remove(conn: &Connection, account_id: AccountId, id: &str) -> Result<bool> {
-    Ok(conn.execute("DELETE FROM local_rules WHERE account_id = ?1 AND id = ?2", params![account_id, id])? > 0)
+    Ok(conn.execute(
+        "DELETE FROM local_rules WHERE account_id = ?1 AND id = ?2",
+        params![account_id, id],
+    )? > 0)
 }
 
 /// Puts `filter`, which carries its id, where rule `old_id` was, so the
 /// edited rule keeps its turn; `false` when the account had no such rule.
-pub fn replace(conn: &Connection, account_id: AccountId, old_id: &str, filter: &Filter) -> Result<bool> {
-    let id = filter
-        .id
-        .clone()
-        .ok_or(StoreError::Corrupt { column: "local_rules.id", value: String::new() })?;
-    let text = serde_json::to_string(filter)
-        .map_err(|err| StoreError::Corrupt { column: "local_rules.filter", value: err.to_string() })?;
+pub fn replace(
+    conn: &Connection,
+    account_id: AccountId,
+    old_id: &str,
+    filter: &Filter,
+) -> Result<bool> {
+    let id = filter.id.clone().ok_or(StoreError::Corrupt {
+        column: "local_rules.id",
+        value: String::new(),
+    })?;
+    let text = serde_json::to_string(filter).map_err(|err| StoreError::Corrupt {
+        column: "local_rules.filter",
+        value: err.to_string(),
+    })?;
     Ok(conn.execute(
         "UPDATE local_rules SET id = ?3, filter = ?4 WHERE account_id = ?1 AND id = ?2",
         params![account_id, old_id, id, text],
@@ -81,7 +97,11 @@ pub fn start_running(conn: &Connection, account_id: AccountId, now: EpochMillis)
 /// account had a rule.
 pub fn ran_until(conn: &Connection, account_id: AccountId) -> Result<Option<EpochMillis>> {
     Ok(conn
-        .query_row("SELECT rules_ran_until FROM accounts WHERE id = ?1", [account_id], |row| row.get(0))
+        .query_row(
+            "SELECT rules_ran_until FROM accounts WHERE id = ?1",
+            [account_id],
+            |row| row.get(0),
+        )
         .optional()?
         .flatten())
 }
@@ -89,7 +109,11 @@ pub fn ran_until(conn: &Connection, account_id: AccountId) -> Result<Option<Epoc
 /// At most `limit` Inbox messages the rules have not run on, received no
 /// more than [`OVERLAP`] before the watermark, oldest first. None before
 /// the account has a watermark.
-pub fn candidates(conn: &Connection, account_id: AccountId, limit: usize) -> Result<Vec<MessageMeta>> {
+pub fn candidates(
+    conn: &Connection,
+    account_id: AccountId,
+    limit: usize,
+) -> Result<Vec<MessageMeta>> {
     let Some(since) = ran_until(conn, account_id)? else {
         return Ok(Vec::new());
     };
@@ -102,7 +126,14 @@ pub fn candidates(conn: &Connection, account_id: AccountId, limit: usize) -> Res
          ORDER BY m.date, m.id LIMIT ?3",
     )?;
     let ids: Vec<String> = stmt
-        .query_map(params![account_id, since - OVERLAP, i64::try_from(limit).unwrap_or(i64::MAX)], |row| row.get(0))?
+        .query_map(
+            params![
+                account_id,
+                since - OVERLAP,
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |row| row.get(0),
+        )?
         .collect::<rusqlite::Result<_>>()?;
     let mut found = messages::by_ids(conn, account_id, &ids)?;
     found.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.id.cmp(&b.id)));
@@ -112,7 +143,11 @@ pub fn candidates(conn: &Connection, account_id: AccountId, limit: usize) -> Res
 /// Records that the rules ran on `ran`, each with its INTERNALDATE, moves
 /// the watermark to the newest, and forgets what fell more than
 /// [`OVERLAP`] below it.
-pub fn mark_ran(conn: &Connection, account_id: AccountId, ran: &[(String, EpochMillis)]) -> Result<()> {
+pub fn mark_ran(
+    conn: &Connection,
+    account_id: AccountId,
+    ran: &[(String, EpochMillis)],
+) -> Result<()> {
     for (message_id, date) in ran {
         conn.execute(
             "INSERT OR IGNORE INTO local_rules_ran (account_id, message_id, date) VALUES (?1, ?2, ?3)",

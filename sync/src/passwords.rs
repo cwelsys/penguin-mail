@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use mailrs_domain::translate::{fill, gettext};
 use mailrs_domain::{Account, AccountId, Provider};
 use mailrs_gmail::{KeyringTokenStore, MemoryTokenStore, TokenStore};
-use mailrs_domain::translate::{fill, gettext};
 
 /// The keyring would not read, keep or delete a password.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -19,7 +19,10 @@ pub enum PasswordError {
 }
 
 fn refused(reason: &str) -> String {
-    fill(&gettext("The keyring refused: {reason}"), &[("reason", reason)])
+    fill(
+        &gettext("The keyring refused: {reason}"),
+        &[("reason", reason)],
+    )
 }
 
 /// Passwords by account. Implementations may block, so async callers run
@@ -202,16 +205,21 @@ impl MemoryPasswords {
     /// Tests: from now on every delete fails.
     #[cfg(test)]
     pub(crate) fn refuse_deletes(&self) {
-        self.refuse_deletes.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.refuse_deletes
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Tests: from now on every save fails.
     #[cfg(test)]
     pub(crate) fn refuse_saves(&self) {
-        self.refuse_saves.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.refuse_saves
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
     fn load_as(&self, user: String) -> Result<Option<String>, PasswordError> {
-        let passwords = self.passwords.lock().unwrap_or_else(PoisonError::into_inner);
+        let passwords = self
+            .passwords
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         Ok(passwords.get(&user).cloned())
     }
 
@@ -220,17 +228,26 @@ impl MemoryPasswords {
         if self.refuse_saves.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(PasswordError::Keyring("the keyring is locked".into()));
         }
-        let mut passwords = self.passwords.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut passwords = self
+            .passwords
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         passwords.insert(user, password.to_string());
         Ok(())
     }
 
     fn delete_as(&self, user: String) -> Result<(), PasswordError> {
         #[cfg(test)]
-        if self.refuse_deletes.load(std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .refuse_deletes
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             return Err(PasswordError::Keyring("the keyring is locked".into()));
         }
-        let mut passwords = self.passwords.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut passwords = self
+            .passwords
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         passwords.remove(&user);
         Ok(())
     }
@@ -374,11 +391,21 @@ impl Secrets {
                     clients.delete(id)
                 })
             }
+            Provider::CalDav => {
+                let passwords = Arc::clone(&self.passwords);
+                Box::new(move || passwords.delete(id))
+            }
             Provider::Imap | Provider::Pop3 => {
                 // A switch to JMAP that stopped between saving its secret
                 // and the swap leaves that secret under this id.
                 let (passwords, jmap) = (Arc::clone(&self.passwords), Arc::clone(&self.jmap));
-                Box::new(move || first_error([passwords.delete_outgoing(id), passwords.delete(id), jmap.delete(id)]))
+                Box::new(move || {
+                    first_error([
+                        passwords.delete_outgoing(id),
+                        passwords.delete(id),
+                        jmap.delete(id),
+                    ])
+                })
             }
             Provider::Microsoft => {
                 let tokens = Arc::clone(&self.microsoft);
@@ -391,7 +418,11 @@ impl Secrets {
                 // beside it in part 3. Nothing may stay under the id: ids
                 // are reused, and the next account would read it.
                 Box::new(move || {
-                    first_error([jmap.delete(id), passwords.delete(id), passwords.delete_outgoing(id)])
+                    first_error([
+                        jmap.delete(id),
+                        passwords.delete(id),
+                        passwords.delete_outgoing(id),
+                    ])
                 })
             }
         };
@@ -403,13 +434,21 @@ impl Secrets {
 
 /// The first error among deletes that all ran, so one the keyring refuses
 /// does not leave the others behind.
-pub(crate) fn first_error<const N: usize>(deletes: [Result<(), PasswordError>; N]) -> Result<(), PasswordError> {
-    deletes.into_iter().find_map(Result::err).map_or(Ok(()), Err)
+pub(crate) fn first_error<const N: usize>(
+    deletes: [Result<(), PasswordError>; N],
+) -> Result<(), PasswordError> {
+    deletes
+        .into_iter()
+        .find_map(Result::err)
+        .map_or(Ok(()), Err)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyringPasswords, MemoryPasswords, PasswordError, PasswordStore, Secrets, first_error, outgoing_user, user};
+    use super::{
+        KeyringPasswords, MemoryPasswords, PasswordError, PasswordStore, Secrets, first_error,
+        outgoing_user, user,
+    };
 
     #[test]
     fn every_imap_password_sits_under_one_service_by_account_id() {

@@ -12,26 +12,32 @@ use std::time::Duration;
 #[cfg(any(test, feature = "fake"))]
 use futures::future::Either;
 
-use mailrs_dav::{Collection, CollectionState, DavApi, DavClient, DavError, Fetched, Homes, Kind, Member, Precondition, Synced};
+use mailrs_dav::{
+    Collection, CollectionState, DavApi, DavClient, DavError, Fetched, Homes, Kind, Member,
+    Precondition, Synced,
+};
 use mailrs_domain::calendar;
 use mailrs_domain::invitation::Answer;
 use mailrs_domain::{EpochMillis, Filter, MessageMeta, Vacation};
 use mailrs_gmail::model::Message;
 use mailrs_gmail::{
-    AccountQuota, ConnectionsPage, ContactFields, GmailError, Granted, HistoryPage, LabelColor, MessagePage, Person,
-    Profile, RemoteLabel, SendAs,
+    AccountQuota, ConnectionsPage, ContactFields, GmailError, Granted, HistoryPage, LabelColor,
+    MessagePage, Person, Profile, RemoteLabel, SendAs,
 };
 use mailrs_graph::{
-    AutomaticReplies, ContactFolder, DeltaPage, Graph, GraphCalendar, GraphContact, GraphError, GraphEvent, Listing,
-    MailFolder, MasterCategory, Me, MessageBody, MessageRule, Override, Page, Response, Write,
+    AutomaticReplies, ContactFolder, DeltaPage, Graph, GraphCalendar, GraphContact, GraphError,
+    GraphEvent, Listing, MailFolder, MasterCategory, Me, MessageBody, MessageRule, Override, Page,
+    Response, Write,
 };
 use mailrs_imap::{
-    AppendUid, BodyStructure, Capabilities, CopyUid, FlagsOf, ImapClient, ImapError, Listed, Selected, Since,
-    SmtpClient, UidSet, Woke,
+    AppendUid, BodyStructure, Capabilities, CopyUid, FlagsOf, ImapClient, ImapError, Listed,
+    Selected, Since, SmtpClient, UidSet, Woke,
 };
 use mailrs_jmap::{
-    CalendarEvents, Canceled, ChangesResponse, Email, EmailQuery, EventWrite, EventsPage, Got, HeldSubmission, Hold, Identity, Imported, JmapCalendar, JmapClient, JmapError, Listed as JmapListed, MailChanges,
-    Mailbox, MailboxWrite, MdnOut, Pushed, Queried, Quota, Saved, Session, SetResponse, Submission, SubmissionState, Threads,
+    CalendarEvents, Canceled, ChangesResponse, Email, EmailQuery, EventWrite, EventsPage, Got,
+    HeldSubmission, Hold, Identity, Imported, JmapCalendar, JmapClient, JmapError,
+    Listed as JmapListed, MailChanges, Mailbox, MailboxWrite, MdnOut, Pushed, Queried, Quota,
+    Saved, Session, SetResponse, Submission, SubmissionState, Threads,
 };
 use mailrs_pop3::{ListItem, Pop3Api, Pop3Client, Pop3Error, Stat, UidlListing};
 use mailrs_sieve::client::{ManageSieveApi, ManageSieveClient, SieveError};
@@ -41,7 +47,9 @@ use super::jmap::JmapApi;
 use super::{GraphApi, ImapApi, Submit};
 use crate::api::{AccountClient, DraftRef, GmailApi, SavedDraft};
 #[cfg(any(test, feature = "fake"))]
-use crate::fake::{FakeDav, FakeGmail, FakeGraph, FakeImap, FakeJmap, FakePop3, FakeSieve, FakeSmtp};
+use crate::fake::{
+    FakeDav, FakeGmail, FakeGraph, FakeImap, FakeJmap, FakePop3, FakeSieve, FakeSmtp,
+};
 
 /// Declares `$enum` over a real client and its fake, and implements
 /// `$trait` on it by passing each call to the client it holds. `now`
@@ -180,7 +188,7 @@ either_client! {
         fn well_known(names: &[&str]) -> Graphed<Vec<Option<MailFolder>>>;
         fn folders(parent: Option<&str>, next: Option<&str>) -> Graphed<Page<MailFolder>>;
         fn categories() -> Graphed<Vec<MasterCategory>>;
-        fn message_delta(folder: &str, link: Option<&str>, received_since: &str) -> Graphed<DeltaPage<mailrs_graph::Message>>;
+        fn message_delta(folder: &str, link: Option<&str>, received_since: Option<&str>) -> Graphed<DeltaPage<mailrs_graph::Message>>;
         fn list_messages(listing: &Listing, next: Option<&str>) -> Graphed<Page<mailrs_graph::Message>>;
         fn messages(ids: &[String]) -> Graphed<Vec<Graphed<mailrs_graph::Message>>>;
         fn raw(id: &str, limit: usize) -> Graphed<Vec<u8>>;
@@ -302,7 +310,7 @@ either_client! {
         fn put(href: &str, body: &str, kind: Kind, when: Precondition) -> Result<Option<String>, DavError>;
         fn delete(href: &str, etag: Option<&str>) -> Result<(), DavError>;
         fn find_uid(collection: &str, uid: &str) -> Result<Option<Fetched>, DavError>;
-        fn auto_schedule() -> Result<bool, DavError>;
+        fn auto_schedule(at: Option<&str>) -> Result<bool, DavError>;
     }
 }
 

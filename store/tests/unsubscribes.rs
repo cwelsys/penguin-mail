@@ -15,7 +15,10 @@ fn a_list_left_is_remembered_by_its_sender() {
         }),
         "the address is matched without regard to case"
     );
-    assert_eq!(unsubscribes::left(&conn, a, "other@shop.example").unwrap(), None);
+    assert_eq!(
+        unsubscribes::left(&conn, a, "other@shop.example").unwrap(),
+        None
+    );
 }
 
 #[test]
@@ -43,5 +46,8 @@ fn each_account_keeps_its_own() {
     let b = accounts::insert_account(&conn, "b@example.com", 0).unwrap();
     unsubscribes::record(&conn, a, "news@shop.example", How::Page, 1_000).unwrap();
 
-    assert_eq!(unsubscribes::left(&conn, b, "news@shop.example").unwrap(), None);
+    assert_eq!(
+        unsubscribes::left(&conn, b, "news@shop.example").unwrap(),
+        None
+    );
 }

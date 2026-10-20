@@ -137,19 +137,12 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
     }
 
     /// The mailboxes the account keeps in step: the Inbox, and Sent,
-    /// Drafts, Archive, Trash and Junk where the server has them, then
-    /// every mailbox a person opened.
+    /// Drafts and Archive where the server has them, then every mailbox a
+    /// person opened.
     pub(super) async fn synced(&self) -> Result<Vec<String>, BackendError> {
         self.ensure_listed().await?;
         let mut synced = Vec::new();
-        for role in [
-            Role::Inbox,
-            Role::Sent,
-            Role::Drafts,
-            Role::Archive,
-            Role::Trash,
-            Role::Junk,
-        ] {
+        for role in [Role::Inbox, Role::Sent, Role::Drafts, Role::Archive] {
             if let Some(id) = self.mailbox_for(role)
                 && !synced.contains(&id)
             {
@@ -231,13 +224,13 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
     ) -> Result<(u32, Vec<u32>), BackendError> {
         let selected = self.select(mailbox, None).await?;
         let top = self.top_uid(mailbox, &selected).await?;
-        self.known()
-            .recent
-            .insert(mailbox.to_string(), Kept::of(&selected, top));
         let keys = window_keys(mailbox, days, chrono::Local::now().date_naive());
         let mut uids = Vec::new();
         self.search_windows(mailbox, (1, top), &keys, |found| uids.extend(found))
             .await?;
+        self.known()
+            .recent
+            .insert(mailbox.to_string(), Kept::of(&selected, top));
         uids.reverse();
         Ok((selected.uidvalidity, uids))
     }

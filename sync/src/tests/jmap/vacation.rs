@@ -10,7 +10,12 @@ use crate::{AutoReplyService, MailBackend};
 #[tokio::test]
 async fn the_reply_round_trips_with_its_dates_and_subject() {
     let h = over(FakeJmap::new().with_capability(VACATION)).await;
-    let reply = h.sync.services().auto_reply.clone().expect("the session offers a reply");
+    let reply = h
+        .sync
+        .services()
+        .auto_reply
+        .clone()
+        .expect("the session offers a reply");
     let wanted = Vacation {
         enabled: true,
         subject: "Away".into(),
@@ -29,7 +34,14 @@ async fn the_reply_round_trips_with_its_dates_and_subject() {
 async fn an_empty_subject_answers_with_the_original_s() {
     let h = over(FakeJmap::new().with_capability(VACATION)).await;
     let reply = h.sync.services().auto_reply.clone().unwrap();
-    reply.set_vacation(&Vacation { enabled: true, body: "Away".into(), ..Vacation::default() }).await.unwrap();
+    reply
+        .set_vacation(&Vacation {
+            enabled: true,
+            body: "Away".into(),
+            ..Vacation::default()
+        })
+        .await
+        .unwrap();
     assert_eq!(h.fake.with(|s| s.vacation.subject.clone()), None);
     let _ = h.mail().capabilities();
 }
@@ -72,8 +84,20 @@ async fn an_html_only_reply_survives_off_and_on() {
     let reply = h.sync.services().auto_reply.clone().unwrap();
     let shown = reply.vacation().await.unwrap();
     assert_eq!(shown.body.trim(), "Away until Monday.");
-    reply.set_vacation(&Vacation { enabled: false, ..shown.clone() }).await.unwrap();
-    reply.set_vacation(&Vacation { enabled: true, ..shown }).await.unwrap();
+    reply
+        .set_vacation(&Vacation {
+            enabled: false,
+            ..shown.clone()
+        })
+        .await
+        .unwrap();
+    reply
+        .set_vacation(&Vacation {
+            enabled: true,
+            ..shown
+        })
+        .await
+        .unwrap();
     let kept = h.fake.with(|s| s.vacation.clone());
     assert!(kept.is_enabled);
     assert_eq!(kept.html_body.as_deref(), Some(html));
@@ -85,10 +109,22 @@ async fn an_html_only_reply_survives_off_and_on() {
 #[tokio::test]
 async fn an_edited_body_replaces_the_html() {
     let h = over(FakeJmap::new().with_capability(VACATION)).await;
-    h.fake.with(|s| s.vacation = mailrs_jmap::VacationResponse { is_enabled: true, html_body: Some("<p>Old</p>".into()), ..Default::default() });
+    h.fake.with(|s| {
+        s.vacation = mailrs_jmap::VacationResponse {
+            is_enabled: true,
+            html_body: Some("<p>Old</p>".into()),
+            ..Default::default()
+        }
+    });
     let reply = h.sync.services().auto_reply.clone().unwrap();
     let shown = reply.vacation().await.unwrap();
-    reply.set_vacation(&Vacation { body: "New words".into(), ..shown }).await.unwrap();
+    reply
+        .set_vacation(&Vacation {
+            body: "New words".into(),
+            ..shown
+        })
+        .await
+        .unwrap();
     let kept = h.fake.with(|s| s.vacation.clone());
     assert_eq!(kept.text_body.as_deref(), Some("New words"));
     assert_eq!(kept.html_body, None);
@@ -109,12 +145,27 @@ async fn toggling_a_reply_set_elsewhere_keeps_its_times() {
             ..Default::default()
         }
     });
-    let connected = std::collections::HashMap::from([(h.account_id, std::sync::Arc::clone(&h.sync))]);
-    let settings = crate::AccountSettings::new(std::sync::Arc::new(crate::tests::Connected(connected)), h.db.clone());
-    let read = settings.automatic_reply(h.account_id).await.unwrap().done().unwrap();
+    let connected =
+        std::collections::HashMap::from([(h.account_id, std::sync::Arc::clone(&h.sync))]);
+    let settings = crate::AccountSettings::new(
+        std::sync::Arc::new(crate::tests::Connected(connected)),
+        h.db.clone(),
+    );
+    let read = settings
+        .automatic_reply(h.account_id)
+        .await
+        .unwrap()
+        .done()
+        .unwrap();
     for enabled in [false, true] {
-        let toggled = crate::settings::AutomaticReply { enabled, ..read.clone() };
-        settings.set_automatic_reply(h.account_id, &toggled).await.unwrap();
+        let toggled = crate::settings::AutomaticReply {
+            enabled,
+            ..read.clone()
+        };
+        settings
+            .set_automatic_reply(h.account_id, &toggled)
+            .await
+            .unwrap();
     }
     let kept = h.fake.with(|s| s.vacation.clone());
     assert!(kept.is_enabled);

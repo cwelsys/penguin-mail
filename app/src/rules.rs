@@ -13,7 +13,9 @@ pub fn place_line(place: RulesPlace, provider: &str) -> String {
             gettext("These rules run on this computer while Penguin Mail is open.")
         }
         RulesPlace::Server => fill(
-            &gettext("{provider} runs these on new mail as it arrives, even when this computer is off."),
+            &gettext(
+                "{provider} runs these on new mail as it arrives, even when this computer is off.",
+            ),
             &[("provider", provider)],
         ),
     }
@@ -141,7 +143,11 @@ impl RuleForm {
             size: criteria.size,
             size_comparison: criteria.size_comparison.clone(),
             add: add.iter().filter(|s| !shown_add(s)).cloned().collect(),
-            remove: remove.iter().filter(|s| !shown_remove(s)).cloned().collect(),
+            remove: remove
+                .iter()
+                .filter(|s| !shown_remove(s))
+                .cloned()
+                .collect(),
             forward: filter.action.forward.clone(),
         };
         (form, unshown)
@@ -483,8 +489,18 @@ mod tests {
         let (mut form, unshown) = RuleForm::read(&made_in_gmail(), offered);
         form.label = None;
         let saved = form.filter_keeping(&unshown).unwrap();
-        assert!(!saved.action.add.contains(&MailSet::Mailbox("Label_7".into())));
-        assert!(saved.action.add.contains(&MailSet::Mailbox("Label_8".into())));
+        assert!(
+            !saved
+                .action
+                .add
+                .contains(&MailSet::Mailbox("Label_7".into()))
+        );
+        assert!(
+            saved
+                .action
+                .add
+                .contains(&MailSet::Mailbox("Label_8".into()))
+        );
     }
 
     #[test]

@@ -15,16 +15,16 @@ use objc2_foundation::{
     NSError, NSNumber, NSObjectProtocol, NSRect, NSString, NSURL, NSURLRequest,
 };
 use objc2_web_kit::{
-    WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction,
-    WKNavigationActionPolicy, WKNavigationDelegate, WKNavigationResponse,
-    WKNavigationResponsePolicy, WKPermissionDecision, WKSecurityOrigin, WKUIDelegate, WKWebView,
-    WKWebViewConfiguration, WKWebsiteDataStore,
+    WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy,
+    WKNavigationDelegate, WKNavigationResponse, WKNavigationResponsePolicy, WKPermissionDecision,
+    WKSecurityOrigin, WKUIDelegate, WKWebView, WKWebViewConfiguration, WKWebsiteDataStore,
 };
 
 use super::hidden::{Engine, State};
 
 // The hidden page must never signal an open by fetching a tracking picture.
-const BLOCK_IMAGES: &str = r#"[{"trigger":{"url-filter":".*","resource-type":["image"]},"action":{"type":"block"}}]"#;
+const BLOCK_IMAGES: &str =
+    r#"[{"trigger":{"url-filter":".*","resource-type":["image"]},"action":{"type":"block"}}]"#;
 
 pub struct WkEngine {
     view: Retained<WKWebView>,
@@ -186,7 +186,11 @@ impl Engine for WkEngine {
             );
         }
         let view = unsafe {
-            WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), NSRect::default(), &config)
+            WKWebView::initWithFrame_configuration(
+                WKWebView::alloc(mtm),
+                NSRect::default(),
+                &config,
+            )
         };
         let keeper = Keeper::alloc(mtm).set_ivars(KeeperIvars { state });
         let keeper: Retained<Keeper> = unsafe { msg_send![super(keeper), init] };
@@ -207,7 +211,10 @@ impl Engine for WkEngine {
         }
         let address = NSString::from_str(url);
         let Some(target) = NSURL::URLWithString(&address) else {
-            self._keeper.ivars().state.arrived(Err(format!("not an address: {url}")));
+            self._keeper
+                .ivars()
+                .state
+                .arrived(Err(format!("not an address: {url}")));
             return;
         };
         let view = self.view.clone();
@@ -219,7 +226,8 @@ impl Engine for WkEngine {
             let filter = async {
                 std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
                 crate::web::compile_filter(&dir, "unsubscribe-block-images", BLOCK_IMAGES).await
-            }.await;
+            }
+            .await;
             let filter = match filter {
                 Ok(filter) => filter,
                 Err(err) => {
@@ -233,7 +241,9 @@ impl Engine for WkEngine {
                 content.addContentRuleList(&filter.0);
                 if target.isFileURL() {
                     // A file may read its own folder and nothing beside it.
-                    let folder = target.URLByDeletingLastPathComponent().unwrap_or(target.clone());
+                    let folder = target
+                        .URLByDeletingLastPathComponent()
+                        .unwrap_or(target.clone());
                     view.loadFileURL_allowingReadAccessToURL(&target, &folder);
                 } else {
                     view.loadRequest(&NSURLRequest::requestWithURL(&target));

@@ -40,7 +40,9 @@ pub(super) fn note(html: &mut String) {
 /// something, and the app leans neither way.
 pub(super) fn card(html: &mut String, message_id: &str, to: &str, working: bool) {
     let detail = fill(
-        &gettext("Sending a receipt tells {address} that you opened this message. Nothing is sent unless you choose."),
+        &gettext(
+            "Sending a receipt tells {address} that you opened this message. Nothing is sent unless you choose.",
+        ),
         &[("address", to)],
     );
     let _ = write!(
@@ -53,7 +55,10 @@ pub(super) fn card(html: &mut String, message_id: &str, to: &str, working: bool)
         title = escape(&gettext("The sender asked to know when you read this")),
         detail = escape(&detail),
     );
-    for (answer, label) in [("send", gettext("Send Receipt")), ("decline", gettext("Don't Send"))] {
+    for (answer, label) in [
+        ("send", gettext("Send Receipt")),
+        ("decline", gettext("Don't Send")),
+    ] {
         match working {
             // No link to follow while the answer goes out, so a second
             // press cannot send a second receipt.
@@ -98,9 +103,15 @@ pub(super) fn report_line(html: &mut String, report: &ReadReport, when: &str) {
     let (class, said) = match report.displayed {
         true => (
             "receipt-line",
-            escape(&fill(&gettext("Read by {who} on {when}"), &[("when", when)])),
+            escape(&fill(
+                &gettext("Read by {who} on {when}"),
+                &[("when", when)],
+            )),
         ),
-        false => ("receipt-line gone", escape(&gettext("Deleted by {who} without being read"))),
+        false => (
+            "receipt-line gone",
+            escape(&gettext("Deleted by {who} without being read")),
+        ),
     };
     let _ = write!(
         html,

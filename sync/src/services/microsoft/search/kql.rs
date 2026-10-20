@@ -32,7 +32,9 @@ pub(crate) fn print(query: &Query, today: NaiveDate) -> Result<Printed, Unsayabl
     let mut said = Vec::new();
     for part in parts {
         let place = match part {
-            Query::Term(Term::In(set @ (MailSet::Role(_) | MailSet::Mailbox(_)))) => Some(Place::Set(set.clone())),
+            Query::Term(Term::In(set @ (MailSet::Role(_) | MailSet::Mailbox(_)))) => {
+                Some(Place::Set(set.clone()))
+            }
             Query::Term(Term::MailboxNamed(name)) => Some(Place::Named(plain(name))),
             _ => None,
         };
@@ -42,7 +44,10 @@ pub(crate) fn print(query: &Query, today: NaiveDate) -> Result<Printed, Unsayabl
             None => said.extend(clause(part, today)?),
         }
     }
-    Ok(Printed { within, kql: said.join(" AND ") })
+    Ok(Printed {
+        within,
+        kql: said.join(" AND "),
+    })
 }
 
 fn clause(query: &Query, today: NaiveDate) -> Result<Option<String>, Unsayable> {
@@ -85,10 +90,15 @@ fn term_clause(term: &Term, today: NaiveDate) -> Result<Option<String>, Unsayabl
         Term::Words(text) => quoted(text),
         Term::Since(day) => Some(format!("received>={}", date(*day))),
         Term::Before(day) => Some(format!("received<{}", date(*day))),
-        Term::NewerThan(days) => Some(format!("received>={}", date(today - chrono::Days::new(u64::from(*days))))),
+        Term::NewerThan(days) => Some(format!(
+            "received>={}",
+            date(today - chrono::Days::new(u64::from(*days)))
+        )),
         Term::HasAttachment => Some("hasattachment:true".into()),
         Term::Larger(bytes) => Some(format!("size>{bytes}")),
-        Term::Unread | Term::Flagged | Term::In(_) | Term::MailboxNamed(_) => return Err(Unsayable),
+        Term::Unread | Term::Flagged | Term::In(_) | Term::MailboxNamed(_) => {
+            return Err(Unsayable);
+        }
     })
 }
 
@@ -110,13 +120,32 @@ mod tests {
 
     #[test]
     fn each_term_prints_as_graphs_kql() {
-        assert_eq!(said(Query::term(Term::From("ann@example.com".into()))), "from:\"ann@example.com\"");
-        assert_eq!(said(Query::term(Term::Subject("weekly report".into()))), "subject:\"weekly report\"");
+        assert_eq!(
+            said(Query::term(Term::From("ann@example.com".into()))),
+            "from:\"ann@example.com\""
+        );
+        assert_eq!(
+            said(Query::term(Term::Subject("weekly report".into()))),
+            "subject:\"weekly report\""
+        );
         assert_eq!(said(Query::term(Term::Words("lunch".into()))), "\"lunch\"");
         assert_eq!(said(Query::term(Term::HasAttachment)), "hasattachment:true");
-        assert_eq!(said(Query::term(Term::NewerThan(7))), "received>=2026-09-20");
-        assert_eq!(said(Query::term(Term::Before(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()))), "received<2026-01-01");
-        assert_eq!(said(Query::term(Term::Since(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()))), "received>=2026-01-01");
+        assert_eq!(
+            said(Query::term(Term::NewerThan(7))),
+            "received>=2026-09-20"
+        );
+        assert_eq!(
+            said(Query::term(Term::Before(
+                NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
+            ))),
+            "received<2026-01-01"
+        );
+        assert_eq!(
+            said(Query::term(Term::Since(
+                NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
+            ))),
+            "received>=2026-01-01"
+        );
         assert_eq!(said(Query::term(Term::Larger(1_000_000))), "size>1000000");
     }
 
@@ -124,29 +153,56 @@ mod tests {
     fn and_or_and_not_nest_in_parentheses() {
         let query = Query::And(vec![
             Query::term(Term::From("ann".into())),
-            Query::Or(vec![Query::term(Term::Subject("a".into())), Query::term(Term::Subject("b".into()))]),
+            Query::Or(vec![
+                Query::term(Term::Subject("a".into())),
+                Query::term(Term::Subject("b".into())),
+            ]),
             Query::Not(Box::new(Query::term(Term::HasAttachment))),
         ]);
-        assert_eq!(said(query), "from:\"ann\" AND (subject:\"a\" OR subject:\"b\") AND NOT hasattachment:true");
+        assert_eq!(
+            said(query),
+            "from:\"ann\" AND (subject:\"a\" OR subject:\"b\") AND NOT hasattachment:true"
+        );
     }
 
     #[test]
     fn read_and_flagged_are_unsayable() {
         assert!(print(&Query::term(Term::Unread), today()).is_err());
-        assert!(print(&Query::And(vec![Query::term(Term::From("a".into())), Query::term(Term::Flagged)]), today()).is_err());
+        assert!(
+            print(
+                &Query::And(vec![
+                    Query::term(Term::From("a".into())),
+                    Query::term(Term::Flagged)
+                ]),
+                today()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn a_folder_at_the_top_is_where_to_search() {
-        let query = Query::And(vec![Query::is_in(MailSet::Role(Role::Sent)), Query::term(Term::To("bo".into()))]);
+        let query = Query::And(vec![
+            Query::is_in(MailSet::Role(Role::Sent)),
+            Query::term(Term::To("bo".into())),
+        ]);
         let printed = print(&query, today()).unwrap();
         assert_eq!(printed.within, Some(Place::Set(MailSet::Role(Role::Sent))));
         assert_eq!(printed.kql, "to:\"bo\"");
-        assert!(print(&Query::Or(vec![Query::is_in(MailSet::Role(Role::Sent))]), today()).is_err());
+        assert!(
+            print(
+                &Query::Or(vec![Query::is_in(MailSet::Role(Role::Sent))]),
+                today()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn a_quote_in_a_value_is_left_out() {
-        assert_eq!(said(Query::term(Term::Subject("the \"big\" day".into()))), "subject:\"the big day\"");
+        assert_eq!(
+            said(Query::term(Term::Subject("the \"big\" day".into()))),
+            "subject:\"the big day\""
+        );
     }
 }

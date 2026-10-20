@@ -18,14 +18,14 @@ mod pop3;
 mod query;
 mod sent;
 
-pub use mailrs_dav::fake::FakeDav;
-pub use mailrs_dav::client::Kind as DavKind;
-pub use mailrs_sieve::fake::FakeSieve;
 pub use graph::{Area, FakeGraph, FakeMail, GraphState, ReplyWrites};
 pub use imap::{
     FakeImap, FakeMailbox, FakeMessage, FakeSmtp, ImapState, SmtpState, Submitted, raw_message,
 };
 pub use jmap::{FakeEmail, FakeHold, FakeJmap, FakeMailbox as FakeJmapMailbox, JmapState, Sent};
+pub use mailrs_dav::client::Kind as DavKind;
+pub use mailrs_dav::fake::FakeDav;
+pub use mailrs_sieve::fake::FakeSieve;
 pub use one_click::FakeOneClick;
 pub use pop3::{FakePop3, Release, pop3_mail};
 pub use sent::read_sent;
@@ -42,17 +42,14 @@ use mail_builder::headers::raw::Raw;
 use mail_builder::mime::MimePart;
 use mailrs_domain::calendar;
 use mailrs_domain::invitation::Answer;
-use mailrs_domain::{
-    Address, EpochMillis, Filter, MessageBody, MessageMeta, Protection, Vacation,
-};
+use mailrs_domain::{Address, EpochMillis, Filter, MessageBody, MessageMeta, Protection, Vacation};
 use mailrs_gmail::labels;
 use mailrs_gmail::model::{Header, Message, MessagePart, PartBody};
 use mailrs_gmail::{
-    AccountQuota, BATCH_LIMIT, CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE,
-    CALENDAR_SCOPE, CALENDARS_SCOPE, CONTACTS_SCOPE,
-    CONTACTS_WRITE_SCOPE, ConnectionsPage, ContactFields, DELETE_SCOPE,
-    GmailError, Granted, HistoryChange, HistoryPage, LabelColor, MessagePage, MessageRef,
-    Person, Priority, Profile, QuotaLimiter, RemoteLabel, SETTINGS_SCOPE, SendAs, cost,
+    AccountQuota, BATCH_LIMIT, CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE,
+    CALENDARS_SCOPE, CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE, ConnectionsPage, ContactFields,
+    DELETE_SCOPE, GmailError, Granted, HistoryChange, HistoryPage, LabelColor, MessagePage,
+    MessageRef, Person, Priority, Profile, QuotaLimiter, RemoteLabel, SETTINGS_SCOPE, SendAs, cost,
     limiter,
 };
 
@@ -637,7 +634,10 @@ impl FakeGmail {
             s.panics = s.panics.saturating_sub(1);
             panics
         });
-        assert!(!panics, "the fake Gmail panicked on {method}, as a test asked");
+        assert!(
+            !panics,
+            "the fake Gmail panicked on {method}, as a test asked"
+        );
         let mut waited = Duration::ZERO;
         if let Some(quota) = &self.quota {
             let priority = limiter::priority();
@@ -737,8 +737,10 @@ impl FakeGmail {
                 .and_then(|e| e.etag.trim_matches('"').parse::<u32>().ok())
                 .unwrap_or(0);
             event.etag = format!("\"{}\"", version + 1);
-            s.calendar_events.retain(|e| !(e.calendar == event.calendar && e.id == event.id));
-            s.calendar_log.push((event.calendar.clone(), event.id.clone(), false));
+            s.calendar_events
+                .retain(|e| !(e.calendar == event.calendar && e.id == event.id));
+            s.calendar_log
+                .push((event.calendar.clone(), event.id.clone(), false));
             s.calendar_events.push(event);
         });
     }
@@ -764,7 +766,10 @@ impl FakeGmail {
     fn series_of(&self, calendar: &str, id: &str) -> Option<(calendar::Event, EpochMillis)> {
         let (series, start) = calendar::split_occurrence_id(id)?;
         let held = self.with(|s| {
-            s.calendar_events.iter().find(|e| e.calendar == calendar && e.id == series && !e.rules.is_empty()).cloned()
+            s.calendar_events
+                .iter()
+                .find(|e| e.calendar == calendar && e.id == series && !e.rules.is_empty())
+                .cloned()
         })?;
         Some((held, start))
     }
@@ -776,11 +781,18 @@ impl FakeGmail {
     /// new version, so the next read of the calendar brings it back
     /// declined. A series is left alone: Google would decline its
     /// occurrences one by one, which no test here needs.
-    fn decline_during(&self, calendar: &str, (from, to): (EpochMillis, EpochMillis), message: &str) {
+    fn decline_during(
+        &self,
+        calendar: &str,
+        (from, to): (EpochMillis, EpochMillis),
+        message: &str,
+    ) {
         let declined: Vec<calendar::Event> = self.with(|s| {
             s.calendar_events
                 .iter()
-                .filter(|e| e.calendar == calendar && e.rules.is_empty() && e.start < to && e.end > from)
+                .filter(|e| {
+                    e.calendar == calendar && e.rules.is_empty() && e.start < to && e.end > from
+                })
                 .filter(|e| e.limited() && e.my_answer != Some(Answer::No))
                 .cloned()
                 .collect()
@@ -799,8 +811,10 @@ impl FakeGmail {
     /// would, and records it in the change log a sync token reads from.
     pub fn drop_calendar_event(&self, calendar: &str, id: &str) {
         self.with(|s| {
-            s.calendar_events.retain(|e| !(e.calendar == calendar && e.id == id));
-            s.calendar_log.push((calendar.to_string(), id.to_string(), true));
+            s.calendar_events
+                .retain(|e| !(e.calendar == calendar && e.id == id));
+            s.calendar_log
+                .push((calendar.to_string(), id.to_string(), true));
         });
     }
 }
@@ -871,9 +885,9 @@ impl FakeState {
 
     /// Whether any message of the thread carries Gmail's mute label.
     fn thread_is_muted(&self, thread_id: &str) -> bool {
-        self.messages.values().any(|m| {
-            m.thread_id == thread_id && has_label(m, labels::MUTE)
-        })
+        self.messages
+            .values()
+            .any(|m| m.thread_id == thread_id && has_label(m, labels::MUTE))
     }
 
     /// The ids a search returns, newest first.
@@ -912,10 +926,15 @@ impl GmailApi for FakeGmail {
             let mut scopes: Vec<&str> = mailrs_gmail::SIGN_IN_SCOPES
                 .iter()
                 .filter(|scope| !s.withheld.contains(*scope))
-                .filter(|scope| !(**scope == CALENDAR_LIST_WRITE_SCOPE && s.withheld.contains(CALENDAR_LIST_SCOPE)))
+                .filter(|scope| {
+                    !(**scope == CALENDAR_LIST_WRITE_SCOPE
+                        && s.withheld.contains(CALENDAR_LIST_SCOPE))
+                })
                 .copied()
                 .collect();
-            if s.withheld.contains(CALENDAR_LIST_WRITE_SCOPE) && !s.withheld.contains(CALENDAR_LIST_SCOPE) {
+            if s.withheld.contains(CALENDAR_LIST_WRITE_SCOPE)
+                && !s.withheld.contains(CALENDAR_LIST_SCOPE)
+            {
                 scopes.push(CALENDAR_LIST_SCOPE);
             }
             Granted::parse(&scopes.join(" "))
@@ -1187,7 +1206,11 @@ impl GmailApi for FakeGmail {
                 display_name: s.display_name.clone().unwrap_or_default(),
                 is_default: true,
                 is_primary: true,
-                signature: s.signature.as_deref().map(signature_html).unwrap_or_default(),
+                signature: s
+                    .signature
+                    .as_deref()
+                    .map(signature_html)
+                    .unwrap_or_default(),
                 verification_status: None,
             }];
             all.extend(s.send_as.iter().cloned());
@@ -1250,13 +1273,20 @@ impl GmailApi for FakeGmail {
                 Some(_) if s.expire_calendar_tokens => Err(GmailError::ExpiredSyncToken),
                 Some(token) => {
                     let since: usize = token.parse().unwrap_or(0);
-                    let mut page = calendar::EventPage { next_sync: Some(end), ..calendar::EventPage::default() };
+                    let mut page = calendar::EventPage {
+                        next_sync: Some(end),
+                        ..calendar::EventPage::default()
+                    };
                     let mut seen = std::collections::HashSet::new();
                     for (cal, id, _) in s.calendar_log.iter().skip(since).rev() {
                         if cal != calendar || !seen.insert(id.clone()) {
                             continue;
                         }
-                        match s.calendar_events.iter().find(|e| &e.calendar == cal && &e.id == id) {
+                        match s
+                            .calendar_events
+                            .iter()
+                            .find(|e| &e.calendar == cal && &e.id == id)
+                        {
                             Some(event) => page.events.push(event.clone()),
                             None => page.removed.push(id.clone()),
                         }
@@ -1270,10 +1300,13 @@ impl GmailApi for FakeGmail {
                     let all: Vec<calendar::Event> = s
                         .calendar_events
                         .iter()
-                        .filter(|e| e.calendar == calendar && overlaps(e, from_ms, EpochMillis::MAX))
+                        .filter(|e| {
+                            e.calendar == calendar && overlaps(e, from_ms, EpochMillis::MAX)
+                        })
                         .cloned()
                         .collect();
-                    let slice: Vec<calendar::Event> = all.iter().skip(from).take(s.page_size).cloned().collect();
+                    let slice: Vec<calendar::Event> =
+                        all.iter().skip(from).take(s.page_size).cloned().collect();
                     let next = from + slice.len();
                     let more = next < all.len();
                     Ok(calendar::EventPage {
@@ -1308,7 +1341,12 @@ impl GmailApi for FakeGmail {
                 .iter()
                 .filter(|e| e.calendar == calendar && overlaps(e, from, to))
                 .collect();
-            let slice: Vec<calendar::Event> = all.iter().skip(start).take(s.page_size).map(|e| (*e).clone()).collect();
+            let slice: Vec<calendar::Event> = all
+                .iter()
+                .skip(start)
+                .take(s.page_size)
+                .map(|e| (*e).clone())
+                .collect();
             let next = start + slice.len();
             calendar::EventPage {
                 events: slice,
@@ -1327,12 +1365,23 @@ impl GmailApi for FakeGmail {
         create: bool,
         notify: calendar::Notify,
     ) -> Result<calendar::Event, GmailError> {
-        self.call(if create { "calendar.events.insert" } else { "calendar.events.patch" }, 0).await?;
+        self.call(
+            if create {
+                "calendar.events.insert"
+            } else {
+                "calendar.events.patch"
+            },
+            0,
+        )
+        .await?;
         self.calendar_open()?;
         self.with(|s| s.calendar_notices.push((event.id.clone(), notify)));
         self.calendar_held(&event.calendar)?;
         let held = self.with(|s| {
-            s.calendar_events.iter().find(|e| e.calendar == event.calendar && e.id == event.id).cloned()
+            s.calendar_events
+                .iter()
+                .find(|e| e.calendar == event.calendar && e.id == event.id)
+                .cloned()
         });
         if create && event.kind.decline().is_some() && self.with(|s| s.refuse_status_entries) {
             // Google's own words for this refusal are not documented; the
@@ -1349,7 +1398,12 @@ impl GmailApi for FakeGmail {
             });
         }
         match (&held, create) {
-            (Some(_), true) => return Err(GmailError::Http { status: 409, body: "duplicate".into() }),
+            (Some(_), true) => {
+                return Err(GmailError::Http {
+                    status: 409,
+                    body: "duplicate".into(),
+                });
+            }
             // An occurrence of a series has an id before anyone changes
             // it; the first change makes it an event of its own.
             (None, false) if self.series_of(&event.calendar, &event.id).is_some() => {}
@@ -1373,7 +1427,9 @@ impl GmailApi for FakeGmail {
         // A write that leaves the attachments out keeps Google's, as a
         // PATCH without the key does.
         if stored.attachments.is_none() {
-            stored.attachments = held.as_ref().map(|h| h.attachments.clone().unwrap_or_default());
+            stored.attachments = held
+                .as_ref()
+                .map(|h| h.attachments.clone().unwrap_or_default());
         }
         // Google keeps the linked files and nothing only this computer
         // knows: a file still waiting never reaches it.
@@ -1388,7 +1444,11 @@ impl GmailApi for FakeGmail {
         if stored.uid.is_empty() {
             stored.uid = format!("{}@google.com", stored.id);
         }
-        let decline = stored.kind.decline().filter(|d| d.meetings == calendar::Declines::All).cloned();
+        let decline = stored
+            .kind
+            .decline()
+            .filter(|d| d.meetings == calendar::Declines::All)
+            .cloned();
         let (calendar, span) = (stored.calendar.clone(), (stored.start, stored.end));
         let stored_id = stored.id.clone();
         self.put_calendar_event(stored);
@@ -1442,7 +1502,8 @@ impl GmailApi for FakeGmail {
         self.needs(mailrs_gmail::DRIVE_FILE_SCOPE)?;
         self.with(|s| {
             let writes = s.calendar_notices.len();
-            s.drive_shares.push((file_id.to_string(), email.to_string(), writes));
+            s.drive_shares
+                .push((file_id.to_string(), email.to_string(), writes));
         });
         Ok(())
     }
@@ -1450,7 +1511,12 @@ impl GmailApi for FakeGmail {
     async fn drive_storage(&self) -> Result<mailrs_gmail::DriveStorage, GmailError> {
         self.call("drive.about.get", 0).await?;
         self.needs(mailrs_gmail::DRIVE_FILE_SCOPE)?;
-        Ok(self.with(|s| s.drive_storage).unwrap_or(mailrs_gmail::DriveStorage { usage: 0, limit: None }))
+        Ok(self
+            .with(|s| s.drive_storage)
+            .unwrap_or(mailrs_gmail::DriveStorage {
+                usage: 0,
+                limit: None,
+            }))
     }
 
     async fn remove_event(
@@ -1464,7 +1530,12 @@ impl GmailApi for FakeGmail {
         self.calendar_open()?;
         self.with(|s| s.calendar_notices.push((id.to_string(), notify)));
         self.calendar_held(calendar)?;
-        let held = self.with(|s| s.calendar_events.iter().find(|e| e.calendar == calendar && e.id == id).cloned());
+        let held = self.with(|s| {
+            s.calendar_events
+                .iter()
+                .find(|e| e.calendar == calendar && e.id == id)
+                .cloned()
+        });
         match (held, etag) {
             // Deleting one occurrence of a series leaves a cancelled
             // occurrence behind, which the change feed hands out.
@@ -1497,7 +1568,10 @@ impl GmailApi for FakeGmail {
                         .collect()
                 });
                 for occurrence in changed {
-                    self.put_calendar_event(calendar::Event { status: calendar::Status::Cancelled, ..occurrence });
+                    self.put_calendar_event(calendar::Event {
+                        status: calendar::Status::Cancelled,
+                        ..occurrence
+                    });
                 }
                 Ok(())
             }
@@ -1518,7 +1592,12 @@ impl GmailApi for FakeGmail {
         self.call("calendar.events.patch", 0).await?;
         self.calendar_open()?;
         self.calendar_held(calendar)?;
-        let held = self.with(|s| s.calendar_events.iter().find(|e| e.calendar == calendar && e.id == id).cloned());
+        let held = self.with(|s| {
+            s.calendar_events
+                .iter()
+                .find(|e| e.calendar == calendar && e.id == id)
+                .cloned()
+        });
         let target = match (held, self.series_of(calendar, id)) {
             (Some(held), _) => held,
             (None, Some((series, start))) => calendar::Event {
@@ -1532,7 +1611,14 @@ impl GmailApi for FakeGmail {
             },
             (None, None) => return Err(self.deleted()),
         };
-        self.with(|s| s.answered_events.push((calendar.to_string(), id.to_string(), answer, note.map(str::to_string))));
+        self.with(|s| {
+            s.answered_events.push((
+                calendar.to_string(),
+                id.to_string(),
+                answer,
+                note.map(str::to_string),
+            ))
+        });
         let answered = |mut event: calendar::Event| {
             event.my_answer = Some(answer);
             for guest in event.guests.iter_mut().filter(|g| g.me) {
@@ -1541,14 +1627,22 @@ impl GmailApi for FakeGmail {
             event
         };
         let changed: Vec<calendar::Event> = self.with(|s| {
-            s.calendar_events.iter().filter(|e| e.calendar == calendar && e.series.as_deref() == Some(id)).cloned().collect()
+            s.calendar_events
+                .iter()
+                .filter(|e| e.calendar == calendar && e.series.as_deref() == Some(id))
+                .cloned()
+                .collect()
         });
         for occurrence in changed {
             self.put_calendar_event(answered(occurrence));
         }
         self.put_calendar_event(answered(target));
         Ok(self.with(|s| {
-            s.calendar_events.iter().find(|e| e.calendar == calendar && e.id == id).cloned().expect("just stored")
+            s.calendar_events
+                .iter()
+                .find(|e| e.calendar == calendar && e.id == id)
+                .cloned()
+                .expect("just stored")
         }))
     }
 
@@ -1567,8 +1661,12 @@ impl GmailApi for FakeGmail {
             ListEdit::Rename { .. } => ("calendar.calendars.patch", CALENDARS_SCOPE),
             ListEdit::Delete => ("calendar.calendars.delete", CALENDARS_SCOPE),
             ListEdit::Unsubscribe => ("calendar.calendarList.delete", CALENDAR_LIST_WRITE_SCOPE),
-            ListEdit::Recolor { .. } | ListEdit::Hide { .. } => ("calendar.calendarList.patch", CALENDAR_LIST_WRITE_SCOPE),
-            ListEdit::Subscribe { .. } | ListEdit::Add => ("calendar.calendarList.insert", CALENDAR_LIST_WRITE_SCOPE),
+            ListEdit::Recolor { .. } | ListEdit::Hide { .. } => {
+                ("calendar.calendarList.patch", CALENDAR_LIST_WRITE_SCOPE)
+            }
+            ListEdit::Subscribe { .. } | ListEdit::Add => {
+                ("calendar.calendarList.insert", CALENDAR_LIST_WRITE_SCOPE)
+            }
         };
         self.call(method, 0).await?;
         self.calendar_open()?;
@@ -1595,7 +1693,11 @@ impl GmailApi for FakeGmail {
                     name: name.clone(),
                     color: color.clone(),
                     access: calendar::Access::Owner,
-                    zone: if zone.is_empty() { "UTC".into() } else { zone.clone() },
+                    zone: if zone.is_empty() {
+                        "UTC".into()
+                    } else {
+                        zone.clone()
+                    },
                     shown: true,
                     ..calendar::Calendar::default()
                 })
@@ -1615,27 +1717,39 @@ impl GmailApi for FakeGmail {
                     ..calendar::Calendar::default()
                 })
             }
-            ListEdit::Add if id.ends_with("#holiday@group.v.calendar.google.com") => listed(calendar::Calendar {
-                id: id.to_string(),
-                name: "Holidays".into(),
-                color: "#e01b24".into(),
-                access: calendar::Access::Reader,
-                zone: "UTC".into(),
-                shown: true,
-                ..calendar::Calendar::default()
-            }),
+            ListEdit::Add if id.ends_with("#holiday@group.v.calendar.google.com") => {
+                listed(calendar::Calendar {
+                    id: id.to_string(),
+                    name: "Holidays".into(),
+                    color: "#e01b24".into(),
+                    access: calendar::Access::Reader,
+                    zone: "UTC".into(),
+                    shown: true,
+                    ..calendar::Calendar::default()
+                })
+            }
             ListEdit::Add => Err(GmailError::NotFound),
             ListEdit::Rename { name } => {
                 let held = held.ok_or(GmailError::NotFound)?;
                 if held.access != calendar::Access::Owner {
-                    return Err(GmailError::Http { status: 403, body: "Forbidden".into() });
+                    return Err(GmailError::Http {
+                        status: 403,
+                        body: "Forbidden".into(),
+                    });
                 }
-                listed(calendar::Calendar { name: name.clone(), ..held }).map(|_| None)
+                listed(calendar::Calendar {
+                    name: name.clone(),
+                    ..held
+                })
+                .map(|_| None)
             }
             ListEdit::Delete => {
                 let held = held.ok_or(GmailError::NotFound)?;
                 if held.primary || held.access != calendar::Access::Owner {
-                    return Err(GmailError::Http { status: 403, body: "Forbidden".into() });
+                    return Err(GmailError::Http {
+                        status: 403,
+                        body: "Forbidden".into(),
+                    });
                 }
                 self.with(|s| {
                     s.calendars.retain(|c| c.id != id);
@@ -1650,12 +1764,19 @@ impl GmailApi for FakeGmail {
             }
             ListEdit::Recolor { color } => {
                 let held = held.ok_or(GmailError::NotFound)?;
-                listed(calendar::Calendar { color: color.clone(), ..held })
+                listed(calendar::Calendar {
+                    color: color.clone(),
+                    ..held
+                })
             }
             ListEdit::Hide { hidden } => {
                 let held = held.ok_or(GmailError::NotFound)?;
                 let shown = held.shown || !hidden;
-                listed(calendar::Calendar { hidden: *hidden, shown, ..held })
+                listed(calendar::Calendar {
+                    hidden: *hidden,
+                    shown,
+                    ..held
+                })
             }
         }
     }
@@ -1685,7 +1806,11 @@ impl GmailApi for FakeGmail {
             ..event.clone()
         });
         Ok(self.with(|s| {
-            s.calendar_events.iter().find(|e| e.calendar == event.calendar && e.id == id).cloned().expect("just stored")
+            s.calendar_events
+                .iter()
+                .find(|e| e.calendar == event.calendar && e.id == id)
+                .cloned()
+                .expect("just stored")
         }))
     }
 
@@ -1713,7 +1838,8 @@ impl GmailApi for FakeGmail {
             s.calendar_events
                 .iter()
                 .filter(|e| {
-                    e.calendar == event.calendar && (e.id == event.id || e.series.as_deref() == Some(event.id.as_str()))
+                    e.calendar == event.calendar
+                        && (e.id == event.id || e.series.as_deref() == Some(event.id.as_str()))
                 })
                 .cloned()
                 .collect()
@@ -1723,7 +1849,10 @@ impl GmailApi for FakeGmail {
         }
         for held in moving {
             self.drop_calendar_event(&held.calendar, &held.id);
-            self.put_calendar_event(calendar::Event { calendar: destination.to_string(), ..held });
+            self.put_calendar_event(calendar::Event {
+                calendar: destination.to_string(),
+                ..held
+            });
         }
         Ok(self.with(|s| {
             s.calendar_events
@@ -2004,10 +2133,14 @@ fn signature_html(text: &str) -> String {
 /// in `attachments`.
 fn built_raw(state: &FakeState, id: &str) -> Result<Vec<u8>, GmailError> {
     let meta = state.messages.get(id).ok_or(GmailError::NotFound)?;
-    let body = state.bodies.get(id).cloned().unwrap_or_else(|| MessageBody {
-        text: Some(meta.snippet.clone()),
-        ..MessageBody::default()
-    });
+    let body = state
+        .bodies
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| MessageBody {
+            text: Some(meta.snippet.clone()),
+            ..MessageBody::default()
+        });
     let address = |a: &Address| (a.name.clone().unwrap_or_default(), a.email.clone());
     let mut message = MessageBuilder::new()
         .subject(meta.subject.as_str())
@@ -2029,7 +2162,10 @@ fn built_raw(state: &FakeState, id: &str) -> Result<Vec<u8>, GmailError> {
         message = message.header("List-Unsubscribe", Raw::new(header.as_str()));
     }
     if body.one_click_unsubscribe {
-        message = message.header("List-Unsubscribe-Post", Raw::new("List-Unsubscribe=One-Click"));
+        message = message.header(
+            "List-Unsubscribe-Post",
+            Raw::new("List-Unsubscribe=One-Click"),
+        );
     }
     // The headers the details panel reads its three lines from, so a
     // fixture's provenance survives the trip through the raw message.
@@ -2109,7 +2245,8 @@ fn protect<'x>(protection: Protection, content: MimePart<'x>) -> MimePart<'x> {
             "multipart/signed; protocol=\"application/pgp-signature\"",
             vec![
                 content,
-                MimePart::new("application/pgp-signature", PGP_SIGNATURE).attachment("signature.asc"),
+                MimePart::new("application/pgp-signature", PGP_SIGNATURE)
+                    .attachment("signature.asc"),
             ],
         ),
         Protection::SmimeSigned => MimePart::new(
@@ -2126,10 +2263,11 @@ fn protect<'x>(protection: Protection, content: MimePart<'x>) -> MimePart<'x> {
                 MimePart::new("application/octet-stream", "data").attachment("encrypted.asc"),
             ],
         ),
-        Protection::SmimeOpaque => {
-            MimePart::new("application/pkcs7-mime; smime-type=signed-data; name=\"smime.p7m\"", "data")
-                .attachment("smime.p7m")
-        }
+        Protection::SmimeOpaque => MimePart::new(
+            "application/pkcs7-mime; smime-type=signed-data; name=\"smime.p7m\"",
+            "data",
+        )
+        .attachment("smime.p7m"),
         Protection::SmimeEnveloped => MimePart::new(
             "application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"",
             "data",
@@ -2143,7 +2281,12 @@ fn protect<'x>(protection: Protection, content: MimePart<'x>) -> MimePart<'x> {
 /// file name. A named part, the calendar text of an invitation among
 /// them, comes by a handle `attachment` answers, as Gmail sends it.
 fn gmail_payload(state: &mut FakeState, message_id: &str, raw: &[u8]) -> MessagePart {
-    fn convert(state: &mut FakeState, message_id: &str, part: &mailrs_mime::Part, part_id: String) -> MessagePart {
+    fn convert(
+        state: &mut FakeState,
+        message_id: &str,
+        part: &mailrs_mime::Part,
+        part_id: String,
+    ) -> MessagePart {
         let mut content_type = part.mime_type.clone();
         if let Some(charset) = &part.charset {
             content_type.push_str(&format!("; charset=\"{charset}\""));
@@ -2165,13 +2308,22 @@ fn gmail_payload(state: &mut FakeState, message_id: &str, raw: &[u8]) -> Message
             });
         }
         if let Some(cid) = &part.content_id {
-            headers.push(Header { name: "Content-ID".into(), value: format!("<{cid}>") });
+            headers.push(Header {
+                name: "Content-ID".into(),
+                value: format!("<{cid}>"),
+            });
         }
         if let Some(subject) = &part.subject {
-            headers.push(Header { name: "Subject".into(), value: subject.clone() });
+            headers.push(Header {
+                name: "Subject".into(),
+                value: subject.clone(),
+            });
         }
         let named = part.filename.is_some();
-        let mut body = PartBody { size: part.size, ..PartBody::default() };
+        let mut body = PartBody {
+            size: part.size,
+            ..PartBody::default()
+        };
         // Gmail sends a forwarded message's parts, not the message itself
         // as one blob, and gives it no handle.
         let data = match part.mime_type.as_str() {
@@ -2182,7 +2334,9 @@ fn gmail_payload(state: &mut FakeState, message_id: &str, raw: &[u8]) -> Message
             (Some(bytes), false) => body.data = Some(URL_SAFE_NO_PAD.encode(bytes)),
             (Some(bytes), true) => {
                 let handle = format!("ref-{message_id}-{part_id}");
-                state.attachments.insert((message_id.into(), handle.clone()), bytes.clone());
+                state
+                    .attachments
+                    .insert((message_id.into(), handle.clone()), bytes.clone());
                 body.attachment_id = Some(handle);
             }
             (None, _) => {}
@@ -2213,7 +2367,14 @@ fn gmail_payload(state: &mut FakeState, message_id: &str, raw: &[u8]) -> Message
     // in place of `convert`'s made-up Content-Type: the real one is
     // among them, with its own params `convert` cannot know (Content-
     // Type's `boundary`, and every other header besides).
-    payload.headers = parts.headers.iter().map(|(n, v)| Header { name: n.clone(), value: v.clone() }).collect();
+    payload.headers = parts
+        .headers
+        .iter()
+        .map(|(n, v)| Header {
+            name: n.clone(),
+            value: v.clone(),
+        })
+        .collect();
     payload
 }
 

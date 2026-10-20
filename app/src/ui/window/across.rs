@@ -33,7 +33,9 @@ impl Card for NextPort {
         Box::pin(async move {
             core.call(async move {
                 let accounts = copy.every_account().await?;
-                let found = copy.occurrences(&accounts, from, to, CalendarScope::Shown).await?;
+                let found = copy
+                    .occurrences(&accounts, from, to, CalendarScope::Shown)
+                    .await?;
                 let mut colours = HashMap::new();
                 for listed in copy.listed(&accounts).await? {
                     for calendar in listed.calendars {
@@ -106,6 +108,7 @@ impl MainWindow {
         };
         let o = up.occurrence();
         self.show_space(Space::Calendar);
-        self.calendar.open(o.account_id, &o.event.calendar, &o.event.id, o.start);
+        self.calendar
+            .open(o.account_id, &o.event.calendar, &o.event.id, o.start);
     }
 }

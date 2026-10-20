@@ -55,7 +55,11 @@ enum Afterwards {
 
 /// What follows `done`, a change to the calendar list: `said` once the
 /// copy took it, the permission question, or `failed` with the reason.
-fn afterwards<T, E: std::fmt::Display>(done: Result<Permitted<T>, E>, said: Option<String>, failed: &str) -> Afterwards {
+fn afterwards<T, E: std::fmt::Display>(
+    done: Result<Permitted<T>, E>,
+    said: Option<String>,
+    failed: &str,
+) -> Afterwards {
     match done {
         Ok(Permitted::Done(_)) => Afterwards::Done(said),
         Ok(Permitted::NeedsPermission) => Afterwards::NeedsPermission,
@@ -65,7 +69,10 @@ fn afterwards<T, E: std::fmt::Display>(done: Result<Permitted<T>, E>, said: Opti
 
 /// The line under "New Calendar", for the account at `address`.
 pub fn new_calendar_body(address: &str) -> String {
-    fill(&gettext("A calendar of your own on {account}, on every device."), &[("account", address)])
+    fill(
+        &gettext("A calendar of your own on {account}, on every device."),
+        &[("account", address)],
+    )
 }
 
 /// The account a change to the calendar list would write to, or `None`
@@ -87,7 +94,10 @@ fn list_edit_of(change: &ListChange) -> Option<AccountId> {
 fn subscription_of(change: &ListChange) -> Option<AccountId> {
     match change {
         ListChange::Unsubscribe { account, .. }
-        | ListChange::Add { account, kind: AddKind::Subscribe | AddKind::Holidays } => Some(*account),
+        | ListChange::Add {
+            account,
+            kind: AddKind::Subscribe | AddKind::Holidays,
+        } => Some(*account),
         _ => None,
     }
 }
@@ -96,7 +106,11 @@ fn subscription_of(change: &ListChange) -> Option<AccountId> {
 /// answers the response the person chose. An alert dialog puts its own
 /// focus on its first button once it shows, so the field takes it back
 /// right after (the libadwaita-dialog-traps skill).
-async fn ask_in(dialog: &adw::AlertDialog, parent: &impl IsA<gtk::Widget>, field: &impl IsA<gtk::Widget>) -> String {
+async fn ask_in(
+    dialog: &adw::AlertDialog,
+    parent: &impl IsA<gtk::Widget>,
+    field: &impl IsA<gtk::Widget>,
+) -> String {
     let (sender, answer) = async_channel::bounded(1);
     dialog.connect_response(None, move |_, response| {
         let _ = sender.try_send(response.to_string());
@@ -129,19 +143,31 @@ impl CalendarView {
         let copy = self.core.calendar_copy();
         let next_event = super::sidebar::redraws_next_event(&change);
         match change {
-            ListChange::Listed { account, calendar, listed } => {
-                self.run_list_edit(account, next_event, gettext("Could not change the calendar list: {reason}"), async move {
-                    copy.list_calendar(account, &calendar, listed).await
-                })
-            }
-            ListChange::Color { account, calendar, color } => {
-                self.run_list_edit(account, next_event, gettext("Could not change the color: {reason}"), async move {
-                    copy.recolor_calendar(account, &calendar, color).await
-                })
-            }
+            ListChange::Listed {
+                account,
+                calendar,
+                listed,
+            } => self.run_list_edit(
+                account,
+                next_event,
+                gettext("Could not change the calendar list: {reason}"),
+                async move { copy.list_calendar(account, &calendar, listed).await },
+            ),
+            ListChange::Color {
+                account,
+                calendar,
+                color,
+            } => self.run_list_edit(
+                account,
+                next_event,
+                gettext("Could not change the color: {reason}"),
+                async move { copy.recolor_calendar(account, &calendar, color).await },
+            ),
             ListChange::Rename { account, calendar } => self.ask_rename(account, &calendar),
             ListChange::Delete { account, calendar } => self.ask_delete(account, &calendar),
-            ListChange::Unsubscribe { account, calendar } => self.ask_unsubscribe(account, &calendar),
+            ListChange::Unsubscribe { account, calendar } => {
+                self.ask_unsubscribe(account, &calendar)
+            }
             ListChange::Add { account, kind } => match kind {
                 AddKind::New => self.ask_new(account),
                 AddKind::Subscribe => self.ask_subscribe(account),
@@ -237,19 +263,30 @@ impl CalendarView {
     }
 
     fn calendar_of(&self, account: AccountId, calendar: &str) -> Option<Calendar> {
-        self.calendars.borrow().get(&(account, calendar.to_string())).cloned()
+        self.calendars
+            .borrow()
+            .get(&(account, calendar.to_string()))
+            .cloned()
     }
 
     fn ask_rename(self: &Rc<Self>, account: AccountId, calendar: &str) {
-        let Some(held) = self.calendar_of(account, calendar) else { return };
+        let Some(held) = self.calendar_of(account, calendar) else {
+            return;
+        };
         if self.withheld_of(account).calendars {
             return self.needs(Permission::ManageCalendars, account);
         }
         let dialog = adw::AlertDialog::new(Some(&gettext("Rename Calendar")), None);
-        let name = gtk::Entry::builder().text(&held.name).activates_default(true).build();
+        let name = gtk::Entry::builder()
+            .text(&held.name)
+            .activates_default(true)
+            .build();
         crate::ui::name(&name, &gettext("Calendar name"));
         dialog.set_extra_child(Some(&name));
-        dialog.add_responses(&[("cancel", &gettext("Cancel")), ("rename", &gettext("Rename"))]);
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("rename", &gettext("Rename")),
+        ]);
         dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("rename"));
         dialog.set_close_response("cancel");
@@ -266,14 +303,19 @@ impl CalendarView {
             }
             let (copy, new_name) = (this.core.calendar_copy(), name.text().trim().to_string());
             let id = held.id.clone();
-            this.run_list_edit(account, true, gettext("Could not rename the calendar: {reason}"), async move {
-                copy.rename_calendar(account, &id, &new_name).await
-            });
+            this.run_list_edit(
+                account,
+                true,
+                gettext("Could not rename the calendar: {reason}"),
+                async move { copy.rename_calendar(account, &id, &new_name).await },
+            );
         });
     }
 
     fn ask_delete(self: &Rc<Self>, account: AccountId, calendar: &str) {
-        let Some(held) = self.calendar_of(account, calendar) else { return };
+        let Some(held) = self.calendar_of(account, calendar) else {
+            return;
+        };
         if self.withheld_of(account).calendars {
             return self.needs(Permission::ManageCalendars, account);
         }
@@ -287,7 +329,10 @@ impl CalendarView {
                 .await
                 .unwrap_or(0);
             let question = confirm(
-                &fill(&gettext("Delete “{calendar}”?"), &[("calendar", &held.name)]),
+                &fill(
+                    &gettext("Delete “{calendar}”?"),
+                    &[("calendar", &held.name)],
+                ),
                 &delete_body(events),
                 &gettext("Delete"),
                 Tone::Destructive,
@@ -296,7 +341,10 @@ impl CalendarView {
                 return;
             }
             let (copy, id) = (this.core.calendar_copy(), held.id.clone());
-            let said = fill(&gettext("Deleted “{calendar}”"), &[("calendar", &held.name)]);
+            let said = fill(
+                &gettext("Deleted “{calendar}”"),
+                &[("calendar", &held.name)],
+            );
             this.run_list_edit_then(
                 account,
                 true,
@@ -309,14 +357,19 @@ impl CalendarView {
     }
 
     fn ask_unsubscribe(self: &Rc<Self>, account: AccountId, calendar: &str) {
-        let Some(held) = self.calendar_of(account, calendar) else { return };
+        let Some(held) = self.calendar_of(account, calendar) else {
+            return;
+        };
         if self.withheld_of(account).change_calendar_list {
             return self.needs(Permission::ManageCalendars, account);
         }
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let question = confirm(
-                &fill(&gettext("Unsubscribe from “{calendar}”?"), &[("calendar", &held.name)]),
+                &fill(
+                    &gettext("Unsubscribe from “{calendar}”?"),
+                    &[("calendar", &held.name)],
+                ),
                 &gettext(
                     "It leaves your calendar list in Google Calendar on every device. You can \
                      subscribe to it again later.",
@@ -328,9 +381,12 @@ impl CalendarView {
                 return;
             }
             let (copy, id) = (this.core.calendar_copy(), held.id.clone());
-            this.run_list_edit(account, true, gettext("Could not unsubscribe: {reason}"), async move {
-                copy.unsubscribe(account, &id).await
-            });
+            this.run_list_edit(
+                account,
+                true,
+                gettext("Could not unsubscribe: {reason}"),
+                async move { copy.unsubscribe(account, &id).await },
+            );
         });
     }
 
@@ -349,7 +405,10 @@ impl CalendarView {
             .activates_default(true)
             .build();
         crate::ui::name(&name, &gettext("Calendar name"));
-        let swatches = gtk::Box::builder().spacing(8).halign(gtk::Align::Center).build();
+        let swatches = gtk::Box::builder()
+            .spacing(8)
+            .halign(gtk::Align::Center)
+            .build();
         crate::ui::name(&swatches, &gettext("Color"));
         let mut first: Option<gtk::ToggleButton> = None;
         let mut buttons = Vec::new();
@@ -367,17 +426,25 @@ impl CalendarView {
             swatches.append(&swatch);
             buttons.push((swatch, *hex));
         }
-        let fields = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).build();
+        let fields = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(18)
+            .build();
         fields.append(&name);
         fields.append(&swatches);
         dialog.set_extra_child(Some(&fields));
-        dialog.add_responses(&[("cancel", &gettext("Cancel")), ("create", &gettext("Create"))]);
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("create", &gettext("Create")),
+        ]);
         dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("create"));
         dialog.set_close_response("cancel");
         dialog.set_response_enabled("create", false);
         let answer = dialog.clone();
-        name.connect_changed(move |name| answer.set_response_enabled("create", !name.text().trim().is_empty()));
+        name.connect_changed(move |name| {
+            answer.set_response_enabled("create", !name.text().trim().is_empty())
+        });
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             if ask_in(&dialog, &this.page, &name).await != "create" {
@@ -389,9 +456,12 @@ impl CalendarView {
                 .map_or(crate::ui::LABEL_COLORS[FIRST_COLOR].0, |(_, hex)| *hex)
                 .to_string();
             let (copy, typed) = (this.core.calendar_copy(), name.text().trim().to_string());
-            this.run_list_edit(account, true, gettext("Could not make the calendar: {reason}"), async move {
-                copy.new_calendar(account, &typed, &color).await
-            });
+            this.run_list_edit(
+                account,
+                true,
+                gettext("Could not make the calendar: {reason}"),
+                async move { copy.new_calendar(account, &typed, &color).await },
+            );
         });
     }
 
@@ -414,14 +484,20 @@ impl CalendarView {
             .build();
         crate::ui::name(&address, &gettext("Calendar address"));
         dialog.set_extra_child(Some(&address));
-        dialog.add_responses(&[("cancel", &gettext("Cancel")), ("subscribe", &gettext("Subscribe"))]);
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("subscribe", &gettext("Subscribe")),
+        ]);
         dialog.set_response_appearance("subscribe", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("subscribe"));
         dialog.set_close_response("cancel");
         dialog.set_response_enabled("subscribe", false);
         let answer = dialog.clone();
         address.connect_changed(move |address| {
-            answer.set_response_enabled("subscribe", list::subscription_address(&address.text()).is_some());
+            answer.set_response_enabled(
+                "subscribe",
+                list::subscription_address(&address.text()).is_some(),
+            );
         });
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
@@ -432,7 +508,9 @@ impl CalendarView {
             this.run_list_edit_then(
                 account,
                 false,
-                Some(gettext("Subscribed. The events arrive once Google Calendar reads the address.")),
+                Some(gettext(
+                    "Subscribed. The events arrive once Google Calendar reads the address.",
+                )),
                 gettext("Could not subscribe: {reason}"),
                 async move { copy.subscribe(account, &typed).await },
                 |_| {},
@@ -472,7 +550,12 @@ impl CalendarView {
     fn holiday_row(self: &Rc<Self>, account: AccountId, region: Region) -> adw::ActionRow {
         let row = crate::ui::plain_row().build();
         row.set_title(&region.name);
-        let added = || gtk::Label::builder().label(gettext("Added")).css_classes(["dim-label"]).build();
+        let added = || {
+            gtk::Label::builder()
+                .label(gettext("Added"))
+                .css_classes(["dim-label"])
+                .build()
+        };
         if self.calendar_of(account, &region.calendar_id()).is_some() {
             row.add_suffix(&added());
             return row;
@@ -484,7 +567,13 @@ impl CalendarView {
             .child(&gtk::Label::new(Some(&gettext("Add"))))
             .valign(gtk::Align::Center)
             .build();
-        crate::ui::name(&add, &fill(&gettext("Add holidays in {region}"), &[("region", &region.name)]));
+        crate::ui::name(
+            &add,
+            &fill(
+                &gettext("Add holidays in {region}"),
+                &[("region", &region.name)],
+            ),
+        );
         row.add_suffix(&add);
         let (weak, held_row) = (Rc::downgrade(self), row.downgrade());
         add.connect_clicked(move |add| {
@@ -530,7 +619,11 @@ mod tests {
     #[test]
     fn deleting_a_calendar_names_no_provider_since_outlook_deletes_too() {
         for events in [0, 1, 12] {
-            assert!(!delete_body(events).contains("Google"), "{}", delete_body(events));
+            assert!(
+                !delete_body(events).contains("Google"),
+                "{}",
+                delete_body(events)
+            );
         }
         assert!(!new_calendar_body("ana@outlook.example").contains("Google"));
     }
@@ -539,18 +632,39 @@ mod tests {
     fn a_list_edit_says_it_is_done_only_once_the_copy_took_it() {
         let said = Some("Deleted “Work”".to_string());
         let failed = "Could not delete the calendar: {reason}";
-        assert_eq!(afterwards(Ok::<_, SyncError>(Permitted::Done(())), said.clone(), failed), Afterwards::Done(said.clone()));
-        assert_eq!(afterwards(Ok::<_, SyncError>(Permitted::<()>::NeedsPermission), said.clone(), failed), Afterwards::NeedsPermission);
+        assert_eq!(
+            afterwards(
+                Ok::<_, SyncError>(Permitted::Done(())),
+                said.clone(),
+                failed
+            ),
+            Afterwards::Done(said.clone())
+        );
+        assert_eq!(
+            afterwards(
+                Ok::<_, SyncError>(Permitted::<()>::NeedsPermission),
+                said.clone(),
+                failed
+            ),
+            Afterwards::NeedsPermission
+        );
         let err = SyncError::NoCalendar("work".into());
         assert_eq!(
             afterwards(Err::<Permitted<()>, _>(err), said, failed),
-            Afterwards::Failed("Could not delete the calendar: there is no calendar work to put the event on".into())
+            Afterwards::Failed(
+                "Could not delete the calendar: there is no calendar work to put the event on"
+                    .into()
+            )
         );
     }
 
     #[test]
     fn deleting_a_calendar_says_how_many_events_go() {
-        assert!(delete_body(1).contains("its 1 event are"), "{}", delete_body(1));
+        assert!(
+            delete_body(1).contains("its 1 event are"),
+            "{}",
+            delete_body(1)
+        );
         assert!(delete_body(12).contains("its 12 events"));
     }
 
@@ -558,19 +672,72 @@ mod tests {
     fn only_changes_that_write_the_list_name_an_account_to_check() {
         let on = |c: &str| (7, c.to_string());
         let (account, calendar) = on("work");
-        assert_eq!(list_edit_of(&ListChange::Rename { account, calendar: calendar.clone() }), Some(7));
-        assert_eq!(list_edit_of(&ListChange::Color { account, calendar: calendar.clone(), color: None }), Some(7));
-        assert_eq!(list_edit_of(&ListChange::Add { account, kind: AddKind::Subscribe }), Some(7));
-        assert_eq!(list_edit_of(&ListChange::Shown { account, calendar, shown: true }), None);
+        assert_eq!(
+            list_edit_of(&ListChange::Rename {
+                account,
+                calendar: calendar.clone()
+            }),
+            Some(7)
+        );
+        assert_eq!(
+            list_edit_of(&ListChange::Color {
+                account,
+                calendar: calendar.clone(),
+                color: None
+            }),
+            Some(7)
+        );
+        assert_eq!(
+            list_edit_of(&ListChange::Add {
+                account,
+                kind: AddKind::Subscribe
+            }),
+            Some(7)
+        );
+        assert_eq!(
+            list_edit_of(&ListChange::Shown {
+                account,
+                calendar,
+                shown: true
+            }),
+            None
+        );
     }
 
     #[test]
     fn subscribing_unsubscribing_and_holidays_need_an_account_that_takes_subscriptions() {
         let (account, calendar) = (7, "fixtures".to_string());
-        assert_eq!(subscription_of(&ListChange::Add { account, kind: AddKind::Subscribe }), Some(7));
-        assert_eq!(subscription_of(&ListChange::Add { account, kind: AddKind::Holidays }), Some(7));
-        assert_eq!(subscription_of(&ListChange::Unsubscribe { account, calendar: calendar.clone() }), Some(7));
-        assert_eq!(subscription_of(&ListChange::Add { account, kind: AddKind::New }), None);
-        assert_eq!(subscription_of(&ListChange::Delete { account, calendar }), None);
+        assert_eq!(
+            subscription_of(&ListChange::Add {
+                account,
+                kind: AddKind::Subscribe
+            }),
+            Some(7)
+        );
+        assert_eq!(
+            subscription_of(&ListChange::Add {
+                account,
+                kind: AddKind::Holidays
+            }),
+            Some(7)
+        );
+        assert_eq!(
+            subscription_of(&ListChange::Unsubscribe {
+                account,
+                calendar: calendar.clone()
+            }),
+            Some(7)
+        );
+        assert_eq!(
+            subscription_of(&ListChange::Add {
+                account,
+                kind: AddKind::New
+            }),
+            None
+        );
+        assert_eq!(
+            subscription_of(&ListChange::Delete { account, calendar }),
+            None
+        );
     }
 }

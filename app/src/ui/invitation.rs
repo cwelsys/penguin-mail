@@ -19,9 +19,9 @@ use mailrs_sync::{Change, Spot};
 
 use crate::format::{event_moved_from, event_when};
 use crate::ui::calendar::{tint, words};
-use strip::Strip;
 use crate::ui::name;
 use mailrs_domain::translate::{fill, fill_plural, gettext};
+use strip::Strip;
 
 /// What the card asks the window to do.
 pub enum Action {
@@ -303,9 +303,7 @@ impl EventCard {
             .hexpand(true)
             .css_classes(["strip-heading"])
             .build();
-        let strip_verdict = gtk::Label::builder()
-            .css_classes(["strip-verdict"])
-            .build();
+        let strip_verdict = gtk::Label::builder().css_classes(["strip-verdict"]).build();
         let strip_top = gtk::Box::builder().spacing(8).build();
         strip_top.append(&strip_heading);
         strip_top.append(&strip_verdict);
@@ -344,7 +342,11 @@ impl EventCard {
             .visible(false)
             .css_classes(["invitation-note"])
             .build();
-        crate::ui::describe(&note, &gettext("Note with your answer"), &gettext("The organizer reads it with your answer"));
+        crate::ui::describe(
+            &note,
+            &gettext("Note with your answer"),
+            &gettext("The organizer reads it with your answer"),
+        );
         let reach = gtk::Box::builder()
             .spacing(0)
             .visible(false)
@@ -492,16 +494,15 @@ impl EventCard {
 
         // Without the calendar permission the event never reaches the
         // Calendar space, so Show in Calendar has nothing to show.
-        let access = gtk::Box::builder()
-            .spacing(8)
-            .visible(false)
-            .build();
+        let access = gtk::Box::builder().spacing(8).visible(false).build();
         let told = gtk::Label::builder()
             .xalign(0.0)
             .wrap(true)
             .hexpand(true)
             .css_classes(["invitation-meta"])
-            .label(gettext("Penguin Mail needs permission to show this event in Calendar."))
+            .label(gettext(
+                "Penguin Mail needs permission to show this event in Calendar.",
+            ))
             .build();
         let grant = gtk::Button::builder()
             .label(gettext("Grant Access"))
@@ -769,7 +770,11 @@ impl EventCard {
             let is_dashed = dashed(block.this, answer);
             let outline = is_dashed.then(|| outline::colour_of(&block.colour));
             let card = outline::Outlined::new(6, outline);
-            card.set_css_classes(&["event-block", "strip-block", &tint::css_class(&block.colour)]);
+            card.set_css_classes(&[
+                "event-block",
+                "strip-block",
+                &tint::css_class(&block.colour),
+            ]);
             if block.lane == 0 {
                 card.add_css_class("first");
             }
@@ -832,9 +837,11 @@ impl EventCard {
 
     fn place_calendar_button(&self, showing: &Showing) {
         let button = calendar_button(showing);
-        self.show_in_calendar.set_visible(button == CalendarButton::Show);
+        self.show_in_calendar
+            .set_visible(button == CalendarButton::Show);
         self.update.set_visible(button == CalendarButton::Update);
-        self.add.set_visible(button == CalendarButton::Add && !self.no_add.get());
+        self.add
+            .set_visible(button == CalendarButton::Add && !self.no_add.get());
         // Where the events go is asked only while Add to Calendar is the
         // button on offer, for a card that adds them.
         let adding = button == CalendarButton::Add && showing.invitation.card() == Card::Add;
@@ -842,7 +849,8 @@ impl EventCard {
             .set_visible(adding && !self.targets.borrow().is_empty());
         // The list stays once the events are on the calendar, so the card
         // still says which ones went; only the choosing ends.
-        self.events.set_visible(showing.invitation.card() == Card::Add && !showing.also.is_empty());
+        self.events
+            .set_visible(showing.invitation.card() == Card::Add && !showing.also.is_empty());
         self.events.set_sensitive(adding);
     }
 
@@ -972,9 +980,15 @@ impl EventCard {
                     .collect(),
             }
         };
-        let target = self.targets.borrow().get(self.picker.selected() as usize).cloned();
+        let target = self
+            .targets
+            .borrow()
+            .get(self.picker.selected() as usize)
+            .cloned();
         match target {
-            Some(target) if showing_adds(&self.showing) => (self.act)(Action::Import(picked, target)),
+            Some(target) if showing_adds(&self.showing) => {
+                (self.act)(Action::Import(picked, target))
+            }
             _ => (self.act)(Action::AddToCalendar),
         }
     }
@@ -1136,7 +1150,8 @@ impl EventCard {
         let yes = said_yes(&attending);
         self.guests_label.set_label(&yes);
         name(&self.guests, &yes);
-        self.guests.set_tooltip_text(Some(&guest_summary(&attending)));
+        self.guests
+            .set_tooltip_text(Some(&guest_summary(&attending)));
         for guest in &attending {
             let row = gtk::Box::builder().spacing(8).build();
             let name = gtk::Label::builder()
@@ -1563,7 +1578,10 @@ mod tests {
     #[test]
     fn an_event_the_calendar_holds_at_another_time_offers_update() {
         let mut showing = showing("PUBLISH", &[]);
-        let held = When::At { starts_at: 1_717_924_800_000, ends_at: None };
+        let held = When::At {
+            starts_at: 1_717_924_800_000,
+            ends_at: None,
+        };
         showing.on_calendar = Some(Spot {
             account_id: 1,
             calendar: "primary".to_string(),
@@ -1687,7 +1705,10 @@ mod tests {
     fn the_second_line_gives_the_time_then_the_place() {
         let mut event = showing("REQUEST", &[]).invitation;
         event.location = Some("Room 2.04".to_string());
-        assert_eq!(joined(&[Some("Wednesday".to_string()), event.location.clone()]), "Wednesday · Room 2.04");
+        assert_eq!(
+            joined(&[Some("Wednesday".to_string()), event.location.clone()]),
+            "Wednesday · Room 2.04"
+        );
         assert_eq!(joined(&[Some("Wednesday".to_string()), None]), "Wednesday");
         assert_eq!(joined(&[None, Some(" ".to_string())]), "");
     }
@@ -1697,7 +1718,10 @@ mod tests {
         let order: Vec<Answer> = ANSWERS.to_vec();
         assert_eq!(order, [Answer::Yes, Answer::Maybe, Answer::No]);
         for answer in ANSWERS {
-            assert!(!words::answer_filled(answer, None), "{answer:?} before any answer");
+            assert!(
+                !words::answer_filled(answer, None),
+                "{answer:?} before any answer"
+            );
         }
         assert!(words::answer_filled(Answer::Maybe, Some(Answer::Maybe)));
         assert!(!words::answer_filled(Answer::Yes, Some(Answer::Maybe)));

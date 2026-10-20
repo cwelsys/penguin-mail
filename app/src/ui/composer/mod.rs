@@ -46,6 +46,7 @@ use crate::templates::{self, Filling};
 use crate::web::WebView;
 use mailrs_domain::Address;
 use mailrs_domain::translate::{fill, fill_plural, gettext, with_reason};
+use mailrs_sync::MailBackend;
 
 pub use crate::compose::Identity;
 
@@ -87,11 +88,18 @@ struct Check(gio::SimpleAction);
 
 impl Check {
     fn new(name: &str, on: bool) -> Check {
-        Check(gio::SimpleAction::new_stateful(name, None, &on.to_variant()))
+        Check(gio::SimpleAction::new_stateful(
+            name,
+            None,
+            &on.to_variant(),
+        ))
     }
 
     fn is_active(&self) -> bool {
-        self.0.state().and_then(|state| state.get()).unwrap_or(false)
+        self.0
+            .state()
+            .and_then(|state| state.get())
+            .unwrap_or(false)
     }
 
     /// Changes the state as a click would, and calls the `connect_toggled`
@@ -112,7 +120,12 @@ impl Check {
     /// click or from `set_active`.
     fn connect_toggled(&self, toggled: impl Fn(bool) + 'static) {
         self.0.connect_state_notify(move |action| {
-            toggled(action.state().and_then(|state| state.get()).unwrap_or(false));
+            toggled(
+                action
+                    .state()
+                    .and_then(|state| state.get())
+                    .unwrap_or(false),
+            );
         });
     }
 }
@@ -145,7 +158,10 @@ fn more_menu(template_menu: &gio::Menu, has_engine: bool) -> gio::Menu {
         menu.append_section(None, &guarding);
     }
     let asking = gio::Menu::new();
-    asking.append(Some(&gettext("Request Read Receipt")), Some("composer.receipt"));
+    asking.append(
+        Some(&gettext("Request Read Receipt")),
+        Some("composer.receipt"),
+    );
     menu.append_section(None, &asking);
     menu
 }
@@ -590,10 +606,7 @@ impl Composer {
             .build();
         // The text view holds the row in its own coordinates, so it sits
         // under the last line and scrolls with the words.
-        let history = gtk::Box::builder()
-            .spacing(6)
-            .visible(false)
-            .build();
+        let history = gtk::Box::builder().spacing(6).visible(false).build();
         let unfold = gtk::Button::builder()
             .child(&gtk::Label::new(Some("•••")))
             .tooltip_text(gettext("Show trimmed content"))
@@ -1020,7 +1033,10 @@ impl Composer {
         }
         self.window.insert_action_group("composer", Some(&actions));
 
-        if let Some(item) = actions.lookup_action("attach").and_downcast::<gio::SimpleAction>() {
+        if let Some(item) = actions
+            .lookup_action("attach")
+            .and_downcast::<gio::SimpleAction>()
+        {
             item.set_enabled(!attach.get_visible());
             attach.connect_visible_notify(move |button| item.set_enabled(!button.get_visible()));
         }
@@ -1045,7 +1061,7 @@ impl Composer {
         let add = |trigger: &str, run: ComposerAction| {
             let weak = Rc::downgrade(self);
             shortcuts.add_shortcut(gtk::Shortcut::new(
-                gtk::ShortcutTrigger::parse_string(trigger),
+                crate::ui::primary_trigger(trigger),
                 Some(gtk::CallbackAction::new(move |_, _| {
                     if let Some(c) = weak.upgrade() {
                         run(&c);
@@ -1054,11 +1070,11 @@ impl Composer {
                 })),
             ));
         };
-        add("<Control>Return", Box::new(|c| c.send()));
-        add("<Control><Shift>d", Box::new(|c| c.send()));
-        add("<Control><Shift>a", Box::new(|c| c.pick_files()));
-        add("<Control><Shift>p", Box::new(|c| c.pick_images()));
-        add("<Control>s", Box::new(|c| c.save_draft(false)));
+        add("<Primary>Return", Box::new(|c| c.send()));
+        add("<Primary><Shift>d", Box::new(|c| c.send()));
+        add("<Primary><Shift>a", Box::new(|c| c.pick_files()));
+        add("<Primary><Shift>p", Box::new(|c| c.pick_images()));
+        add("<Primary>s", Box::new(|c| c.save_draft(false)));
         add("Escape", Box::new(|c| c.window.close()));
         self.window.add_controller(shortcuts);
 
@@ -1067,23 +1083,23 @@ impl Composer {
         formatting.set_propagation_phase(gtk::PropagationPhase::Capture);
         for (trigger, run) in [
             (
-                "<Control>b",
+                "<Primary>b",
                 Box::new(|c: &Rc<Composer>| c.style("bold")) as ComposerAction,
             ),
-            ("<Control>i", Box::new(|c| c.style("italic"))),
-            ("<Control><Shift>x", Box::new(|c| c.style("strike"))),
-            ("<Control>e", Box::new(|c| c.style("code"))),
-            ("<Control>k", Box::new(|c| c.link())),
-            ("<Control><Shift>8", Box::new(|c| c.list(BlockKind::Bullet))),
+            ("<Primary>i", Box::new(|c| c.style("italic"))),
+            ("<Primary><Shift>x", Box::new(|c| c.style("strike"))),
+            ("<Primary>e", Box::new(|c| c.style("code"))),
+            ("<Primary>k", Box::new(|c| c.link())),
+            ("<Primary><Shift>8", Box::new(|c| c.list(BlockKind::Bullet))),
             (
-                "<Control><Shift>7",
+                "<Primary><Shift>7",
                 Box::new(|c| c.list(BlockKind::Numbered)),
             ),
-            ("<Control><Shift>9", Box::new(|c| c.list(BlockKind::Quote))),
+            ("<Primary><Shift>9", Box::new(|c| c.list(BlockKind::Quote))),
         ] {
             let weak = Rc::downgrade(self);
             formatting.add_shortcut(gtk::Shortcut::new(
-                gtk::ShortcutTrigger::parse_string(trigger),
+                crate::ui::primary_trigger(trigger),
                 Some(gtk::CallbackAction::new(move |_, _| {
                     let Some(c) = weak.upgrade() else {
                         return glib::Propagation::Proceed;
@@ -1107,7 +1123,7 @@ impl Composer {
                 return glib::Propagation::Proceed;
             };
             if !matches!(key, gdk::Key::Return | gdk::Key::KP_Enter)
-                || modifiers.contains(gdk::ModifierType::CONTROL_MASK)
+                || modifiers.contains(crate::ui::PRIMARY)
                 || !c.editor.enter()
             {
                 return glib::Propagation::Proceed;
@@ -1153,8 +1169,15 @@ impl Composer {
     /// New Masked Address, the suffix or the sender. With no From row the
     /// focus stays in To.
     fn before_to(&self) {
-        let from_row: [&gtk::Widget; 3] = [self.mask.upcast_ref(), self.suffix.upcast_ref(), self.from.upcast_ref()];
-        if let Some(widget) = from_row.into_iter().find(|w| w.is_mapped() && w.is_sensitive()) {
+        let from_row: [&gtk::Widget; 3] = [
+            self.mask.upcast_ref(),
+            self.suffix.upcast_ref(),
+            self.from.upcast_ref(),
+        ];
+        if let Some(widget) = from_row
+            .into_iter()
+            .find(|w| w.is_mapped() && w.is_sensitive())
+        {
             widget.grab_focus();
         }
     }
@@ -1410,8 +1433,11 @@ impl Composer {
         let buffer = self.body.buffer();
         let start = self.body.iter_location(&buffer.start_iter());
         let end = self.body.iter_location(&buffer.end_iter());
-        self.body
-            .move_overlay(&self.history, start.x(), end.y() + end.height() + HISTORY_GAP);
+        self.body.move_overlay(
+            &self.history,
+            start.x(),
+            end.y() + end.height() + HISTORY_GAP,
+        );
     }
 
     fn identity(&self) -> Option<Identity> {
@@ -1442,7 +1468,11 @@ impl Composer {
             let account_id = chosen.account_id;
             let made = this
                 .core
-                .call(async move { settings.create_masked_address(account_id, &site, &note).await })
+                .call(async move {
+                    settings
+                        .create_masked_address(account_id, &site, &note)
+                        .await
+                })
                 .await;
             this.mask.set_sensitive(true);
             // The writer moved the From row to another account meanwhile:
@@ -1458,10 +1488,15 @@ impl Composer {
                     this.dirty.set(true);
                     this.check_send();
                     this.check_own();
-                    this.toast_wrapping(&fill(&gettext("Sending from {address}"), &[("address", &masked.email)]));
+                    this.toast_wrapping(&fill(
+                        &gettext("Sending from {address}"),
+                        &[("address", &masked.email)],
+                    ));
                 }
                 Ok(_) => {}
-                Err(err) => this.failed(&gettext("Could not make a masked address: {reason}"), &err),
+                Err(err) => {
+                    this.failed(&gettext("Could not make a masked address: {reason}"), &err)
+                }
             }
         });
     }
@@ -1554,7 +1589,8 @@ impl Composer {
                 draft.problem()
             }
         };
-        self.send.set_sensitive(problem.is_none() && !self.work.is_busy());
+        self.send
+            .set_sensitive(problem.is_none() && !self.work.is_busy());
         let tip = problem.unwrap_or_else(|| gettext("Send (Ctrl+Enter)"));
         self.send.set_tooltip_text(Some(&tip));
     }
@@ -1674,13 +1710,7 @@ impl Composer {
         let identity = self.identity()?;
         let base = self.base.borrow();
         let mut draft = base.clone();
-        if draft.account_id != identity.account_id {
-            // A different account cannot reply inside another account's thread.
-            draft.thread_id = None;
-            draft.draft_id = None;
-        }
-        draft.account_id = identity.account_id;
-        draft.from = identity.address;
+        draft.use_account(identity.account_id, identity.address);
         draft.to = self.to.addresses();
         draft.cc = self.cc.addresses();
         draft.bcc = self.bcc.addresses();
@@ -1713,7 +1743,11 @@ impl Composer {
         self.body.set_editable(false);
         self.subject.set_editable(false);
         gtk::prelude::GtkWindowExt::set_focus(&self.window, None::<&gtk::Widget>);
-        let banner = adw::Banner::builder().use_markup(false).title(notice).revealed(true).build();
+        let banner = adw::Banner::builder()
+            .use_markup(false)
+            .title(notice)
+            .revealed(true)
+            .build();
         if let Some(cancel) = cancel {
             banner.set_button_label(Some(&gettext("Cancel Send")));
             let weak = Rc::downgrade(self);
@@ -1731,11 +1765,17 @@ impl Composer {
                 content.set_sensitive(false);
             }
         }
-        for control in [self.send.upcast_ref::<gtk::Widget>(), self.more_menu.upcast_ref(), self.attach.upcast_ref(), self.protection.upcast_ref()] {
+        for control in [
+            self.send.upcast_ref::<gtk::Widget>(),
+            self.more_menu.upcast_ref(),
+            self.attach.upcast_ref(),
+            self.protection.upcast_ref(),
+        ] {
             control.set_sensitive(false);
         }
         // Takes the menu's and the keys' actions away with the buttons.
-        self.window.insert_action_group("composer", None::<&gio::ActionGroup>);
+        self.window
+            .insert_action_group("composer", None::<&gio::ActionGroup>);
     }
 
     /// Runs `unchanged` when the window closes on the message as it
@@ -1761,8 +1801,12 @@ impl Composer {
     }
 
     pub fn toast(&self, text: &str) {
-        self.toasts
-            .add_toast(adw::Toast::builder().title(super::window::toast_title(text)).timeout(4).build());
+        self.toasts.add_toast(
+            adw::Toast::builder()
+                .title(super::window::toast_title(text))
+                .timeout(4)
+                .build(),
+        );
     }
 
     /// A toast whose words wrap instead of ending in "…", for a line that
@@ -1775,8 +1819,12 @@ impl Composer {
             .max_width_chars(40)
             .xalign(0.0)
             .build();
-        self.toasts
-            .add_toast(adw::Toast::builder().custom_title(&title).timeout(4).build());
+        self.toasts.add_toast(
+            adw::Toast::builder()
+                .custom_title(&title)
+                .timeout(4)
+                .build(),
+        );
     }
 
     /// Toasts a failure. `said` is `gettext` of the sentence, with
@@ -2028,12 +2076,24 @@ impl Composer {
         });
     }
 
+    /// Where this draft lives if the writer saves it. POP3 mail stays on
+    /// this computer. An unavailable account cannot save a draft.
+    fn draft_kept_line(&self) -> String {
+        let Some(identity) = self.identity() else {
+            return gettext("That account is not connected.");
+        };
+        let Some(sync) = self.core.account(identity.account_id) else {
+            return gettext("That account is not connected.");
+        };
+        let mail = &sync.services().mail;
+        let provider = mailrs_discover::resolved_provider_name(mail.provider_name());
+        draft_kept(Some(&provider), mail.capabilities().local_mailboxes)
+    }
+
     fn confirm_close(self: &Rc<Self>) {
         let dialog = adw::AlertDialog::new(
             Some(&gettext("Save as Draft?")),
-            Some(&gettext(
-                "The draft is kept in Gmail, so you can finish it later on any device.",
-            )),
+            Some(&self.draft_kept_line()),
         );
         dialog.add_responses(&[
             ("discard", &gettext("Discard")),
@@ -2705,8 +2765,8 @@ impl Composer {
             let Some(c) = weak.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            let paste = modifiers.contains(gdk::ModifierType::CONTROL_MASK)
-                && matches!(key, gdk::Key::v | gdk::Key::V);
+            let paste =
+                modifiers.contains(crate::ui::PRIMARY) && matches!(key, gdk::Key::v | gdk::Key::V);
             let clipboard = c.body.clipboard();
             let formats = clipboard.formats();
             if !paste
@@ -3029,6 +3089,22 @@ fn block_of(name: &str) -> BlockKind {
     }
 }
 
+/// Where closing the composer says the draft is kept.
+fn draft_kept(provider: Option<&str>, local: bool) -> String {
+    if local {
+        return gettext("The draft is kept on this computer, so you can finish it later here.");
+    }
+    match provider.filter(|name| !name.is_empty()) {
+        Some(provider) => fill(
+            &gettext("The draft is kept in {provider}, so you can finish it later on any device."),
+            &[("provider", provider)],
+        ),
+        None => {
+            gettext("The draft is kept in your account, so you can finish it later on any device.")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3054,7 +3130,11 @@ mod tests {
         for has_engine in [true, false] {
             let menu = more_menu(&gio::Menu::new(), has_engine);
             let sections = actions(&menu);
-            assert_eq!(sections.last().unwrap(), &["composer.receipt"], "{sections:?}");
+            assert_eq!(
+                sections.last().unwrap(),
+                &["composer.receipt"],
+                "{sections:?}"
+            );
         }
     }
 
@@ -3132,6 +3212,21 @@ mod tests {
             "the list is the same"
         );
         assert_ne!(to_only, now_blind, "and the question still has to be asked");
+    }
+
+    #[test]
+    fn a_saved_draft_names_the_account_that_keeps_it() {
+        assert_eq!(
+            draft_kept(Some("Fastmail"), false),
+            "The draft is kept in Fastmail, so you can finish it later on any device."
+        );
+        let here = draft_kept(Some("Gmail"), true);
+        assert!(here.contains("this computer"), "{here}");
+        assert!(!here.contains("any device"), "{here}");
+        let unnamed = draft_kept(None, false);
+        assert!(!unnamed.contains("Gmail"), "{unnamed}");
+        assert!(unnamed.contains("your account"), "{unnamed}");
+        assert!(!unnamed.contains("this computer"), "{unnamed}");
     }
 
     #[test]

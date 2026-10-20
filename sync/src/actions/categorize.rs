@@ -138,5 +138,7 @@ impl<A: Accounts> MailActions<A> {
 
 /// The categories `ids` name, as mail sets.
 fn marks(ids: &[&'static str]) -> Vec<MailSet> {
-    ids.iter().map(|c| MailSet::Category(c.to_string())).collect()
+    ids.iter()
+        .map(|c| MailSet::Category(c.to_string()))
+        .collect()
 }

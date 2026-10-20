@@ -148,7 +148,10 @@ impl MainWindow {
         account_id: AccountId,
     ) {
         for (name, enabled) in gates(mailbox, self.offers(account_id)) {
-            if let Some(action) = group.lookup_action(name).and_downcast::<gio::SimpleAction>() {
+            if let Some(action) = group
+                .lookup_action(name)
+                .and_downcast::<gio::SimpleAction>()
+            {
                 action.set_enabled(enabled);
             }
             if name == "categorize-sender" {
@@ -164,7 +167,11 @@ impl MainWindow {
 
     /// Shows `message_id` in `view` as it arrived, or the newest message
     /// when it is `None`.
-    pub(super) fn view_source_of(self: &Rc<Self>, view: &ConversationView, message_id: Option<String>) {
+    pub(super) fn view_source_of(
+        self: &Rc<Self>,
+        view: &ConversationView,
+        message_id: Option<String>,
+    ) {
         let found = view.find(|o| {
             let message = match message_id.as_ref().or(o.only_message.as_ref()) {
                 Some(id) => o.messages.iter().find(|m| &m.id == id),
@@ -182,7 +189,10 @@ impl MainWindow {
         glib::spawn_future_local(async move {
             match this
                 .core
-                .call(async move { sync.raw_message(&message_id).await })
+                .call_for(
+                    account_id,
+                    async move { sync.raw_message(&message_id).await },
+                )
                 .await
             {
                 Ok(raw) => show_source(&this.window, &subject, raw),
@@ -197,7 +207,11 @@ impl MainWindow {
 /// `mailbox`.
 fn gates(mailbox: &Mailbox, offers: Offers) -> [(&'static str, bool); 3] {
     let [block, categorize] = crate::offered::sender_actions(offers);
-    [block, categorize, ("trash", deletes(mailbox, offers.delete_forever))]
+    [
+        block,
+        categorize,
+        ("trash", deletes(mailbox, offers.delete_forever)),
+    ]
 }
 
 fn show_source(parent: &adw::Window, subject: &str, raw: std::sync::Arc<Vec<u8>>) {
@@ -299,7 +313,11 @@ mod tests {
         for mailbox in [inbox, trash()] {
             assert_eq!(
                 gates(&mailbox, Offers::EVERYTHING),
-                [("block-sender", true), ("categorize-sender", true), ("trash", true)]
+                [
+                    ("block-sender", true),
+                    ("categorize-sender", true),
+                    ("trash", true)
+                ]
             );
         }
     }
@@ -314,12 +332,20 @@ mod tests {
         };
         assert_eq!(
             gates(&trash(), bare),
-            [("block-sender", false), ("categorize-sender", false), ("trash", false)]
+            [
+                ("block-sender", false),
+                ("categorize-sender", false),
+                ("trash", false)
+            ]
         );
         let inbox = Mailbox::Unified(Standard::Inbox);
         assert_eq!(
             gates(&inbox, bare),
-            [("block-sender", false), ("categorize-sender", false), ("trash", true)]
+            [
+                ("block-sender", false),
+                ("categorize-sender", false),
+                ("trash", true)
+            ]
         );
     }
 }

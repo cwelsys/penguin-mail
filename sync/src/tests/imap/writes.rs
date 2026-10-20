@@ -66,7 +66,12 @@ async fn archiving_moves_the_message_and_its_remote_ref_follows() {
 async fn a_thread_wide_archive_leaves_a_sent_copy_in_sent() {
     let imap = FakeImap::new();
     imap.add_mailbox("Work", None);
-    imap.deliver_flagged("Work", &raw_message("w", "Kites", days_ago(2), None), &[], days_ago(2));
+    imap.deliver_flagged(
+        "Work",
+        &raw_message("w", "Kites", days_ago(2), None),
+        &[],
+        days_ago(2),
+    );
     let h = imap_harness_on(imap, fake_settings()).await;
     h.bootstrap().await;
     h.sync.follow_mailbox("Work").await.unwrap();
@@ -419,7 +424,10 @@ async fn delete_forever_expunges_a_message_the_app_moved() {
         .unwrap();
 
     assert!(erased[0].is_ok());
-    assert!(undeleted(&h, "Archive").await.is_empty(), "the message left the server");
+    assert!(
+        undeleted(&h, "Archive").await.is_empty(),
+        "the message left the server"
+    );
     assert!(h.ids().await.is_empty());
 }
 
@@ -436,13 +444,20 @@ async fn an_archive_the_server_took_succeeds_when_listing_the_new_archive_fails(
     let before = h.imap.calls_to("list");
     // The move lists the mailboxes once after it makes the Archive; the
     // second listing is the one that records the new Archive.
-    h.imap.fail_on_later("list", 1, ImapError::Network("dropped".into()));
+    h.imap
+        .fail_on_later("list", 1, ImapError::Network("dropped".into()));
 
     let archived = h.sync.triage_thread(&thread, &TriageAction::Archive).await;
 
-    assert!(h.imap.calls_to("list") > before, "the new Archive was listed");
+    assert!(
+        h.imap.calls_to("list") > before,
+        "the new Archive was listed"
+    );
     assert!(archived.is_ok(), "{archived:?}");
-    assert!(h.imap.search("INBOX", "ALL").await.unwrap().is_empty(), "the server moved it");
+    assert!(
+        h.imap.search("INBOX", "ALL").await.unwrap().is_empty(),
+        "the server moved it"
+    );
 }
 
 #[tokio::test]

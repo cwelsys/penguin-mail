@@ -13,8 +13,8 @@ use mailrs_store::{labels, mailboxes, messages, reminders, remote_refs, threads}
 use super::store_mail::{Moves, Named};
 use super::{AccountSync, FETCH_CONCURRENCY};
 use crate::ops::{
-    Roles, Tags, drop_protected, local_changes, moved_out_of, ops_for, reverse_changes, source_mailbox,
-    split_keywords,
+    Roles, Tags, drop_protected, local_changes, moved_out_of, ops_for, reverse_changes,
+    source_mailbox, split_keywords,
 };
 use crate::services::{Relocated, Unapplied};
 use crate::{BackendError, MailOp, SyncError, TriageAction, backoff_delay, with_jitter};
@@ -67,7 +67,8 @@ impl AccountSync {
         let moves = self.mail.hold_moves().await;
         let named = moves.named(&all).await?;
         for chunk in named.chunks(limit) {
-            if let Err(Unapplied { error: err, .. }) = moves.apply(chunk, &[MailOp::Destroy]).await {
+            if let Err(Unapplied { error: err, .. }) = moves.apply(chunk, &[MailOp::Destroy]).await
+            {
                 // Gmail refuses a missing permission before it erases
                 // anything, so no later batch would fare better.
                 let stop = matches!(err, BackendError::NeedsPermission);
@@ -204,7 +205,10 @@ impl AccountSync {
             return Ok(Tags::new());
         }
         let account_id = self.account_id;
-        Ok(self.db.read(move |c| labels::tag_ids(c, account_id)).await?)
+        Ok(self
+            .db
+            .read(move |c| labels::tag_ids(c, account_id))
+            .await?)
     }
 
     /// Applies `action` to every target at once, as the operations
@@ -309,6 +313,9 @@ impl AccountSync {
         let stored = self.keywords_stored(&wanted, ops).await;
         let (to_server, kept_here) = split_keywords(ops, &stored);
         let tags = self.tags().await?;
+        // Held from the store's change until the server has it, so no sync
+        // pass reads the server in between and writes the mail back.
+        let moves = self.mail.hold_moves().await;
         let (ids, applied) = {
             let (wanted, ops, roles) = (wanted.clone(), ops.to_vec(), self.roles());
             let from = from.and_then(|set| source_mailbox(set, &roles, &tags));
@@ -364,7 +371,6 @@ impl AccountSync {
             return Ok(applied);
         }
 
-        let moves = self.mail.hold_moves().await;
         let named = moves.named(&ids).await?;
         let writing = Writing {
             what: what.to_string(),
@@ -374,7 +380,14 @@ impl AccountSync {
         let mut budget = Budget::new(self.retry_max, self.wait_ceiling);
         let mut progress = Progress::default();
         let written = self
-            .write_ops(&mut budget, &moves, &named, &writing, &to_server, &mut progress)
+            .write_ops(
+                &mut budget,
+                &moves,
+                &named,
+                &writing,
+                &to_server,
+                &mut progress,
+            )
             .await;
         // What the server moved before any refusal has moved, so its refs
         // follow whatever else happened. A failure here still lets the
@@ -502,7 +515,12 @@ impl AccountSync {
         ops: &[MailOp],
         progress: &mut Progress,
     ) -> Result<(), BackendError> {
-        let taken = |messages: &[Named]| messages.iter().map(|m| m.id().to_string()).collect::<Vec<_>>();
+        let taken = |messages: &[Named]| {
+            messages
+                .iter()
+                .map(|m| m.id().to_string())
+                .collect::<Vec<_>>()
+        };
         let mut from = 0;
         loop {
             match moves.apply(&named[from..], ops).await {
@@ -830,7 +848,10 @@ mod tests {
             still_waiting(&writing("Fastmail")),
             "Fastmail is busy. Still working on 1 conversation."
         );
-        assert_eq!(still_waiting(&writing("Gmail")), "Gmail is busy. Still working on 1 conversation.");
+        assert_eq!(
+            still_waiting(&writing("Gmail")),
+            "Gmail is busy. Still working on 1 conversation."
+        );
     }
 
     #[test]
@@ -848,7 +869,10 @@ mod tests {
 
     #[test]
     fn a_rate_limit_failure_keeps_the_folder_name_as_the_person_wrote_it() {
-        let moving = Writing { what: "Move to Work Projects".into(), ..writing("Fastmail") };
+        let moving = Writing {
+            what: "Move to Work Projects".into(),
+            ..writing("Fastmail")
+        };
         let said = write_failure(&moving, &BackendError::RateLimited(None), Duration::ZERO);
         assert!(said.contains("“Move to Work Projects”"), "{said}");
     }

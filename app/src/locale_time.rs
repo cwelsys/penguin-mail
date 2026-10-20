@@ -54,7 +54,11 @@ fn read_t_fmt() -> Option<String> {
     // SAFETY: as above; `T_FMT` answers a NUL-terminated C string, copied
     // to an owned `String` before any later call could reuse it.
     let ptr = unsafe { nl_langinfo(T_FMT) };
-    (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+    (!ptr.is_null()).then(|| {
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 /// The weekday the system locale starts a week on, Monday when it names

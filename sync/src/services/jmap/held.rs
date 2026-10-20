@@ -56,7 +56,11 @@ impl From<Fate> for Settled {
 
 /// The copy a submission names, or the row's when it names none.
 fn copy_of<'a>(state: &'a SubmissionState, message_id: &'a str) -> &'a str {
-    if state.email_id.is_empty() { message_id } else { &state.email_id }
+    if state.email_id.is_empty() {
+        message_id
+    } else {
+        &state.email_id
+    }
 }
 
 /// A submission state none of RFC 8621's three: no cancel, no send.
@@ -67,7 +71,9 @@ fn unreadable() -> BackendError {
 /// When the server sends the hold, in milliseconds. The server writes it
 /// in RFC 3339 with any offset, which names one instant.
 fn send_at(state: &SubmissionState) -> Option<EpochMillis> {
-    chrono::DateTime::parse_from_rfc3339(state.send_at.as_deref()?).ok().map(|at| at.timestamp_millis())
+    chrono::DateTime::parse_from_rfc3339(state.send_at.as_deref()?)
+        .ok()
+        .map(|at| at.timestamp_millis())
 }
 
 /// The whole seconds from `now` to `at`, rounded up so the message never
@@ -82,7 +88,11 @@ fn seconds_until(at: EpochMillis, now: EpochMillis) -> u64 {
 /// caller must look in Drafts before it queues a second copy.
 fn refused_hold(err: JmapError) -> BackendError {
     match err {
-        JmapError::Method { ref kind, .. } if kind == "invalidArguments" || kind == "invalidProperties" => BackendError::Unsupported,
+        JmapError::Method { ref kind, .. }
+            if kind == "invalidArguments" || kind == "invalidProperties" =>
+        {
+            BackendError::Unsupported
+        }
         JmapError::HoldUnknown => BackendError::Offline(JmapError::HoldUnknown.to_string()),
         other => backend(other),
     }
@@ -104,25 +114,49 @@ impl<J: JmapApi> Jmap<J> {
         Ok(answers)
     }
 
-    pub(super) async fn hold_message(&self, raw: &[u8], at: EpochMillis) -> Result<Held, BackendError> {
+    pub(super) async fn hold_message(
+        &self,
+        raw: &[u8],
+        at: EpochMillis,
+    ) -> Result<Held, BackendError> {
         if !self.holds(seconds_until(at, now_millis())).await? {
             return Err(BackendError::Unsupported);
         }
         self.sending().await?;
         self.listed().await?;
-        let drafts = self.known().roles.get(&Role::Drafts).cloned().ok_or(BackendError::Unsupported)?;
+        let drafts = self
+            .known()
+            .roles
+            .get(&Role::Drafts)
+            .cloned()
+            .ok_or(BackendError::Unsupported)?;
         let (from, to) = envelope_of(raw, &self.settings().address)?;
         let identity = self.identity(&from).await?;
-        let blob = self.api().upload(without_bcc(raw).into_owned()).await.map_err(backend)?;
+        let blob = self
+            .api()
+            .upload(without_bcc(raw).into_owned())
+            .await
+            .map_err(backend)?;
         // Counted again after the upload, which can take a while, so the
         // message goes at the hour picked and not that much later.
         let seconds = seconds_until(at, now_millis());
         if !self.holds(seconds).await? {
             return Err(BackendError::Unsupported);
         }
-        let hold = Hold { blob_id: blob, identity_id: identity.id, mail_from: from, rcpt_to: to, drafts, hold_for: seconds };
+        let hold = Hold {
+            blob_id: blob,
+            identity_id: identity.id,
+            mail_from: from,
+            rcpt_to: to,
+            drafts,
+            hold_for: seconds,
+        };
         let held = self.api().hold(&hold).await.map_err(refused_hold)?;
-        Ok(Held { handle: held.id, message_id: held.email_id, thread_id: held.thread_id })
+        Ok(Held {
+            handle: held.id,
+            message_id: held.email_id,
+            thread_id: held.thread_id,
+        })
     }
 
     /// The hold on the copy in Drafts whose `Message-ID` is `message_id`,
@@ -138,16 +172,29 @@ impl<J: JmapApi> Jmap<J> {
         let filter = json!({ "operator": "AND", "conditions": [
             has_message_id(message_id), { "inMailbox": drafts }, { "hasKeyword": HELD }
         ] });
-        let query = EmailQuery { filter: Some(filter), position: 0, limit: 2, total: false };
+        let query = EmailQuery {
+            filter: Some(filter),
+            position: 0,
+            limit: 2,
+            total: false,
+        };
         let mut hits = self.api().query(&query).await.map_err(backend)?.hits;
         let copy = match (hits.pop(), hits.is_empty()) {
             (None, _) => return Ok(None),
             (Some(copy), true) => copy,
             (Some(_), false) => return Err(unreadable()),
         };
-        let mut handles = self.api().submissions_for(&copy.id).await.map_err(backend)?;
+        let mut handles = self
+            .api()
+            .submissions_for(&copy.id)
+            .await
+            .map_err(backend)?;
         match (handles.pop(), handles.is_empty()) {
-            (Some(handle), true) => Ok(Some(Held { handle, message_id: copy.id, thread_id: copy.thread_id })),
+            (Some(handle), true) => Ok(Some(Held {
+                handle,
+                message_id: copy.id,
+                thread_id: copy.thread_id,
+            })),
             _ => Err(unreadable()),
         }
     }
@@ -159,13 +206,21 @@ impl<J: JmapApi> Jmap<J> {
     /// submission's envelope: every address it goes to that the copy's To
     /// and Cc leave out.
     pub(super) async fn claimed(&self, email_id: &str) -> Result<Option<Claimed>, BackendError> {
-        let mut handles = self.api().submissions_for(email_id).await.map_err(backend)?;
+        let mut handles = self
+            .api()
+            .submissions_for(email_id)
+            .await
+            .map_err(backend)?;
         let handle = match (handles.pop(), handles.is_empty()) {
             (None, _) => return self.unclaimed(email_id).await,
             (Some(handle), true) => handle,
             (Some(_), false) => return Err(unreadable()),
         };
-        let found = self.api().submissions(std::slice::from_ref(&handle)).await.map_err(backend)?;
+        let found = self
+            .api()
+            .submissions(std::slice::from_ref(&handle))
+            .await
+            .map_err(backend)?;
         let Some(state) = found.into_iter().next() else {
             return self.unclaimed(email_id).await;
         };
@@ -185,17 +240,41 @@ impl<J: JmapApi> Jmap<J> {
         let Some(copy) = self.raws(&ids).await?.into_iter().next() else {
             return Ok(None);
         };
-        let got = self.api().emails(&ids, &["id", "threadId"]).await.map_err(backend)?;
-        let thread_id = got.list.into_iter().next().map(|e| e.thread_id).unwrap_or_default();
+        let got = self
+            .api()
+            .emails(&ids, &["id", "threadId"])
+            .await
+            .map_err(backend)?;
+        let thread_id = got
+            .list
+            .into_iter()
+            .next()
+            .map(|e| e.thread_id)
+            .unwrap_or_default();
         let (_, written_to) = envelope_of(&copy.bytes, &self.settings().address)?;
-        let blind: Vec<String> =
-            state.recipients().into_iter().filter(|r| !written_to.iter().any(|w| w.eq_ignore_ascii_case(r))).collect();
+        let blind: Vec<String> = state
+            .recipients()
+            .into_iter()
+            .filter(|r| !written_to.iter().any(|w| w.eq_ignore_ascii_case(r)))
+            .collect();
         let raw = match blind.is_empty() {
             true => copy.bytes,
-            false => [format!("Bcc: {}\r\n", blind.join(", ")).into_bytes(), copy.bytes].concat(),
+            false => [
+                format!("Bcc: {}\r\n", blind.join(", ")).into_bytes(),
+                copy.bytes,
+            ]
+            .concat(),
         };
-        let held = Held { handle, message_id: email_id.to_string(), thread_id };
-        Ok(Some(Claimed::Held { held, send_at: send_at(&state).unwrap_or_else(now_millis), raw }))
+        let held = Held {
+            handle,
+            message_id: email_id.to_string(),
+            thread_id,
+        };
+        Ok(Some(Claimed::Held {
+            held,
+            send_at: send_at(&state).unwrap_or_else(now_millis),
+            raw,
+        }))
     }
 
     /// A held copy no submission sends: one the server sent and forgot, or
@@ -207,8 +286,17 @@ impl<J: JmapApi> Jmap<J> {
         }))
     }
 
-    pub(super) async fn release(&self, handle: &str, message_id: &str, at: EpochMillis) -> Result<Unheld, BackendError> {
-        let found = self.api().submissions(&[handle.to_string()]).await.map_err(backend)?;
+    pub(super) async fn release(
+        &self,
+        handle: &str,
+        message_id: &str,
+        at: EpochMillis,
+    ) -> Result<Unheld, BackendError> {
+        let found = self
+            .api()
+            .submissions(&[handle.to_string()])
+            .await
+            .map_err(backend)?;
         let Some(state) = found.into_iter().next() else {
             return self.forgotten(message_id, at).await.map(Unheld::from);
         };
@@ -218,7 +306,12 @@ impl<J: JmapApi> Jmap<J> {
                 self.file(copy).await;
                 Ok(Unheld::AlreadySent)
             }
-            "pending" => match self.api().cancel_submission(handle).await.map_err(backend)? {
+            "pending" => match self
+                .api()
+                .cancel_submission(handle)
+                .await
+                .map_err(backend)?
+            {
                 Canceled::Canceled => {
                     self.take_off_hold(copy).await?;
                     Ok(Unheld::InDrafts)
@@ -238,8 +331,17 @@ impl<J: JmapApi> Jmap<J> {
         }
     }
 
-    pub(super) async fn settle_hold(&self, handle: &str, message_id: &str, at: EpochMillis) -> Result<Settled, BackendError> {
-        let found = self.api().submissions(&[handle.to_string()]).await.map_err(backend)?;
+    pub(super) async fn settle_hold(
+        &self,
+        handle: &str,
+        message_id: &str,
+        at: EpochMillis,
+    ) -> Result<Settled, BackendError> {
+        let found = self
+            .api()
+            .submissions(&[handle.to_string()])
+            .await
+            .map_err(backend)?;
         let Some(state) = found.into_iter().next() else {
             return self.forgotten(message_id, at).await.map(Settled::from);
         };
@@ -249,7 +351,11 @@ impl<J: JmapApi> Jmap<J> {
             // ask again in a while, not straight away.
             "pending" => {
                 let now = now_millis();
-                Ok(Settled::Waiting(send_at(&state).filter(|t| *t > now).unwrap_or(now + ASK_AGAIN)))
+                Ok(Settled::Waiting(
+                    send_at(&state)
+                        .filter(|t| *t > now)
+                        .unwrap_or(now + ASK_AGAIN),
+                ))
             }
             "final" => {
                 self.file(copy).await;
@@ -268,14 +374,19 @@ impl<J: JmapApi> Jmap<J> {
     /// held proves nothing once its hour is near: only one without `$draft`,
     /// or one in Sent, went, and only one held well before its hour did not.
     async fn forgotten(&self, email_id: &str, at: EpochMillis) -> Result<Fate, BackendError> {
-        let got = self.api().emails(&[email_id.to_string()], &["id", "keywords", "mailboxIds"]).await.map_err(backend)?;
+        let got = self
+            .api()
+            .emails(&[email_id.to_string()], &["id", "keywords", "mailboxIds"])
+            .await
+            .map_err(backend)?;
         let Some(email) = got.list.into_iter().find(|e| e.id == email_id) else {
             return Ok(Fate::Unknown);
         };
         self.listed().await?;
         let sent = self.known().roles.get(&Role::Sent).cloned();
         let has = |keyword: &str| email.keywords.get(keyword).copied().unwrap_or(false);
-        let in_sent = sent.is_some_and(|sent| email.mailbox_ids.get(&sent).copied().unwrap_or(false));
+        let in_sent =
+            sent.is_some_and(|sent| email.mailbox_ids.get(&sent).copied().unwrap_or(false));
         if !has(DRAFT) || in_sent {
             if !in_sent || has(DRAFT) || has(HELD) {
                 self.file(email_id).await;
@@ -313,10 +424,15 @@ impl<J: JmapApi> Jmap<J> {
         let (drafts, filed) = {
             let known = self.known();
             let role = |r| known.roles.get(&r).cloned();
-            (role(Role::Drafts), role(Role::Sent).or_else(|| role(Role::Archive)))
+            (
+                role(Role::Drafts),
+                role(Role::Sent).or_else(|| role(Role::Archive)),
+            )
         };
         let Some(drafts) = drafts else {
-            return tracing::warn!("a held message went out, but the account has no Drafts mailbox to file it from");
+            return tracing::warn!(
+                "a held message went out, but the account has no Drafts mailbox to file it from"
+            );
         };
         let filed = filed.unwrap_or_else(|| drafts.clone());
         if let Err(err) = self.api().file_held(email_id, &drafts, &filed).await {
@@ -332,7 +448,13 @@ mod tests {
     use super::{seconds_until, send_at};
 
     fn sending_at(at: &str) -> SubmissionState {
-        SubmissionState { id: "S1".into(), email_id: "M1".into(), undo_status: "pending".into(), send_at: Some(at.into()), envelope: None }
+        SubmissionState {
+            id: "S1".into(),
+            email_id: "M1".into(),
+            undo_status: "pending".into(),
+            send_at: Some(at.into()),
+            envelope: None,
+        }
     }
 
     #[test]

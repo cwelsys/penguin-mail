@@ -125,7 +125,10 @@ mod tests {
     fn every_hour_of_a_weekend_day_is_shaded() {
         let hours = WorkingHours::default();
         for hour in 0..24 {
-            assert!(hours.hour_shaded(Weekday::Sat, hour), "hour {hour} on Saturday");
+            assert!(
+                hours.hour_shaded(Weekday::Sat, hour),
+                "hour {hour} on Saturday"
+            );
         }
     }
 
@@ -139,7 +142,10 @@ mod tests {
 
     #[test]
     fn a_weekend_day_shades_the_whole_day_as_one_range() {
-        assert_eq!(WorkingHours::default().shaded_hour_ranges(Weekday::Sat), vec![(0, 24)]);
+        assert_eq!(
+            WorkingHours::default().shaded_hour_ranges(Weekday::Sat),
+            vec![(0, 24)]
+        );
     }
 
     #[test]
@@ -149,13 +155,19 @@ mod tests {
             end_minutes: 24 * 60,
             days: [true; 7],
         };
-        assert_eq!(hours.shaded_hour_ranges(Weekday::Mon), Vec::<(u32, u32)>::new());
+        assert_eq!(
+            hours.shaded_hour_ranges(Weekday::Mon),
+            Vec::<(u32, u32)>::new()
+        );
     }
 
     #[test]
     fn start_and_end_time_read_back_as_naive_times() {
         let hours = WorkingHours::default();
-        assert_eq!(hours.start_time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        assert_eq!(
+            hours.start_time(),
+            NaiveTime::from_hms_opt(9, 0, 0).unwrap()
+        );
         assert_eq!(hours.end_time(), NaiveTime::from_hms_opt(18, 0, 0).unwrap());
     }
 

@@ -28,7 +28,9 @@ pub(crate) fn asked_at(header: Option<&str>) -> Option<String> {
     let plain = email.matches('@').count() == 1
         && !email.starts_with('@')
         && !email.ends_with('@')
-        && !email.chars().any(|c| c.is_whitespace() || c.is_control() || ";<>,\"".contains(c));
+        && !email
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || ";<>,\"".contains(c));
     plain.then_some(email)
 }
 
@@ -55,7 +57,10 @@ pub(crate) fn report(root: &Part) -> Option<ReadReport> {
     if root.mime_type != "multipart/report" {
         return None;
     }
-    let part = root.children.iter().find(|c| c.mime_type == "message/disposition-notification")?;
+    let part = root
+        .children
+        .iter()
+        .find(|c| c.mime_type == "message/disposition-notification")?;
     let data = part.data.as_deref()?;
     let text = String::from_utf8_lossy(&data[..data.len().min(MAX_REPORT_BYTES)]);
     let (mut final_recipient, mut original_recipient, mut displayed) = (None, None, None);
@@ -66,7 +71,13 @@ pub(crate) fn report(root: &Part) -> Option<ReadReport> {
         };
         let value = value.trim();
         // "rfc822; tomas@allotment.example": the address after the type.
-        let address = || value.split_once(';').map_or(value, |(_, a)| a).trim().to_ascii_lowercase();
+        let address = || {
+            value
+                .split_once(';')
+                .map_or(value, |(_, a)| a)
+                .trim()
+                .to_ascii_lowercase()
+        };
         match name.trim().to_ascii_lowercase().as_str() {
             "final-recipient" => final_recipient = Some(address()),
             "original-recipient" => original_recipient = Some(address()),
@@ -75,19 +86,35 @@ pub(crate) fn report(root: &Part) -> Option<ReadReport> {
             // "/error" after the type.
             "disposition" => {
                 let kind = value.rsplit(';').next().unwrap_or_default();
-                displayed = Some(kind.split('/').next().unwrap_or_default().trim().eq_ignore_ascii_case("displayed"));
+                displayed = Some(
+                    kind.split('/')
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .eq_ignore_ascii_case("displayed"),
+                );
             }
             _ => {}
         }
     }
-    let by = final_recipient.filter(|b| !b.is_empty()).or(original_recipient).filter(|b| !b.is_empty())?;
-    Some(ReadReport { by, displayed: displayed?, original })
+    let by = final_recipient
+        .filter(|b| !b.is_empty())
+        .or(original_recipient)
+        .filter(|b| !b.is_empty())?;
+    Some(ReadReport {
+        by,
+        displayed: displayed?,
+        original,
+    })
 }
 
 /// `<id@host>` as `id@host`, when the field holds one id and nothing else.
 fn one_message_id(value: &str) -> Option<String> {
     let id = value.strip_prefix('<')?.strip_suffix('>')?;
-    let plain = !id.is_empty() && !id.chars().any(|c| c.is_whitespace() || c.is_control() || "<>".contains(c));
+    let plain = !id.is_empty()
+        && !id
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "<>".contains(c));
     plain.then(|| id.to_string())
 }
 
@@ -114,7 +141,10 @@ Original-Message-ID: <rota@fastmail.example>\r\nDisposition: manual-action/MDN-s
 
     #[test]
     fn a_message_that_asks_names_where_in_lower_case() {
-        assert_eq!(crate::read(ASKS).receipt_to.as_deref(), Some("ines@allotment.example"));
+        assert_eq!(
+            crate::read(ASKS).receipt_to.as_deref(),
+            Some("ines@allotment.example")
+        );
         assert_eq!(crate::read(b"Subject: s\r\n\r\nhi\r\n").receipt_to, None);
     }
 
@@ -152,7 +182,12 @@ Original-Message-ID: <rota@fastmail.example>\r\nDisposition: manual-action/MDN-s
 
     #[test]
     fn a_receipt_for_mail_deleted_unread_says_so() {
-        assert_eq!(crate::read(&report("deleted")).read_report.map(|r| r.displayed), Some(false));
+        assert_eq!(
+            crate::read(&report("deleted"))
+                .read_report
+                .map(|r| r.displayed),
+            Some(false)
+        );
     }
 
     #[test]
@@ -183,7 +218,10 @@ Original-Message-ID: <rota@fastmail.example>\r\nDisposition: manual-action/MDN-s
 
     #[test]
     fn an_address_with_a_control_character_asks_nothing() {
-        assert_eq!(asked_at(Some("Ines <a@x.example\r\nBcc: z@y.example>")), None);
+        assert_eq!(
+            asked_at(Some("Ines <a@x.example\r\nBcc: z@y.example>")),
+            None
+        );
         assert_eq!(asked_at(Some("a\u{7}@x.example")), None);
     }
 
@@ -207,7 +245,10 @@ Content-Type: multipart/report; report-type=disposition-notification; boundary=\
         let body = crate::read(&report_with(
             "Final-Recipient: rfc822;\r\n tomas@allotment.example\r\nOriginal-Recipient: rfc822; other@allotment.example\r\nDisposition: manual-action/MDN-sent-manually; displayed\r\n",
         ));
-        assert_eq!(body.read_report.map(|r| r.by).as_deref(), Some("tomas@allotment.example"));
+        assert_eq!(
+            body.read_report.map(|r| r.by).as_deref(),
+            Some("tomas@allotment.example")
+        );
     }
 
     #[test]
@@ -215,7 +256,10 @@ Content-Type: multipart/report; report-type=disposition-notification; boundary=\
         let body = crate::read(&report_with(
             "Final-Recipient: rfc822;\r\nOriginal-Recipient: rfc822; other@allotment.example\r\nDisposition: manual-action/MDN-sent-manually; displayed\r\n",
         ));
-        assert_eq!(body.read_report.map(|r| r.by).as_deref(), Some("other@allotment.example"));
+        assert_eq!(
+            body.read_report.map(|r| r.by).as_deref(),
+            Some("other@allotment.example")
+        );
     }
 
     #[test]

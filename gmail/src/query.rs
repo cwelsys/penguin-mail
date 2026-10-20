@@ -303,14 +303,23 @@ mod tests {
         use mailrs_domain::query::parse;
 
         let cases = [
-            ("from:ann@example.com subject:kites", "from:ann@example.com subject:kites"),
-            ("from:\"Ann Smith\" is:unread", "from:\"Ann Smith\" is:unread"),
+            (
+                "from:ann@example.com subject:kites",
+                "from:ann@example.com subject:kites",
+            ),
+            (
+                "from:\"Ann Smith\" is:unread",
+                "from:\"Ann Smith\" is:unread",
+            ),
             ("is:starred has:attachment", "is:starred has:attachment"),
             ("is:flagged", "is:starred"),
             ("is:read", "-is:unread"),
             ("newer_than:7d", "newer_than:7d"),
             ("older_than:30d", "-newer_than:30d"),
-            ("after:2026/02/01 before:2026/03/01", "after:2026/02/01 before:2026/03/01"),
+            (
+                "after:2026/02/01 before:2026/03/01",
+                "after:2026/02/01 before:2026/03/01",
+            ),
             ("larger:5M", "larger:5M"),
             ("larger:1500", "larger:1500"),
             ("label:work-clients", "label:work-clients"),

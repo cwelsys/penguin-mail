@@ -39,7 +39,10 @@ async fn a_guest_google_left_off_the_list_is_added() {
     mount_token(&server).await;
     Mock::given(method("GET"))
         .and(path(format!("{CALENDAR}/calendars/primary/events/{EVENT}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": EVENT, "iCalUID": UID, "attendees": []})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": EVENT, "iCalUID": UID, "attendees": []})),
+        )
         .mount(&server)
         .await;
     let sent = std::sync::Arc::new(std::sync::Mutex::new(Value::Null));
@@ -76,7 +79,9 @@ async fn a_missing_calendar_permission_is_reported_as_such() {
         .mount(&server)
         .await;
     assert!(matches!(
-        client(&server).event_changes("primary", None, None, "2026-03-10T00:00:00+00:00").await,
+        client(&server)
+            .event_changes("primary", None, None, "2026-03-10T00:00:00+00:00")
+            .await,
         Err(GmailError::MissingScope)
     ));
 }
@@ -98,7 +103,9 @@ async fn a_calendar_api_switched_off_says_where_to_turn_it_on() {
         })))
         .mount(&server)
         .await;
-    let listed = client(&server).event_changes("primary", None, None, "2026-03-10T00:00:00+00:00").await;
+    let listed = client(&server)
+        .event_changes("primary", None, None, "2026-03-10T00:00:00+00:00")
+        .await;
     assert!(
         matches!(
             &listed,
@@ -170,9 +177,15 @@ async fn a_change_page_maps_events_and_names_the_deleted_ones() {
     assert_eq!(event.zone, "Europe/Lisbon");
     assert_eq!(event.end - event.start, 90 * 60 * 1000);
     assert_eq!(event.rules, vec!["RRULE:FREQ=WEEKLY;BYDAY=WE".to_string()]);
-    assert_eq!(event.conference.as_deref(), Some("https://meet.google.com/abc-defg-hij"));
+    assert_eq!(
+        event.conference.as_deref(),
+        Some("https://meet.google.com/abc-defg-hij")
+    );
     assert_eq!(event.my_answer, Some(Answer::Maybe));
-    assert_eq!(event.sequence, 3, "the organizer's version, which a proposal must name");
+    assert_eq!(
+        event.sequence, 3,
+        "the organizer's version, which a proposal must name"
+    );
     // Google writes an all-day holiday with no transparency, so its own
     // flag says busy; `Event::blocks_time` is what leaves the day open.
     assert!(page.events[1].busy);
@@ -204,7 +217,12 @@ async fn an_older_range_is_read_by_time_and_sends_no_sync_token() {
         .mount(&server)
         .await;
     let page = client(&server)
-        .event_range("work", "2024-09-01T00:00:00Z", "2025-09-01T00:00:00Z", Some("p2"))
+        .event_range(
+            "work",
+            "2024-09-01T00:00:00Z",
+            "2025-09-01T00:00:00Z",
+            Some("p2"),
+        )
         .await
         .unwrap();
     assert_eq!(page.events.len(), 1);
@@ -213,10 +231,19 @@ async fn an_older_range_is_read_by_time_and_sends_no_sync_token() {
     assert_eq!(page.removed, vec!["gone".to_string()]);
     assert_eq!(page.next_sync, None);
     let sent = server.received_requests().await.unwrap();
-    let events = sent.iter().find(|r| r.url.path().ends_with("/events")).unwrap();
+    let events = sent
+        .iter()
+        .find(|r| r.url.path().ends_with("/events"))
+        .unwrap();
     let query = events.url.query().unwrap_or_default();
-    assert!(!query.contains("syncToken"), "a range read must not carry a sync token: {query}");
-    assert!(!query.contains("singleEvents"), "a series must arrive whole: {query}");
+    assert!(
+        !query.contains("syncToken"),
+        "a range read must not carry a sync token: {query}"
+    );
+    assert!(
+        !query.contains("singleEvents"),
+        "a series must arrive whole: {query}"
+    );
 }
 
 #[tokio::test]
@@ -228,7 +255,10 @@ async fn an_expired_calendar_token_says_so() {
         .respond_with(ResponseTemplate::new(410).set_body_json(json!({"error": {"code": 410, "message": "Sync token is no longer valid, a full sync is required."}})))
         .mount(&server)
         .await;
-    let err = client(&server).event_changes("work", Some("old"), None, "x").await.unwrap_err();
+    let err = client(&server)
+        .event_changes("work", Some("old"), None, "x")
+        .await
+        .unwrap_err();
     assert!(matches!(err, GmailError::ExpiredSyncToken));
 }
 
@@ -248,7 +278,10 @@ async fn a_write_against_an_older_version_is_refused_as_changed() {
         zone: "UTC".into(),
         ..Default::default()
     };
-    let err = client(&server).put_event(&event, Some("\"2\""), false, Notify::Guests).await.unwrap_err();
+    let err = client(&server)
+        .put_event(&event, Some("\"2\""), false, Notify::Guests)
+        .await
+        .unwrap_err();
     assert!(matches!(err, GmailError::Changed));
 }
 
@@ -278,7 +311,10 @@ async fn a_new_event_goes_out_with_its_own_id() {
         zone: "Europe/Lisbon".into(),
         ..Default::default()
     };
-    let made = client(&server).put_event(&event, None, true, Notify::Guests).await.unwrap();
+    let made = client(&server)
+        .put_event(&event, None, true, Notify::Guests)
+        .await
+        .unwrap();
     assert_eq!(made.etag, "\"1\"");
     assert_eq!(made.title, "Lunch");
 }
@@ -293,7 +329,10 @@ async fn asking_for_a_meet_link_sends_a_create_request() {
         .and(query_param("sendUpdates", "all"))
         .respond_with(|request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
-            assert_eq!(body.pointer("/conferenceData/createRequest/requestId"), Some(&json!("req0123")));
+            assert_eq!(
+                body.pointer("/conferenceData/createRequest/requestId"),
+                Some(&json!("req0123"))
+            );
             assert_eq!(
                 body.pointer("/conferenceData/createRequest/conferenceSolutionKey/type"),
                 Some(&json!("hangoutsMeet"))
@@ -316,8 +355,14 @@ async fn asking_for_a_meet_link_sends_a_create_request() {
         meet_request: Some("req0123".into()),
         ..Default::default()
     };
-    let made = client(&server).put_event(&event, None, true, Notify::Guests).await.unwrap();
-    assert_eq!(made.conference.as_deref(), Some("https://meet.google.com/abc-defg-hij"));
+    let made = client(&server)
+        .put_event(&event, None, true, Notify::Guests)
+        .await
+        .unwrap();
+    assert_eq!(
+        made.conference.as_deref(),
+        Some("https://meet.google.com/abc-defg-hij")
+    );
 }
 
 #[tokio::test]
@@ -325,10 +370,15 @@ async fn a_changed_occurrence_goes_out_as_a_patch_without_a_rule() {
     let server = MockServer::start().await;
     mount_token(&server).await;
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/calendars/work/events/standup_20260923T080000Z")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/work/events/standup_20260923T080000Z"
+        )))
         .respond_with(|request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
-            assert!(body.get("recurrence").is_none(), "Google refuses a rule on one occurrence");
+            assert!(
+                body.get("recurrence").is_none(),
+                "Google refuses a rule on one occurrence"
+            );
             assert!(body.get("id").is_none());
             assert!(request.headers.get("If-Match").is_none());
             ResponseTemplate::new(200).set_body_json(json!({
@@ -349,7 +399,10 @@ async fn a_changed_occurrence_goes_out_as_a_patch_without_a_rule() {
         original_start: Some(1_790_150_400_000),
         ..Default::default()
     };
-    let made = client(&server).put_event(&event, None, false, Notify::Guests).await.unwrap();
+    let made = client(&server)
+        .put_event(&event, None, false, Notify::Guests)
+        .await
+        .unwrap();
     assert_eq!(made.series.as_deref(), Some("standup"));
 }
 
@@ -379,7 +432,10 @@ async fn a_series_saved_without_rules_stops_repeating_on_google() {
         end: 1_790_151_300_000,
         ..Default::default()
     };
-    let made = client(&server).put_event(&event, Some("\"7\""), false, Notify::Guests).await.unwrap();
+    let made = client(&server)
+        .put_event(&event, Some("\"7\""), false, Notify::Guests)
+        .await
+        .unwrap();
     assert!(made.rules.is_empty());
 }
 
@@ -405,11 +461,21 @@ async fn an_organizer_edit_keeps_what_google_holds_on_each_guest_and_the_visibil
         .respond_with(|request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
             assert_eq!(body["visibility"], "public", "{body}");
-            let ann = body["attendees"].as_array().unwrap().iter().find(|g| g["email"] == "ann@example.com").unwrap();
+            let ann = body["attendees"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|g| g["email"] == "ann@example.com")
+                .unwrap();
             assert_eq!(ann["optional"], true, "{body}");
             assert_eq!(ann["additionalGuests"], 2, "{body}");
             assert_eq!(ann["responseStatus"], "tentative", "{body}");
-            let bob = body["attendees"].as_array().unwrap().iter().find(|g| g["email"] == "bob@example.com").unwrap();
+            let bob = body["attendees"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|g| g["email"] == "bob@example.com")
+                .unwrap();
             assert!(bob.get("optional").is_none(), "{body}");
             ResponseTemplate::new(200).set_body_json(json!({"id": "review", "etag": "\"3\""}))
         })
@@ -423,13 +489,29 @@ async fn an_organizer_edit_keeps_what_google_holds_on_each_guest_and_the_visibil
         title: "Review, renamed".into(),
         organizer: Some("me@example.com".into()),
         guests: vec![
-            Guest { email: "me@example.com".into(), organizer: true, me: true, answer: Some(Answer::Yes), ..Guest::default() },
-            Guest { email: "ann@example.com".into(), answer: Some(Answer::Maybe), ..Guest::default() },
-            Guest { email: "bob@example.com".into(), ..Guest::default() },
+            Guest {
+                email: "me@example.com".into(),
+                organizer: true,
+                me: true,
+                answer: Some(Answer::Yes),
+                ..Guest::default()
+            },
+            Guest {
+                email: "ann@example.com".into(),
+                answer: Some(Answer::Maybe),
+                ..Guest::default()
+            },
+            Guest {
+                email: "bob@example.com".into(),
+                ..Guest::default()
+            },
         ],
         ..Default::default()
     };
-    client(&server).put_event(&event, Some("\"2\""), false, Notify::Guests).await.unwrap();
+    client(&server)
+        .put_event(&event, Some("\"2\""), false, Notify::Guests)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -438,7 +520,9 @@ async fn an_event_made_private_goes_out_private_whatever_google_held() {
     mount_token(&server).await;
     Mock::given(method("GET"))
         .and(path(format!("{CALENDAR}/calendars/work/events/a")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "a", "visibility": "public"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "a", "visibility": "public"})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
@@ -448,8 +532,17 @@ async fn an_event_made_private_goes_out_private_whatever_google_held() {
         .expect(1)
         .mount(&server)
         .await;
-    let event = mailrs_domain::calendar::Event { calendar: "work".into(), id: "a".into(), zone: "UTC".into(), private: true, ..Default::default() };
-    client(&server).put_event(&event, None, false, Notify::Guests).await.unwrap();
+    let event = mailrs_domain::calendar::Event {
+        calendar: "work".into(),
+        id: "a".into(),
+        zone: "UTC".into(),
+        private: true,
+        ..Default::default()
+    };
+    client(&server)
+        .put_event(&event, None, false, Notify::Guests)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -470,12 +563,30 @@ async fn an_event_colour_goes_out_as_googles_colour_id() {
         .expect(1)
         .mount(&server)
         .await;
-    let base = mailrs_domain::calendar::Event { calendar: "work".into(), zone: "UTC".into(), ..Default::default() };
-    let tangerine = mailrs_domain::calendar::Event { id: "a".into(), color: Some("#F4511E".into()), ..base.clone() };
-    let made = client(&server).put_event(&tangerine, None, false, Notify::Guests).await.unwrap();
+    let base = mailrs_domain::calendar::Event {
+        calendar: "work".into(),
+        zone: "UTC".into(),
+        ..Default::default()
+    };
+    let tangerine = mailrs_domain::calendar::Event {
+        id: "a".into(),
+        color: Some("#F4511E".into()),
+        ..base.clone()
+    };
+    let made = client(&server)
+        .put_event(&tangerine, None, false, Notify::Guests)
+        .await
+        .unwrap();
     assert_eq!(made.color.as_deref(), Some("#f4511e"));
-    let plain = mailrs_domain::calendar::Event { id: "b".into(), color: None, ..base };
-    client(&server).put_event(&plain, None, false, Notify::Guests).await.unwrap();
+    let plain = mailrs_domain::calendar::Event {
+        id: "b".into(),
+        color: None,
+        ..base
+    };
+    client(&server)
+        .put_event(&plain, None, false, Notify::Guests)
+        .await
+        .unwrap();
 }
 
 /// A guest's change, as the series change hands it over: every field as
@@ -489,13 +600,28 @@ fn attended(id: &str, series: Option<&str>) -> mailrs_domain::calendar::Event {
         zone: "Europe/Lisbon".into(),
         start: 1_790_150_400_000,
         end: 1_790_151_300_000,
-        rules: if series.is_none() { vec!["RRULE:FREQ=DAILY;COUNT=10".into()] } else { Vec::new() },
+        rules: if series.is_none() {
+            vec!["RRULE:FREQ=DAILY;COUNT=10".into()]
+        } else {
+            Vec::new()
+        },
         series: series.map(str::to_string),
         guests: vec![
-            Guest { email: "rita@example.com".into(), organizer: true, ..Guest::default() },
-            Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
+            Guest {
+                email: "rita@example.com".into(),
+                organizer: true,
+                ..Guest::default()
+            },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            },
         ],
-        reminders: Some(vec![Reminder { minutes: 30, method: ReminderMethod::Notification }]),
+        reminders: Some(vec![Reminder {
+            minutes: 30,
+            method: ReminderMethod::Notification,
+        }]),
         color: Some("#f4511e".into()),
         busy: false,
         ..Default::default()
@@ -528,8 +654,24 @@ async fn a_guests_change_patches_only_reminders_colour_and_busy() {
             .await;
     }
     let gmail = client(&server);
-    gmail.put_event(&attended("standup_20260923T080000Z", Some("standup")), None, false, Notify::Guests).await.unwrap();
-    gmail.put_event(&attended("standup", None), Some("\"7\""), false, Notify::Guests).await.unwrap();
+    gmail
+        .put_event(
+            &attended("standup_20260923T080000Z", Some("standup")),
+            None,
+            false,
+            Notify::Guests,
+        )
+        .await
+        .unwrap();
+    gmail
+        .put_event(
+            &attended("standup", None),
+            Some("\"7\""),
+            false,
+            Notify::Guests,
+        )
+        .await
+        .unwrap();
 }
 
 fn moved_standup() -> mailrs_domain::calendar::Event {
@@ -550,9 +692,24 @@ fn moved_standup() -> mailrs_domain::calendar::Event {
 async fn refuse_any_retry(server: &MockServer) {
     // The read of the guests Google holds comes before the PATCH and is
     // no retry.
-    let not_the_guest_read = |request: &Request| !request.url.query().unwrap_or_default().contains("fields=attendees");
-    Mock::given(method("GET")).and(not_the_guest_read).respond_with(ResponseTemplate::new(500)).expect(0).mount(server).await;
-    Mock::given(method("PUT")).respond_with(ResponseTemplate::new(500)).expect(0).mount(server).await;
+    let not_the_guest_read = |request: &Request| {
+        !request
+            .url
+            .query()
+            .unwrap_or_default()
+            .contains("fields=attendees")
+    };
+    Mock::given(method("GET"))
+        .and(not_the_guest_read)
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(server)
+        .await;
 }
 
 #[tokio::test]
@@ -560,13 +717,18 @@ async fn an_occurrence_patch_answered_404_means_the_event_is_gone() {
     let server = MockServer::start().await;
     mount_token(&server).await;
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/calendars/work/events/standup_20260923T080000Z")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/work/events/standup_20260923T080000Z"
+        )))
         .respond_with(ResponseTemplate::new(404))
         .expect(1)
         .mount(&server)
         .await;
     refuse_any_retry(&server).await;
-    let err = client(&server).put_event(&moved_standup(), None, false, Notify::Guests).await.unwrap_err();
+    let err = client(&server)
+        .put_event(&moved_standup(), None, false, Notify::Guests)
+        .await
+        .unwrap_err();
     assert!(matches!(err, GmailError::NotFound), "got {err:?}");
 }
 
@@ -575,7 +737,9 @@ async fn an_occurrence_patch_answered_400_turns_the_edit_down_with_googles_reaso
     let server = MockServer::start().await;
     mount_token(&server).await;
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/calendars/work/events/standup_20260923T080000Z")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/work/events/standup_20260923T080000Z"
+        )))
         .respond_with(ResponseTemplate::new(400).set_body_json(json!({
             "error": {"code": 400, "message": "The specified time range is empty."}
         })))
@@ -583,9 +747,18 @@ async fn an_occurrence_patch_answered_400_turns_the_edit_down_with_googles_reaso
         .mount(&server)
         .await;
     refuse_any_retry(&server).await;
-    let err = client(&server).put_event(&moved_standup(), None, false, Notify::Guests).await.unwrap_err();
-    assert!(matches!(err, GmailError::Http { status: 400, .. }), "got {err:?}");
-    assert!(err.to_string().contains("The specified time range is empty."));
+    let err = client(&server)
+        .put_event(&moved_standup(), None, false, Notify::Guests)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, GmailError::Http { status: 400, .. }),
+        "got {err:?}"
+    );
+    assert!(
+        err.to_string()
+            .contains("The specified time range is empty.")
+    );
 }
 
 #[tokio::test]
@@ -593,7 +766,9 @@ async fn an_occurrence_patch_refused_for_a_stale_etag_says_changed() {
     let server = MockServer::start().await;
     mount_token(&server).await;
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/calendars/work/events/standup_20260923T080000Z")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/work/events/standup_20260923T080000Z"
+        )))
         .and(header("If-Match", "\"1\""))
         .respond_with(ResponseTemplate::new(412))
         .mount(&server)
@@ -606,12 +781,18 @@ async fn an_occurrence_patch_refused_for_a_stale_etag_says_changed() {
         original_start: Some(1_790_150_400_000),
         ..Default::default()
     };
-    let err = client(&server).put_event(&event, Some("\"1\""), false, Notify::Guests).await.unwrap_err();
+    let err = client(&server)
+        .put_event(&event, Some("\"1\""), false, Notify::Guests)
+        .await
+        .unwrap_err();
     assert!(matches!(err, GmailError::Changed), "got {err:?}");
 }
 
 fn guest(email: &str) -> mailrs_domain::calendar::Guest {
-    mailrs_domain::calendar::Guest { email: email.into(), ..Default::default() }
+    mailrs_domain::calendar::Guest {
+        email: email.into(),
+        ..Default::default()
+    }
 }
 
 #[tokio::test]
@@ -621,8 +802,12 @@ async fn a_new_event_with_a_guest_goes_out_with_the_guest_and_invitations_on() {
     Mock::given(method("POST"))
         .and(path(format!("{CALENDAR}/calendars/work/events")))
         .and(query_param("sendUpdates", "all"))
-        .and(body_partial_json(json!({"attendees": [{"email": "ann@example.com"}]})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "pm0123abcd", "etag": "\"1\""})))
+        .and(body_partial_json(
+            json!({"attendees": [{"email": "ann@example.com"}]}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "pm0123abcd", "etag": "\"1\""})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -633,7 +818,10 @@ async fn a_new_event_with_a_guest_goes_out_with_the_guest_and_invitations_on() {
         guests: vec![guest("ann@example.com")],
         ..Default::default()
     };
-    client(&server).put_event(&event, None, true, Notify::Guests).await.unwrap();
+    client(&server)
+        .put_event(&event, None, true, Notify::Guests)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -643,7 +831,9 @@ async fn a_move_the_person_keeps_quiet_goes_out_with_updates_off() {
     Mock::given(method("PATCH"))
         .and(path(format!("{CALENDAR}/calendars/work/events/review")))
         .and(query_param("sendUpdates", "none"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "review", "etag": "\"2\""})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "review", "etag": "\"2\""})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -655,7 +845,10 @@ async fn a_move_the_person_keeps_quiet_goes_out_with_updates_off() {
         guests: vec![guest("ann@example.com")],
         ..Default::default()
     };
-    client(&server).put_event(&event, Some("\"1\""), false, Notify::Nobody).await.unwrap();
+    client(&server)
+        .put_event(&event, Some("\"1\""), false, Notify::Nobody)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -677,8 +870,14 @@ async fn a_delete_sends_the_cancellation_only_when_asked() {
         .mount(&server)
         .await;
     let gmail = client(&server);
-    gmail.remove_event("work", "told", None, Notify::Guests).await.unwrap();
-    gmail.remove_event("work", "quiet", None, Notify::Nobody).await.unwrap();
+    gmail
+        .remove_event("work", "told", None, Notify::Guests)
+        .await
+        .unwrap();
+    gmail
+        .remove_event("work", "quiet", None, Notify::Nobody)
+        .await
+        .unwrap();
 }
 
 /// Google leaves `timeZone` off an event's start and end when the event
@@ -730,7 +929,10 @@ async fn a_written_event_without_a_zone_in_the_answer_keeps_its_own() {
         zone: "Europe/Lisbon".into(),
         ..Default::default()
     };
-    let saved = client(&server).put_event(&event, None, false, Notify::Nobody).await.unwrap();
+    let saved = client(&server)
+        .put_event(&event, None, false, Notify::Nobody)
+        .await
+        .unwrap();
     assert_eq!(saved.zone, "Europe/Lisbon");
 }
 
@@ -743,18 +945,18 @@ async fn moving_an_event_to_another_calendar_posts_to_its_move() {
     let server = MockServer::start().await;
     mount_token(&server).await;
     Mock::given(method("POST"))
-        .and(path(format!("{CALENDAR}/calendars/work/events/review/move")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/work/events/review/move"
+        )))
         .and(query_param("destination", "home@example.com"))
         .and(query_param("sendUpdates", "none"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({
-                "id": "review",
-                "etag": "\"7\"",
-                "summary": "Review",
-                "start": {"dateTime": "2026-10-01T09:00:00Z", "timeZone": "Europe/Lisbon"},
-                "end": {"dateTime": "2026-10-01T10:00:00Z", "timeZone": "Europe/Lisbon"}
-            })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "review",
+            "etag": "\"7\"",
+            "summary": "Review",
+            "start": {"dateTime": "2026-10-01T09:00:00Z", "timeZone": "Europe/Lisbon"},
+            "end": {"dateTime": "2026-10-01T10:00:00Z", "timeZone": "Europe/Lisbon"}
+        })))
         .expect(1)
         .mount(&server)
         .await;
@@ -764,8 +966,14 @@ async fn moving_an_event_to_another_calendar_posts_to_its_move() {
         zone: "Europe/Lisbon".into(),
         ..Default::default()
     };
-    let moved = client(&server).move_event(&review, "home@example.com", Notify::Nobody).await.unwrap();
-    assert_eq!((moved.calendar.as_str(), moved.etag.as_str()), ("home@example.com", "\"7\""));
+    let moved = client(&server)
+        .move_event(&review, "home@example.com", Notify::Nobody)
+        .await
+        .unwrap();
+    assert_eq!(
+        (moved.calendar.as_str(), moved.etag.as_str()),
+        ("home@example.com", "\"7\"")
+    );
 }
 
 /// A guest who removes an invitation deletes only their own copy. Google
@@ -783,19 +991,37 @@ async fn a_guests_removal_is_one_quiet_delete_and_no_answer() {
         .expect(1)
         .mount(&server)
         .await;
-    Mock::given(method("PATCH")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&server).await;
-    Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&server).await;
+    Mock::given(method("PATCH"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
     let invitation = mailrs_domain::calendar::Event {
         calendar: "primary".into(),
         id: EVENT.into(),
         guests: vec![
-            mailrs_domain::calendar::Guest { email: "priya@fernwood.example".into(), organizer: true, ..guest("priya@fernwood.example") },
-            mailrs_domain::calendar::Guest { me: true, ..guest("me@example.com") },
+            mailrs_domain::calendar::Guest {
+                email: "priya@fernwood.example".into(),
+                organizer: true,
+                ..guest("priya@fernwood.example")
+            },
+            mailrs_domain::calendar::Guest {
+                me: true,
+                ..guest("me@example.com")
+            },
         ],
         ..Default::default()
     };
     let notify = mailrs_domain::calendar::removal_notify(&invitation, Notify::Guests);
-    client(&server).remove_event(&invitation.calendar, &invitation.id, None, notify).await.unwrap();
+    client(&server)
+        .remove_event(&invitation.calendar, &invitation.id, None, notify)
+        .await
+        .unwrap();
 }
 
 /// One occurrence of a weekly series, by the id Google gives it before
@@ -822,7 +1048,9 @@ fn instance() -> Value {
 
 async fn mount_instance(server: &MockServer) {
     Mock::given(method("GET"))
-        .and(path(format!("{CALENDAR}/calendars/primary/events/{INSTANCE}")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/primary/events/{INSTANCE}"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(instance()))
         .expect(1)
         .mount(server)
@@ -838,7 +1066,9 @@ async fn answering_one_occurrence_patches_that_instance_alone() {
     answered["etag"] = json!("\"2\"");
     answered["attendees"][1]["responseStatus"] = json!("declined");
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/calendars/primary/events/{INSTANCE}")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/primary/events/{INSTANCE}"
+        )))
         .and(query_param("sendUpdates", "all"))
         .and(body_json(json!({"attendees": [
             {"email": "priya@fernwood.example", "responseStatus": "accepted", "organizer": true,
@@ -863,7 +1093,12 @@ async fn answering_one_occurrence_patches_that_instance_alone() {
         .await
         .unwrap();
     assert_eq!(
-        (event.id.as_str(), event.series.as_deref(), event.etag.as_str(), event.my_answer),
+        (
+            event.id.as_str(),
+            event.series.as_deref(),
+            event.etag.as_str(),
+            event.my_answer
+        ),
         (INSTANCE, Some("standup"), "\"2\"", Some(Answer::No))
     );
 }
@@ -874,7 +1109,9 @@ async fn a_note_goes_out_as_the_guests_own_comment() {
     mount_token(&server).await;
     mount_instance(&server).await;
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/calendars/primary/events/{INSTANCE}")))
+        .and(path(format!(
+            "{CALENDAR}/calendars/primary/events/{INSTANCE}"
+        )))
         .and(body_partial_json(json!({"attendees": [
             {"email": "priya@fernwood.example", "comment": "Bring the numbers"},
             {"email": "me@example.com", "responseStatus": "tentative",
@@ -887,7 +1124,13 @@ async fn a_note_goes_out_as_the_guests_own_comment() {
         .await;
 
     client(&server)
-        .answer_event("primary", INSTANCE, "me@example.com", Answer::Maybe, Some("Running ten minutes late"))
+        .answer_event(
+            "primary",
+            INSTANCE,
+            "me@example.com",
+            Answer::Maybe,
+            Some("Running ten minutes late"),
+        )
         .await
         .unwrap();
 }
@@ -938,7 +1181,11 @@ async fn typed_page() -> Vec<mailrs_domain::calendar::Event> {
         })))
         .mount(&server)
         .await;
-    client(&server).event_changes("primary", None, None, "2026-09-01T00:00:00Z").await.unwrap().events
+    client(&server)
+        .event_changes("primary", None, None, "2026-09-01T00:00:00Z")
+        .await
+        .unwrap()
+        .events
 }
 
 fn kind_of(events: &[mailrs_domain::calendar::Event], id: &str) -> mailrs_domain::calendar::Kind {
@@ -951,7 +1198,10 @@ async fn an_out_of_office_entry_reads_with_what_it_declines() {
     let events = typed_page().await;
     assert_eq!(
         kind_of(&events, "ooo"),
-        Kind::OutOfOffice(Decline { meetings: Declines::All, message: "Away until Thursday".into() })
+        Kind::OutOfOffice(Decline {
+            meetings: Declines::All,
+            message: "Away until Thursday".into()
+        })
     );
 }
 
@@ -961,7 +1211,10 @@ async fn a_focus_time_entry_reads_with_what_it_declines() {
     let events = typed_page().await;
     assert_eq!(
         kind_of(&events, "focus"),
-        Kind::Focus(Decline { meetings: Declines::New, message: "Heads down".into() })
+        Kind::Focus(Decline {
+            meetings: Declines::New,
+            message: "Heads down".into()
+        })
     );
 }
 
@@ -969,21 +1222,36 @@ async fn a_focus_time_entry_reads_with_what_it_declines() {
 async fn a_working_location_reads_as_home_an_office_or_a_named_place() {
     use mailrs_domain::calendar::{Kind, Workplace};
     let events = typed_page().await;
-    assert_eq!(kind_of(&events, "home"), Kind::WorkingLocation(Workplace::Home));
-    assert_eq!(kind_of(&events, "office"), Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into())));
-    assert_eq!(kind_of(&events, "cafe"), Kind::WorkingLocation(Workplace::Elsewhere("Café Tati".into())));
+    assert_eq!(
+        kind_of(&events, "home"),
+        Kind::WorkingLocation(Workplace::Home)
+    );
+    assert_eq!(
+        kind_of(&events, "office"),
+        Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into()))
+    );
+    assert_eq!(
+        kind_of(&events, "cafe"),
+        Kind::WorkingLocation(Workplace::Elsewhere("Café Tati".into()))
+    );
 }
 
 #[tokio::test]
 async fn a_birthday_reads_as_a_birthday() {
     let events = typed_page().await;
-    assert_eq!(kind_of(&events, "bday"), mailrs_domain::calendar::Kind::Birthday);
+    assert_eq!(
+        kind_of(&events, "bday"),
+        mailrs_domain::calendar::Kind::Birthday
+    );
 }
 
 #[tokio::test]
 async fn an_event_with_no_type_is_an_ordinary_event() {
     let events = typed_page().await;
-    assert_eq!(kind_of(&events, "plain"), mailrs_domain::calendar::Kind::Event);
+    assert_eq!(
+        kind_of(&events, "plain"),
+        mailrs_domain::calendar::Kind::Event
+    );
 }
 
 fn out_of_office(declines: mailrs_domain::calendar::Declines) -> mailrs_domain::calendar::Event {
@@ -996,7 +1264,10 @@ fn out_of_office(declines: mailrs_domain::calendar::Declines) -> mailrs_domain::
         end: 1_790_028_800_000,
         zone: "Europe/Lisbon".into(),
         busy: true,
-        kind: Kind::OutOfOffice(Decline { meetings: declines, message: "Back on Monday".into() }),
+        kind: Kind::OutOfOffice(Decline {
+            meetings: declines,
+            message: "Back on Monday".into(),
+        }),
         ..Default::default()
     }
 }
@@ -1032,10 +1303,18 @@ async fn a_new_out_of_office_goes_out_typed_with_what_it_declines() {
         .mount(&server)
         .await;
     let made = client(&server)
-        .put_event(&out_of_office(mailrs_domain::calendar::Declines::All), None, true, Notify::Guests)
+        .put_event(
+            &out_of_office(mailrs_domain::calendar::Declines::All),
+            None,
+            true,
+            Notify::Guests,
+        )
         .await
         .unwrap();
-    assert_eq!(made.kind, out_of_office(mailrs_domain::calendar::Declines::All).kind);
+    assert_eq!(
+        made.kind,
+        out_of_office(mailrs_domain::calendar::Declines::All).kind
+    );
 }
 
 #[tokio::test]
@@ -1049,16 +1328,25 @@ async fn a_new_focus_time_goes_out_typed() {
             "eventType": "focusTime",
             "focusTimeProperties": {"autoDeclineMode": "declineNone"}
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "pm0focus", "eventType": "focusTime"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": "pm0focus", "eventType": "focusTime"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
     let event = mailrs_domain::calendar::Event {
         id: "pm0focus".into(),
-        kind: Kind::Focus(Decline { meetings: Declines::Nothing, message: String::new() }),
+        kind: Kind::Focus(Decline {
+            meetings: Declines::Nothing,
+            message: String::new(),
+        }),
         ..out_of_office(Declines::Nothing)
     };
-    client(&server).put_event(&event, None, true, Notify::Guests).await.unwrap();
+    client(&server)
+        .put_event(&event, None, true, Notify::Guests)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1072,14 +1360,23 @@ async fn an_edit_of_an_out_of_office_leaves_its_type_alone() {
         .respond_with(|request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
             assert!(body.get("eventType").is_none(), "{body}");
-            assert_eq!(body.pointer("/outOfOfficeProperties/autoDeclineMode"), Some(&json!("declineOnlyNewConflictingInvitations")));
-            ResponseTemplate::new(200).set_body_json(json!({"id": "pm0ooo", "eventType": "outOfOffice"}))
+            assert_eq!(
+                body.pointer("/outOfOfficeProperties/autoDeclineMode"),
+                Some(&json!("declineOnlyNewConflictingInvitations"))
+            );
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": "pm0ooo", "eventType": "outOfOffice"}))
         })
         .expect(1)
         .mount(&server)
         .await;
     client(&server)
-        .put_event(&out_of_office(mailrs_domain::calendar::Declines::New), Some("\"1\""), false, Notify::Guests)
+        .put_event(
+            &out_of_office(mailrs_domain::calendar::Declines::New),
+            Some("\"1\""),
+            false,
+            Notify::Guests,
+        )
         .await
         .unwrap();
 }
@@ -1117,7 +1414,10 @@ async fn an_imported_event_goes_out_under_its_uid_with_no_guests() {
 
     let made = client(&server).import_event(&event).await.unwrap();
 
-    assert_eq!((made.id.as_str(), made.uid.as_str()), ("gen1", "ticket-4471@rail.example"));
+    assert_eq!(
+        (made.id.as_str(), made.uid.as_str()),
+        ("gen1", "ticket-4471@rail.example")
+    );
     let body = sent.lock().unwrap().clone();
     assert_eq!(body["iCalUID"], "ticket-4471@rail.example");
     assert_eq!(body["start"]["timeZone"], "Europe/Lisbon");
@@ -1151,7 +1451,10 @@ fn an_event_reads_its_attachments() {
         }]
     });
     let event = mailrs_gmail::google_event("work", &item, None, "UTC");
-    assert_eq!(event.attachments, Some(vec![drive_file("Agenda.pdf", "application/pdf", "1abc")]));
+    assert_eq!(
+        event.attachments,
+        Some(vec![drive_file("Agenda.pdf", "application/pdf", "1abc")])
+    );
 }
 
 #[test]
@@ -1196,7 +1499,10 @@ async fn a_change_sends_the_attachments_back_with_supports_attachments() {
         ]),
         ..Default::default()
     };
-    let made = client(&server).put_event(&event, Some("\"8\""), false, Notify::Guests).await.unwrap();
+    let made = client(&server)
+        .put_event(&event, Some("\"8\""), false, Notify::Guests)
+        .await
+        .unwrap();
     assert_eq!(made.attachments.map(|a| a.len()), Some(2));
 }
 
@@ -1209,8 +1515,12 @@ async fn a_change_with_unknown_attachments_leaves_googles_list_alone() {
         .and(query_param("supportsAttachments", "true"))
         .respond_with(|request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
-            assert!(body.get("attachments").is_none(), "an unread list must not go out as empty");
-            ResponseTemplate::new(200).set_body_json(json!({"id": "review", "start": body["start"], "end": body["end"]}))
+            assert!(
+                body.get("attachments").is_none(),
+                "an unread list must not go out as empty"
+            );
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": "review", "start": body["start"], "end": body["end"]}))
         })
         .expect(1)
         .mount(&server)
@@ -1224,7 +1534,10 @@ async fn a_change_with_unknown_attachments_leaves_googles_list_alone() {
         attachments: None,
         ..Default::default()
     };
-    client(&server).put_event(&event, None, false, Notify::Guests).await.unwrap();
+    client(&server)
+        .put_event(&event, None, false, Notify::Guests)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1253,5 +1566,8 @@ async fn a_new_event_goes_out_with_its_attachments() {
         attachments: Some(vec![drive_file("Agenda.pdf", "application/pdf", "1abc")]),
         ..Default::default()
     };
-    client(&server).put_event(&event, None, true, Notify::Guests).await.unwrap();
+    client(&server)
+        .put_event(&event, None, true, Notify::Guests)
+        .await
+        .unwrap();
 }

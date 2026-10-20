@@ -51,8 +51,10 @@ fn event(calendar: &str, id: &str, title: &str) -> Event {
 /// hidden, with one event on each.
 async fn filled() -> (Harness, CalendarCopy<Connected>) {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
-    h.fake.put_calendar_event(event("primary", "a", "Design review"));
+    h.fake
+        .with(|s| s.calendars = vec![calendar("primary", true), calendar("team", false)]);
+    h.fake
+        .put_calendar_event(event("primary", "a", "Design review"));
     h.fake.put_calendar_event(event("team", "b", "Team lunch"));
     let copy = copy(&h);
     copy.refresh(h.account_id, NOW).await.unwrap();
@@ -63,7 +65,12 @@ async fn filled() -> (Harness, CalendarCopy<Connected>) {
 async fn a_range_read_leaves_a_hidden_calendar_out() {
     let (h, copy) = filled().await;
     let found = copy
-        .occurrences(&[h.account_id], NOW - HOUR, NOW + 2 * HOUR, CalendarScope::Shown)
+        .occurrences(
+            &[h.account_id],
+            NOW - HOUR,
+            NOW + 2 * HOUR,
+            CalendarScope::Shown,
+        )
         .await
         .unwrap();
     let ids: Vec<&str> = found.iter().map(|o| o.event.id.as_str()).collect();
@@ -74,7 +81,12 @@ async fn a_range_read_leaves_a_hidden_calendar_out() {
 async fn a_range_read_of_every_calendar_takes_the_hidden_one_too() {
     let (h, copy) = filled().await;
     let found = copy
-        .occurrences(&[h.account_id], NOW - HOUR, NOW + 2 * HOUR, CalendarScope::All)
+        .occurrences(
+            &[h.account_id],
+            NOW - HOUR,
+            NOW + 2 * HOUR,
+            CalendarScope::All,
+        )
         .await
         .unwrap();
     assert_eq!(found.len(), 2);
@@ -101,14 +113,21 @@ async fn one_event_comes_back_by_its_calendar_and_id() {
 #[tokio::test]
 async fn an_event_the_copy_lacks_comes_back_as_none() {
     let (h, copy) = filled().await;
-    assert!(copy.event(h.account_id, "primary", "gone").await.unwrap().is_none());
+    assert!(
+        copy.event(h.account_id, "primary", "gone")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
 async fn the_calendar_list_names_what_the_person_took_off_it() {
     let (h, copy) = filled().await;
     let account = h.account_id;
-    h.db.write(move |c| store::set_listed(c, account, "team", false)).await.unwrap();
+    h.db.write(move |c| store::set_listed(c, account, "team", false))
+        .await
+        .unwrap();
     let listed = copy.listed(&[account]).await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].account_id, account);
@@ -120,9 +139,16 @@ async fn the_calendar_list_names_what_the_person_took_off_it() {
 #[tokio::test]
 async fn showing_a_calendar_again_brings_its_events_back_into_a_range_read() {
     let (h, copy) = filled().await;
-    copy.show_calendar(h.account_id, "team", true).await.unwrap();
+    copy.show_calendar(h.account_id, "team", true)
+        .await
+        .unwrap();
     let found = copy
-        .occurrences(&[h.account_id], NOW - HOUR, NOW + 2 * HOUR, CalendarScope::Shown)
+        .occurrences(
+            &[h.account_id],
+            NOW - HOUR,
+            NOW + 2 * HOUR,
+            CalendarScope::Shown,
+        )
         .await
         .unwrap();
     assert_eq!(found.len(), 2);

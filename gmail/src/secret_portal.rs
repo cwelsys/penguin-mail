@@ -102,7 +102,8 @@ fn run<T: Send + 'static>(fut: impl Future<Output = T> + Send + 'static) -> T {
     runtime.spawn(async move {
         let _ = tx.send(fut.await);
     });
-    rx.recv().expect("the secret portal's runtime dropped a call")
+    rx.recv()
+        .expect("the secret portal's runtime dropped a call")
 }
 
 #[cfg(test)]
@@ -165,8 +166,14 @@ mod tests {
         let keyring = empty_keyring().await;
         let attrs = attributes("penguin-mail-imap", "7");
 
-        keyring.create_item("7", &attrs, "first", true).await.unwrap();
-        keyring.create_item("7", &attrs, "second", true).await.unwrap();
+        keyring
+            .create_item("7", &attrs, "first", true)
+            .await
+            .unwrap();
+        keyring
+            .create_item("7", &attrs, "second", true)
+            .await
+            .unwrap();
 
         let items = keyring.search_items(&attrs).await.unwrap();
         assert_eq!(items.len(), 1);

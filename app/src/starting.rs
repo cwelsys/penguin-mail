@@ -53,15 +53,24 @@ pub(crate) trait Starting<S>: Send + Sync + 'static {
 /// tried again after a pause that doubles each time. The accounts used
 /// to start one after another, and one connect that never finished kept
 /// every account after it from syncing.
-pub(crate) async fn start_each<S, P, C, F>(accounts: Vec<Account>, connect: C, port: Arc<P>, waits: Waits)
-where
+pub(crate) async fn start_each<S, P, C, F>(
+    accounts: Vec<Account>,
+    connect: C,
+    port: Arc<P>,
+    waits: Waits,
+) where
     S: Send + 'static,
     P: Starting<S>,
     C: Fn(Account) -> F + Clone + Send + Sync + 'static,
     F: Future<Output = anyhow::Result<Connected<S>>> + Send + 'static,
 {
     for account in accounts {
-        tokio::spawn(start_one(account, connect.clone(), Arc::clone(&port), waits));
+        tokio::spawn(start_one(
+            account,
+            connect.clone(),
+            Arc::clone(&port),
+            waits,
+        ));
     }
 }
 
@@ -75,7 +84,9 @@ where
     loop {
         let state = match tokio::time::timeout(waits.connect, connect(account.clone())).await {
             Ok(Ok(Connected::Ready(services))) => return port.start(account.id, services),
-            Ok(Ok(Connected::NeedsSignIn)) => return port.report(account.id, AccountState::NeedsReauth).await,
+            Ok(Ok(Connected::NeedsSignIn)) => {
+                return port.report(account.id, AccountState::NeedsReauth).await;
+            }
             Ok(Err(err)) => {
                 tracing::warn!(
                     account = account.id,
@@ -174,25 +185,47 @@ mod tests {
         }
 
         fn tries(&self, account: AccountId) -> usize {
-            self.0.lock().unwrap().get(&(account + 1000)).map_or(0, Vec::len)
+            self.0
+                .lock()
+                .unwrap()
+                .get(&(account + 1000))
+                .map_or(0, Vec::len)
         }
 
-        fn connect(&self) -> impl Fn(Account) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<Connected<&'static str>>> + Send>> + Clone + Send + Sync + 'static {
+        fn connect(
+            &self,
+        ) -> impl Fn(
+            Account,
+        ) -> std::pin::Pin<
+            Box<dyn Future<Output = anyhow::Result<Connected<&'static str>>> + Send>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static {
             let script = self.clone();
             move |account: Account| {
                 let next = {
                     let mut answers = script.0.lock().unwrap();
                     // Counts the tries under an id no account uses.
-                    answers.entry(account.id + 1000).or_default().push(Answer::Ready);
+                    answers
+                        .entry(account.id + 1000)
+                        .or_default()
+                        .push(Answer::Ready);
                     let mine = answers.entry(account.id).or_default();
-                    if mine.is_empty() { Answer::Hang } else { mine.remove(0) }
+                    if mine.is_empty() {
+                        Answer::Hang
+                    } else {
+                        mine.remove(0)
+                    }
                 };
                 Box::pin(async move {
                     match next {
                         Answer::Ready => Ok(Connected::Ready("services")),
                         Answer::SignIn => Ok(Connected::NeedsSignIn),
                         Answer::Fail => Err(anyhow::anyhow!("the keyring refused")),
-                        Answer::Keyring => Err(mailrs_sync::SyncError::NoAnswer(mailrs_sync::KEYRING).into()),
+                        Answer::Keyring => {
+                            Err(mailrs_sync::SyncError::NoAnswer(mailrs_sync::KEYRING).into())
+                        }
                         Answer::Hang => std::future::pending().await,
                     }
                 })
@@ -214,16 +247,26 @@ mod tests {
     async fn until(done: impl Fn() -> bool) {
         let started = tokio::time::Instant::now();
         while !done() {
-            assert!(started.elapsed() < Duration::from_secs(2), "the accounts started in time");
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "the accounts started in time"
+            );
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
 
     #[tokio::test]
     async fn an_account_that_never_connects_does_not_hold_up_the_next() {
-        let script = Script::default().with(9, &[Answer::Hang]).with(10, &[Answer::Ready]);
+        let script = Script::default()
+            .with(9, &[Answer::Hang])
+            .with(10, &[Answer::Ready]);
         let record = Arc::new(Record::default());
-        tokio::spawn(start_each(vec![account(9), account(10)], script.connect(), Arc::clone(&record), SHORT));
+        tokio::spawn(start_each(
+            vec![account(9), account(10)],
+            script.connect(),
+            Arc::clone(&record),
+            SHORT,
+        ));
         until(|| record.started.lock().unwrap().contains(&10)).await;
     }
 
@@ -231,38 +274,71 @@ mod tests {
     async fn an_account_that_takes_too_long_is_reported_and_tried_again() {
         let script = Script::default().with(9, &[Answer::Hang, Answer::Ready]);
         let record = Arc::new(Record::default());
-        tokio::spawn(start_each(vec![account(9)], script.connect(), Arc::clone(&record), SHORT));
+        tokio::spawn(start_each(
+            vec![account(9)],
+            script.connect(),
+            Arc::clone(&record),
+            SHORT,
+        ));
         until(|| record.started.lock().unwrap().contains(&9)).await;
-        assert_eq!(*record.reported.lock().unwrap(), vec![(9, AccountState::BackingOff)]);
+        assert_eq!(
+            *record.reported.lock().unwrap(),
+            vec![(9, AccountState::BackingOff)]
+        );
     }
 
     #[tokio::test]
     async fn an_account_that_fails_to_connect_is_tried_again() {
         let script = Script::default().with(9, &[Answer::Fail, Answer::Ready]);
         let record = Arc::new(Record::default());
-        tokio::spawn(start_each(vec![account(9)], script.connect(), Arc::clone(&record), SHORT));
+        tokio::spawn(start_each(
+            vec![account(9)],
+            script.connect(),
+            Arc::clone(&record),
+            SHORT,
+        ));
         until(|| record.started.lock().unwrap().contains(&9)).await;
         assert_eq!(script.tries(9), 2);
-        assert_eq!(*record.reported.lock().unwrap(), vec![(9, AccountState::BackingOff)]);
+        assert_eq!(
+            *record.reported.lock().unwrap(),
+            vec![(9, AccountState::BackingOff)]
+        );
     }
 
     #[tokio::test]
     async fn an_account_whose_keyring_does_not_answer_is_reported_as_waiting_for_it() {
         let script = Script::default().with(9, &[Answer::Keyring, Answer::Ready]);
         let record = Arc::new(Record::default());
-        tokio::spawn(start_each(vec![account(9)], script.connect(), Arc::clone(&record), SHORT));
+        tokio::spawn(start_each(
+            vec![account(9)],
+            script.connect(),
+            Arc::clone(&record),
+            SHORT,
+        ));
         until(|| record.started.lock().unwrap().contains(&9)).await;
-        assert_eq!(*record.reported.lock().unwrap(), vec![(9, AccountState::WaitingForKeyring)]);
+        assert_eq!(
+            *record.reported.lock().unwrap(),
+            vec![(9, AccountState::WaitingForKeyring)]
+        );
     }
 
     #[tokio::test]
     async fn an_account_that_needs_to_sign_in_is_reported_once_and_left() {
         let script = Script::default().with(9, &[Answer::SignIn]);
         let record = Arc::new(Record::default());
-        start_each(vec![account(9)], script.connect(), Arc::clone(&record), SHORT).await;
+        start_each(
+            vec![account(9)],
+            script.connect(),
+            Arc::clone(&record),
+            SHORT,
+        )
+        .await;
         until(|| !record.reported.lock().unwrap().is_empty()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert_eq!(*record.reported.lock().unwrap(), vec![(9, AccountState::NeedsReauth)]);
+        assert_eq!(
+            *record.reported.lock().unwrap(),
+            vec![(9, AccountState::NeedsReauth)]
+        );
         assert_eq!(script.tries(9), 1);
     }
 
@@ -271,7 +347,12 @@ mod tests {
         let script = Script::default().with(9, &[Answer::Fail, Answer::Ready]);
         let record = Arc::new(Record::default());
         record.unwanted.lock().unwrap().push(9);
-        tokio::spawn(start_each(vec![account(9)], script.connect(), Arc::clone(&record), SHORT));
+        tokio::spawn(start_each(
+            vec![account(9)],
+            script.connect(),
+            Arc::clone(&record),
+            SHORT,
+        ));
         until(|| script.tries(9) == 1).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(script.tries(9), 1);

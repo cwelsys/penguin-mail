@@ -37,16 +37,9 @@ pub fn reads_as_markdown(text: &str) -> bool {
         if is_list_line(rest) {
             list += 1;
         }
-        let table = rest.contains('|')
-            && lines
-                .get(index + 1)
-                .is_some_and(|next| is_table_rule(next));
-        if list >= 2
-            || table
-            || is_heading(rest)
-            || has_bold_pair(rest)
-            || has_link(rest)
-        {
+        let table =
+            rest.contains('|') && lines.get(index + 1).is_some_and(|next| is_table_rule(next));
+        if list >= 2 || table || is_heading(rest) || has_bold_pair(rest) || has_link(rest) {
             return true;
         }
     }
@@ -63,8 +56,7 @@ pub fn plain_text_only(mime_types: &[&str]) -> bool {
             || mime.starts_with("image/")
             || mime.starts_with("text/uri-list")
     };
-    mime_types.iter().any(|mime| mime.starts_with("text/plain"))
-        && !mime_types.iter().any(richer)
+    mime_types.iter().any(|mime| mime.starts_with("text/plain")) && !mime_types.iter().any(richer)
 }
 
 /// `# Title` to `###### Title`: hashes, a space, then words.
@@ -281,10 +273,12 @@ fn line_as_markdown(block: &Block) -> String {
     block
         .spans
         .iter()
-        .map(|span| match span.style == Style::default() && span.link.is_none() {
-            true => span.text.clone(),
-            false => span_to_markdown(span),
-        })
+        .map(
+            |span| match span.style == Style::default() && span.link.is_none() {
+                true => span.text.clone(),
+                false => span_to_markdown(span),
+            },
+        )
         .collect()
 }
 
@@ -355,7 +349,9 @@ mod tests {
 
     #[test]
     fn a_table_is_markdown() {
-        assert!(reads_as_markdown("| Day | Dish |\n|-----|------|\n| Mon | Soup |"));
+        assert!(reads_as_markdown(
+            "| Day | Dish |\n|-----|------|\n| Mon | Soup |"
+        ));
         assert!(reads_as_markdown("Day | Dish\n--- | ---\nMon | Soup"));
     }
 
@@ -425,7 +421,10 @@ mod tests {
         };
         let body = RichBody {
             blocks: vec![
-                Block::new(BlockKind::Paragraph, vec![Span::plain("- hi "), bold.clone()]),
+                Block::new(
+                    BlockKind::Paragraph,
+                    vec![Span::plain("- hi "), bold.clone()],
+                ),
                 paragraph("- bye"),
             ],
         };
@@ -437,7 +436,10 @@ mod tests {
     #[test]
     fn the_quote_and_the_signature_stay_as_they_are() {
         let mut body = lines(&["Thanks", "", "--", "- sig one", "- sig two"]);
-        assert!(!left_in(&body), "the signature is not the writer's to format");
+        assert!(
+            !left_in(&body),
+            "the signature is not the writer's to format"
+        );
         body = lines(&["Thanks"]);
         body.blocks.push(Block::new(
             BlockKind::Quote,
@@ -537,7 +539,8 @@ mod tests {
     #[test]
     fn format_markdown_reads_past_the_quote_and_keeps_the_signature_line() {
         let mut body = lines(&["Thanks."]);
-        body.blocks.push(Block::new(BlockKind::Quote, vec![Span::plain("hi")]));
+        body.blocks
+            .push(Block::new(BlockKind::Quote, vec![Span::plain("hi")]));
         body.blocks.extend(lines(&["# Reply", "--", "Dana"]).blocks);
         let found = every_conversion(&body);
         // "Thanks." reads the same, and the `--` would make the line above

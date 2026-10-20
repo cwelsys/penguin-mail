@@ -1,10 +1,13 @@
-use std::sync::Arc;
+mod storage;
+
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
+use mailrs_dav::{DavClient, Kind as DavKind, Login as DavLogin};
 use mailrs_discover::{Security, Server, UserName};
 use mailrs_domain::{Account, AccountId, AccountState, Provider};
-use mailrs_gmail::{Granted, GmailClient, GmailError, OAuthClient, TokenStore};
+use mailrs_gmail::{GmailClient, GmailError, Granted, OAuthClient, TokenStore};
 use mailrs_graph::MicrosoftClient;
 use mailrs_imap::{ImapClient, Login, SmtpClient};
 use mailrs_jmap::oauth::OAuthSession;
@@ -15,12 +18,12 @@ use mailrs_store::{Db, accounts};
 
 use crate::config::Config;
 use crate::passwords::{PasswordError, PasswordStore, Secrets};
+use crate::services::{Beside, FoundServer};
 use crate::sign_in::account_client;
 use crate::sign_in::own_client::{self, OwnClient, OwnClientError};
-use crate::services::{Beside, FoundServer};
 use crate::{
-    AccountClient, AccountServices, BackendError, ImapSettings, JmapSettings, LocalRules, MicrosoftSettings, Pop3Settings,
-    SyncError,
+    AccountClient, AccountServices, BackendError, ImapSettings, JmapSettings, LocalRules,
+    MicrosoftSettings, Pop3Settings, SyncError,
 };
 
 /// How long starting an account waits on one step, such as a keyring
@@ -45,7 +48,12 @@ async fn bounded<T, E: Into<SyncError>>(
     match tokio::time::timeout(wait, work).await {
         Ok(done) => done.map_err(Into::into),
         Err(_) => {
-            tracing::warn!(account, step, waited_secs = wait.as_secs_f32(), "a step of starting the account did not answer");
+            tracing::warn!(
+                account,
+                step,
+                waited_secs = wait.as_secs_f32(),
+                "a step of starting the account did not answer"
+            );
             Err(SyncError::NoAnswer(step))
         }
     }
@@ -145,7 +153,8 @@ pub enum Lacks {
     /// The client it signed in with: this build has none, or an own
     /// Google client left the keyring or `config.toml`.
     Client,
-    /// Its refresh token or password, or an IMAP or POP3 account's servers.
+    /// Its refresh token or password, or an IMAP or POP3 account's
+    /// servers, or a calendar account's server.
     Secret,
 }
 
@@ -170,7 +179,10 @@ impl Connector {
         let started = match account.provider {
             Provider::Gmail => {
                 let kept = Arc::clone(&self.secrets.google_clients);
-                let Some(oauth) = account_client(db, &self.config, self.clients.google.clone(), kept, account).await? else {
+                let Some(oauth) =
+                    account_client(db, &self.config, self.clients.google.clone(), kept, account)
+                        .await?
+                else {
                     tracing::warn!(account = account.id, "no Google client for this account");
                     return Ok(Connected::NeedsSignIn(Lacks::Client));
                 };
@@ -178,22 +190,40 @@ impl Connector {
                     .await
                     .map(AccountServices::google)
             }
-            Provider::Imap => connect_imap(db, Arc::clone(&self.secrets.passwords), account, window_days).await,
+            Provider::Imap => {
+                connect_imap(
+                    db,
+                    Arc::clone(&self.secrets.passwords),
+                    account,
+                    window_days,
+                )
+                .await
+            }
             Provider::Pop3 => connect_pop3(db, Arc::clone(&self.secrets.passwords), account).await,
-            Provider::Jmap => {
-                connect_jmap(db, &self.secrets, account, window_days).await
+            Provider::Jmap => connect_jmap(db, &self.secrets, account, window_days).await,
+            Provider::CalDav => {
+                connect_caldav(db, Arc::clone(&self.secrets.passwords), account).await
             }
             Provider::Microsoft => {
                 let Some(client) = self.clients.microsoft.clone() else {
                     tracing::warn!(account = account.id, "no Microsoft client in this build");
                     return Ok(Connected::NeedsSignIn(Lacks::Client));
                 };
-                connect_microsoft(db, Arc::clone(&self.secrets.microsoft), client, account, window_days).await
+                connect_microsoft(
+                    db,
+                    Arc::clone(&self.secrets.microsoft),
+                    client,
+                    account,
+                    window_days,
+                )
+                .await
             }
         };
         match started {
             Ok(services) => Ok(Connected::Ready(services)),
-            Err(SyncError::Backend(BackendError::NeedsReauth)) => Ok(Connected::NeedsSignIn(Lacks::Secret)),
+            Err(SyncError::Backend(BackendError::NeedsReauth)) => {
+                Ok(Connected::NeedsSignIn(Lacks::Secret))
+            }
             Err(err) => Err(err),
         }
     }
@@ -234,7 +264,13 @@ pub(crate) async fn connect_account_within(
     };
     let stored = bounded(id, KEYRING, wait, read).await?;
     let refresh_token = stored.ok_or(GmailError::NeedsReauth)?;
-    let consent = bounded(id, "the mail store", wait, db.read(move |c| accounts::consent(c, id))).await?;
+    let consent = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| accounts::consent(c, id)),
+    )
+    .await?;
     let granted = consent.granted.as_deref().map(Granted::parse);
     let db = db.clone();
     let client = GmailClient::for_account(oauth, refresh_token, &account.email)
@@ -243,7 +279,10 @@ pub(crate) async fn connect_account_within(
             let scope = granted.to_scope();
             let db = db.clone();
             tokio::spawn(async move {
-                if let Err(err) = db.write(move |c| accounts::set_granted(c, id, &scope)).await {
+                if let Err(err) = db
+                    .write(move |c| accounts::set_granted(c, id, &scope))
+                    .await
+                {
                     tracing::warn!(account = id, %err, "could not save the granted scopes");
                 }
             });
@@ -267,7 +306,15 @@ pub async fn connect_microsoft<P: PasswordStore + 'static>(
     account: &Account,
     window_days: i64,
 ) -> Result<AccountServices, SyncError> {
-    connect_microsoft_at(db, tokens, client, account, window_days, mailrs_graph::GRAPH_BASE).await
+    connect_microsoft_at(
+        db,
+        tokens,
+        client,
+        account,
+        window_days,
+        mailrs_graph::GRAPH_BASE,
+    )
+    .await
 }
 
 /// [`connect_microsoft`] against `base`, which tests point at a mock.
@@ -297,7 +344,13 @@ pub(crate) async fn connect_microsoft_within<P: PasswordStore + 'static>(
         bounded(id, "the mail store", wait, marked).await?;
         return Err(BackendError::NeedsReauth.into());
     };
-    let consent = bounded(id, "the mail store", wait, db.read(move |c| accounts::consent(c, id))).await?;
+    let consent = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| accounts::consent(c, id)),
+    )
+    .await?;
     let granted = consent.granted.as_deref().map(mailrs_graph::Granted::parse);
     let saver = Arc::clone(&tokens);
     let store = db.clone();
@@ -315,7 +368,10 @@ pub(crate) async fn connect_microsoft_within<P: PasswordStore + 'static>(
         .on_granted(move |granted| {
             let (store, scope) = (store.clone(), granted.to_scope());
             tokio::spawn(async move {
-                if let Err(err) = store.write(move |c| accounts::set_granted(c, id, &scope)).await {
+                if let Err(err) = store
+                    .write(move |c| accounts::set_granted(c, id, &scope))
+                    .await
+                {
                     tracing::warn!(account = id, %err, "could not save the granted scopes");
                 }
             });
@@ -359,7 +415,13 @@ pub(crate) async fn connect_imap_within<P: PasswordStore + 'static>(
     wait: Duration,
 ) -> Result<AccountServices, SyncError> {
     let id = account.id;
-    let saved = bounded(id, "the mail store", wait, db.read(move |c| servers::load(c, id))).await?;
+    let saved = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| servers::load(c, id)),
+    )
+    .await?;
     let (password, outgoing) = read_passwords(passwords, id, wait).await?;
     let (Some(saved), Some(password)) = (saved, password) else {
         let marked = db.write(move |c| accounts::set_state(c, id, AccountState::NeedsReauth));
@@ -432,7 +494,13 @@ pub(crate) async fn connect_pop3_within<P: PasswordStore + 'static>(
     wait: Duration,
 ) -> Result<AccountServices, SyncError> {
     let id = account.id;
-    let saved = bounded(id, "the mail store", wait, db.read(move |c| servers::load_pop3(c, id))).await?;
+    let saved = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| servers::load_pop3(c, id)),
+    )
+    .await?;
     let (password, outgoing) = read_passwords(passwords, id, wait).await?;
     let (Some(saved), Some(password)) = (saved, password) else {
         let marked = db.write(move |c| accounts::set_state(c, id, AccountState::NeedsReauth));
@@ -462,18 +530,40 @@ pub(crate) async fn connect_pop3_within<P: PasswordStore + 'static>(
     );
     // Its rules are kept on this computer from the start.
     let found = confirmed(db, id, &secret, wait).await?;
-    let beside = Beside { account_id: id, address: account.email.clone(), provider_name, found, local: None, local_kept: false };
+    let beside = Beside {
+        account_id: id,
+        address: account.email.clone(),
+        provider_name,
+        found,
+        local: None,
+        local_kept: false,
+    };
     Ok(services.with_beside(beside))
 }
 
 /// The servers found for the account that the person confirmed, each to
 /// sign in with `password`, which goes to no other server.
-async fn confirmed(db: &Db, id: AccountId, password: &str, wait: Duration) -> Result<Vec<FoundServer>, SyncError> {
-    let found = bounded(id, "the mail store", wait, db.read(move |c| mailrs_store::services::load(c, id))).await?;
+async fn confirmed(
+    db: &Db,
+    id: AccountId,
+    password: &str,
+    wait: Duration,
+) -> Result<Vec<FoundServer>, SyncError> {
+    let found = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| mailrs_store::services::load(c, id)),
+    )
+    .await?;
     Ok(found
         .into_iter()
         .filter(|f| f.confirmed)
-        .map(|service| FoundServer { service, secret: password.to_string(), bearer: None })
+        .map(|service| FoundServer {
+            service,
+            secret: password.to_string(),
+            bearer: None,
+        })
         .collect())
 }
 
@@ -481,15 +571,68 @@ async fn confirmed(db: &Db, id: AccountId, password: &str, wait: Duration) -> Re
 /// a token. An OAuth row is refused: its secret is the refresh token,
 /// which only the token endpoint may see. It signs in through its
 /// [`OAuthSession`] instead.
-pub fn auth_of(saved: &mailrs_store::jmap::JmapSaved, address: &str, secret: String) -> Result<mailrs_jmap::Auth, BackendError> {
+pub fn auth_of(
+    saved: &mailrs_store::jmap::JmapSaved,
+    address: &str,
+    secret: String,
+) -> Result<mailrs_jmap::Auth, BackendError> {
     match saved.auth {
         mailrs_store::jmap::JmapAuth::Bearer => Ok(mailrs_jmap::Auth::Bearer(secret)),
         mailrs_store::jmap::JmapAuth::Basic => Ok(mailrs_jmap::Auth::Basic {
-            user: saved.user_name.clone().unwrap_or_else(|| address.to_string()),
+            user: saved
+                .user_name
+                .clone()
+                .unwrap_or_else(|| address.to_string()),
             password: secret,
         }),
         mailrs_store::jmap::JmapAuth::OAuth => Err(BackendError::NeedsReauth),
     }
+}
+
+/// The services for a calendar account, from the server the store keeps
+/// for it and the password in `passwords`: a calendar and no mail.
+/// Without either, the store records that the account needs to sign in
+/// again before this answers `NeedsReauth`, since no loop runs to say so.
+/// The server tells the adapter which addresses the account goes by, so
+/// none is handed in. Nothing here connects.
+pub async fn connect_caldav<P: PasswordStore + 'static>(
+    db: &Db,
+    passwords: Arc<P>,
+    account: &Account,
+) -> Result<AccountServices, SyncError> {
+    connect_caldav_within(db, passwords, account, STEP_WAIT).await
+}
+
+pub(crate) async fn connect_caldav_within<P: PasswordStore + 'static>(
+    db: &Db,
+    passwords: Arc<P>,
+    account: &Account,
+    wait: Duration,
+) -> Result<AccountServices, SyncError> {
+    let id = account.id;
+    let found = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| mailrs_store::services::load(c, id)),
+    )
+    .await?;
+    let server = found
+        .into_iter()
+        .find(|f| f.kind == ServiceKind::CalDav && f.confirmed);
+    let password = read_secret(passwords, id, wait).await?;
+    let (Some(server), Some(password)) = (server, password) else {
+        let marked = db.write(move |c| accounts::set_state(c, id, AccountState::NeedsReauth));
+        bounded(id, "the mail store", wait, marked).await?;
+        return Err(BackendError::NeedsReauth.into());
+    };
+    let client = DavClient::new(
+        &server.url,
+        DavKind::Calendar,
+        DavLogin::new(&server.user_name, password),
+    )
+    .map_err(|err| BackendError::Refused(err.to_string()))?;
+    Ok(AccountServices::calendar_only(client))
 }
 
 /// This run's OAuth sessions, one per JMAP account, so a restart of the
@@ -512,7 +655,9 @@ struct HeldSession {
 
 impl JmapSessions {
     fn held_state(&self) -> std::sync::MutexGuard<'_, SessionsHeld> {
-        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The account's session for `client` at `session_url`, made with
@@ -532,13 +677,22 @@ impl JmapSessions {
             return Arc::clone(&kept.session);
         }
         let session = Arc::new(make());
-        held.sessions.insert(id, HeldSession { made_for, session: Arc::clone(&session) });
+        held.sessions.insert(
+            id,
+            HeldSession {
+                made_for,
+                session: Arc::clone(&session),
+            },
+        );
         session
     }
 
     /// The session the account holds now, if any.
     pub fn held(&self, id: AccountId) -> Option<Arc<OAuthSession>> {
-        self.held_state().sessions.get(&id).map(|kept| Arc::clone(&kept.session))
+        self.held_state()
+            .sessions
+            .get(&id)
+            .map(|kept| Arc::clone(&kept.session))
     }
 
     /// Drops the account's session before a new sign-in keeps its refresh
@@ -579,9 +733,18 @@ pub async fn jmap_grant(db: &Db, account: &Account) -> Option<JmapGrantRow> {
         return None;
     }
     let id = account.id;
-    let saved = db.read(move |c| mailrs_store::jmap::load(c, id)).await.ok()??;
-    let client = saved.oauth.filter(|_| saved.auth == mailrs_store::jmap::JmapAuth::OAuth)?;
-    Some(JmapGrantRow { id, session_url: saved.session_url, client_id: client.client_id })
+    let saved = db
+        .read(move |c| mailrs_store::jmap::load(c, id))
+        .await
+        .ok()??;
+    let client = saved
+        .oauth
+        .filter(|_| saved.auth == mailrs_store::jmap::JmapAuth::OAuth)?;
+    Some(JmapGrantRow {
+        id,
+        session_url: saved.session_url,
+        client_id: client.client_id,
+    })
 }
 
 impl JmapGrantRow {
@@ -590,12 +753,22 @@ impl JmapGrantRow {
     /// the grant to revoke. Without a session, the keyring's token.
     pub async fn retire(self, secrets: &Secrets) -> Option<JmapGrant> {
         let id = self.id;
-        let held = secrets.jmap_sessions.forget(id).await.filter(|token| !token.is_empty());
+        let held = secrets
+            .jmap_sessions
+            .forget(id)
+            .await
+            .filter(|token| !token.is_empty());
         let refresh_token = match held {
             Some(token) => token,
-            None => read_secret(Arc::clone(&secrets.jmap), id, STEP_WAIT).await.ok()??,
+            None => read_secret(Arc::clone(&secrets.jmap), id, STEP_WAIT)
+                .await
+                .ok()??,
         };
-        Some(JmapGrant { session_url: self.session_url, client_id: self.client_id, refresh_token })
+        Some(JmapGrant {
+            session_url: self.session_url,
+            client_id: self.client_id,
+            refresh_token,
+        })
     }
 }
 
@@ -604,9 +777,13 @@ impl JmapGrant {
     /// (RFC 7009), giving up after a few seconds. The log says only how it
     /// went, never the server's words or the token.
     pub async fn revoke(self) {
-        match mailrs_jmap::oauth::revoke(&self.session_url, &self.client_id, &self.refresh_token).await {
+        match mailrs_jmap::oauth::revoke(&self.session_url, &self.client_id, &self.refresh_token)
+            .await
+        {
             Ok(true) => tracing::info!("revoked a browser sign-in the app no longer keeps"),
-            Ok(false) => tracing::info!("the server offers no revocation; the grant stays until it runs out"),
+            Ok(false) => {
+                tracing::info!("the server offers no revocation; the grant stays until it runs out")
+            }
             Err(_) => tracing::warn!("could not revoke a browser sign-in the app no longer keeps"),
         }
     }
@@ -627,7 +804,8 @@ pub(crate) enum JmapSignIn {
 pub(crate) fn keep_rotations<P: PasswordStore + 'static>(
     tokens: Arc<P>,
     id: AccountId,
-) -> impl Fn(String) -> futures::future::BoxFuture<'static, Result<(), String>> + Send + Sync + 'static {
+) -> impl Fn(String) -> futures::future::BoxFuture<'static, Result<(), String>> + Send + Sync + 'static
+{
     move |token| {
         let tokens = Arc::clone(&tokens);
         Box::pin(async move {
@@ -649,7 +827,10 @@ pub(crate) fn session_tokens(session: Arc<OAuthSession>) -> Arc<dyn mailrs_dav::
 }
 
 impl mailrs_dav::TokenSource for SessionTokens {
-    fn token<'a>(&'a self, refused: Option<&'a str>) -> std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+    fn token<'a>(
+        &'a self,
+        refused: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
         Box::pin(async move {
             let token = match refused {
                 // Calls refused together share one refresh.
@@ -673,7 +854,12 @@ impl mailrs_dav::TokenSource for SessionTokens {
 /// same session's token, or an app password once one refused the token.
 /// Nothing here connects; the client reads the session when sync first
 /// asks.
-pub async fn connect_jmap(db: &Db, secrets: &Secrets, account: &Account, window_days: i64) -> Result<AccountServices, SyncError> {
+pub async fn connect_jmap(
+    db: &Db,
+    secrets: &Secrets,
+    account: &Account,
+    window_days: i64,
+) -> Result<AccountServices, SyncError> {
     connect_jmap_within(db, secrets, account, window_days, STEP_WAIT).await
 }
 
@@ -686,19 +872,28 @@ pub(crate) async fn connect_jmap_within(
 ) -> Result<AccountServices, SyncError> {
     let id = account.id;
     let jmap = Arc::clone(&secrets.jmap);
-    let saved = bounded(id, "the mail store", wait, db.read(move |c| mailrs_store::jmap::load(c, id))).await?;
+    let saved = bounded(
+        id,
+        "the mail store",
+        wait,
+        db.read(move |c| mailrs_store::jmap::load(c, id)),
+    )
+    .await?;
     let secret = read_secret(Arc::clone(&jmap), id, wait).await?;
     let sign_in = match (saved, secret) {
         (Some(saved), Some(secret)) => match (&saved.auth, &saved.oauth) {
             (mailrs_store::jmap::JmapAuth::OAuth, Some(client)) => {
-                let session = secrets.jmap_sessions.session_for(id, &saved.session_url, client, || {
-                    let client = mailrs_jmap::oauth::OAuthClient {
-                        client_id: client.client_id.clone(),
-                        token_endpoint: client.token_endpoint.clone(),
-                        resource: saved.session_url.clone(),
-                    };
-                    OAuthSession::new(client, secret).on_rotated(keep_rotations(jmap, id))
-                });
+                let session =
+                    secrets
+                        .jmap_sessions
+                        .session_for(id, &saved.session_url, client, || {
+                            let client = mailrs_jmap::oauth::OAuthClient {
+                                client_id: client.client_id.clone(),
+                                token_endpoint: client.token_endpoint.clone(),
+                                resource: saved.session_url.clone(),
+                            };
+                            OAuthSession::new(client, secret).on_rotated(keep_rotations(jmap, id))
+                        });
                 Some((saved, JmapSignIn::OAuth(session)))
             }
             // An OAuth row that lost its client cannot refresh.
@@ -712,7 +907,16 @@ pub(crate) async fn connect_jmap_within(
         bounded(id, "the mail store", wait, marked).await?;
         return Err(BackendError::NeedsReauth.into());
     };
-    jmap_services(db, Arc::clone(&secrets.passwords), account, saved, sign_in, window_days, wait).await
+    jmap_services(
+        db,
+        Arc::clone(&secrets.passwords),
+        account,
+        saved,
+        sign_in,
+        window_days,
+        wait,
+    )
+    .await
 }
 
 /// [`connect_jmap`] once the row and what signs it in are read.
@@ -736,7 +940,8 @@ pub(crate) async fn jmap_services<P: PasswordStore + 'static>(
             (auth_of(&saved, &account.email, secret)?, basic, None)
         }
     };
-    let client = mailrs_jmap::JmapClient::new(&saved.session_url, auth).map_err(crate::services::jmap::backend)?;
+    let client = mailrs_jmap::JmapClient::new(&saved.session_url, auth)
+        .map_err(crate::services::jmap::backend)?;
     let token = saved.auth == mailrs_store::jmap::JmapAuth::Bearer;
     let table_says_no_reply = mailrs_discover::jmap_named(account.provider_name())
         .is_some_and(|p| p.token_lacks.iter().any(|c| c == mailrs_jmap::VACATION));
@@ -746,7 +951,10 @@ pub(crate) async fn jmap_services<P: PasswordStore + 'static>(
         window_days,
         labels: saved.labels,
         capabilities: saved.capabilities.clone(),
-        auto_reply_needs_sign_in: token && table_says_no_reply && !saved.offers(mailrs_jmap::VACATION) && !saved.offers(mailrs_jmap::SIEVE),
+        auto_reply_needs_sign_in: token
+            && table_says_no_reply
+            && !saved.offers(mailrs_jmap::VACATION)
+            && !saved.offers(mailrs_jmap::SIEVE),
     };
     let app_password = read_secret(dav, id, wait).await?;
     let read = db.read(move |c| {
@@ -759,17 +967,32 @@ pub(crate) async fn jmap_services<P: PasswordStore + 'static>(
         Ok((mailrs_store::services::load(c, id)?, refused, local))
     });
     let (found, refused, local_kept) = bounded(id, "the mail store", wait, read).await?;
-    let found = dav_plan(found, &saved, bearer.is_some(), app_password, basic_password, &refused)
-        .into_iter()
-        .filter_map(|(service, sign)| match (sign, &bearer) {
-            (DavSign::Password(secret), _) => Some(FoundServer { service, secret, bearer: None }),
-            (DavSign::Bearer, Some(tokens)) => {
-                let source = dav_bearer(Arc::clone(tokens), db.clone(), id, service.kind);
-                Some(FoundServer { service, secret: String::new(), bearer: Some(source) })
-            }
-            (DavSign::Bearer, None) => None,
-        })
-        .collect();
+    let found = dav_plan(
+        found,
+        &saved,
+        bearer.is_some(),
+        app_password,
+        basic_password,
+        &refused,
+    )
+    .into_iter()
+    .filter_map(|(service, sign)| match (sign, &bearer) {
+        (DavSign::Password(secret), _) => Some(FoundServer {
+            service,
+            secret,
+            bearer: None,
+        }),
+        (DavSign::Bearer, Some(tokens)) => {
+            let source = dav_bearer(Arc::clone(tokens), db.clone(), id, service.kind);
+            Some(FoundServer {
+                service,
+                secret: String::new(),
+                bearer: Some(source),
+            })
+        }
+        (DavSign::Bearer, None) => None,
+    })
+    .collect();
     let beside = Beside {
         account_id: id,
         address: account.email.clone(),
@@ -780,7 +1003,12 @@ pub(crate) async fn jmap_services<P: PasswordStore + 'static>(
         // go on running here, beside it, and the Rules dialog lists both.
         local_kept,
     };
-    Ok(AccountServices::jmap_from(client, settings, beside))
+    let fallback = storage::fastmail(&saved.session_url, bearer);
+    let mut services = AccountServices::jmap_from(client, settings, beside);
+    if let (crate::services::AnyMail::Jmap(mail), Some(read)) = (&mut services.mail, fallback) {
+        *mail = mail.clone().with_storage_fallback(read);
+    }
+    Ok(services)
 }
 
 /// How a CalDAV, CardDAV or ManageSieve server beside a JMAP session
@@ -825,7 +1053,11 @@ pub(crate) fn dav_plan(
             ServiceKind::CalDav => !saved.offers(mailrs_jmap::CALENDARS),
             ServiceKind::Sieve => !saved.offers(mailrs_jmap::SIEVE) && !bearer,
         })
-        .filter(|f| !bearer || (mailrs_dav::shares_site(&saved.session_url, &f.url) && !refused.contains(&f.kind)))
+        .filter(|f| {
+            !bearer
+                || (mailrs_dav::shares_site(&saved.session_url, &f.url)
+                    && !refused.contains(&f.kind))
+        })
         .map(|f| (f, sign.clone()))
         .collect()
 }
@@ -836,8 +1068,19 @@ pub(crate) fn dav_plan(
 /// out no more tokens for it this run, so no call refreshes again, and
 /// the store keeps that the service refused the sign-in: the next start
 /// leaves it out until the person gives an app password.
-pub(crate) fn dav_bearer(inner: Arc<dyn mailrs_dav::TokenSource>, db: Db, account: AccountId, kind: ServiceKind) -> Arc<dyn mailrs_dav::TokenSource> {
-    Arc::new(DavBearer { inner, db, account, kind, stopped: std::sync::atomic::AtomicBool::new(false) })
+pub(crate) fn dav_bearer(
+    inner: Arc<dyn mailrs_dav::TokenSource>,
+    db: Db,
+    account: AccountId,
+    kind: ServiceKind,
+) -> Arc<dyn mailrs_dav::TokenSource> {
+    Arc::new(DavBearer {
+        inner,
+        db,
+        account,
+        kind,
+        stopped: std::sync::atomic::AtomicBool::new(false),
+    })
 }
 
 struct DavBearer {
@@ -849,7 +1092,10 @@ struct DavBearer {
 }
 
 impl mailrs_dav::TokenSource for DavBearer {
-    fn token<'a>(&'a self, refused: Option<&'a str>) -> std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+    fn token<'a>(
+        &'a self,
+        refused: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
         if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
             return Box::pin(async { Err("the server refused the account's sign-in".to_string()) });
         }
@@ -861,9 +1107,17 @@ impl mailrs_dav::TokenSource for DavBearer {
             return;
         }
         let (db, account, kind) = (self.db.clone(), self.account, self.kind);
-        tracing::warn!(account, service = kind.as_str(), "the server refused the browser sign-in; it needs an app password");
+        tracing::warn!(
+            account,
+            service = kind.as_str(),
+            "the server refused the browser sign-in; it needs an app password"
+        );
         tokio::spawn(async move {
-            let kept = db.write(move |c| mailrs_store::services::save_miss(c, account, kind, Some(Miss::Refused))).await;
+            let kept = db
+                .write(move |c| {
+                    mailrs_store::services::save_miss(c, account, kind, Some(Miss::Refused))
+                })
+                .await;
             if let Err(err) = kept {
                 tracing::warn!(account, %err, "could not keep that the server refused the sign-in");
             }
@@ -909,7 +1163,12 @@ pub fn servers_for(imap: &Server, imap_user: &str, smtp: &Server, smtp_user: &st
 
 /// The servers to keep for a POP3 account that logged in as `pop3_user`
 /// and `smtp_user`.
-pub fn pop3_servers_for(pop3: &Server, pop3_user: &str, smtp: &Server, smtp_user: &str) -> Pop3Servers {
+pub fn pop3_servers_for(
+    pop3: &Server,
+    pop3_user: &str,
+    smtp: &Server,
+    smtp_user: &str,
+) -> Pop3Servers {
     let both = servers_for(pop3, pop3_user, smtp, smtp_user);
     Pop3Servers {
         pop3: both.imap,

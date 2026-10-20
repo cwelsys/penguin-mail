@@ -49,7 +49,9 @@ impl MainWindow {
             let name = attachment.filename.clone();
             let fetched = this
                 .core
-                .call(async move { sync.attachment(&message_id, &attachment_id).await })
+                .call_for(account_id, async move {
+                    sync.attachment(&message_id, &attachment_id).await
+                })
                 .await;
             match fetched {
                 Ok(data) => this.show_attachment(attachment, data, false),
@@ -141,7 +143,7 @@ impl MainWindow {
                 let name = attachment.filename.clone();
                 let written = this
                     .core
-                    .call(async move {
+                    .call_for(account_id, async move {
                         let data = s.attachment(&m, &attachment_id).await?;
                         let path = super::unique_path(&folder, &name);
                         tokio::task::spawn_blocking(move || std::fs::write(&path, data)).await??;

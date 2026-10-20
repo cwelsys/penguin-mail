@@ -98,25 +98,44 @@ pub fn stored_messages(conn: &Connection, account_id: AccountId) -> Result<Vec<S
 }
 
 pub fn stored_mailboxes(conn: &Connection, account_id: AccountId) -> Result<Vec<StoredMailbox>> {
-    let mut stmt = conn.prepare("SELECT id, name, role FROM mailboxes WHERE account_id = ?1 AND named = 1")?;
-    let rows = stmt.query_map(params![account_id], |row| Ok(StoredMailbox { id: row.get(0)?, name: row.get(1)?, role: row.get(2)? }))?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, role FROM mailboxes WHERE account_id = ?1 AND named = 1")?;
+    let rows = stmt.query_map(params![account_id], |row| {
+        Ok(StoredMailbox {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            role: row.get(2)?,
+        })
+    })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Rewrites the account as a JMAP account. Runs inside the caller's
 /// transaction; an error leaves the transaction to roll back. None, with
 /// nothing changed, when the stored account is no longer IMAP.
-pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption) -> Result<Option<Adopted>> {
+pub fn adopt_jmap(
+    conn: &Connection,
+    account_id: AccountId,
+    adoption: &Adoption,
+) -> Result<Option<Adopted>> {
     // A second click, or a retry after the first switch went through,
     // would find none of its IMAP ids and drop every message.
-    let provider: Option<String> =
-        conn.query_row("SELECT provider FROM accounts WHERE id = ?1", params![account_id], |row| row.get(0)).optional()?;
+    let provider: Option<String> = conn
+        .query_row(
+            "SELECT provider FROM accounts WHERE id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )
+        .optional()?;
     if provider.as_deref() != Some("imap") {
         return Ok(None);
     }
     let targets: BTreeSet<&str> = adoption.messages.iter().map(|m| m.to.as_str()).collect();
     if targets.len() != adoption.messages.len() {
-        return Err(StoreError::Corrupt { column: "switch.messages", value: "two messages take one JMAP id".into() });
+        return Err(StoreError::Corrupt {
+            column: "switch.messages",
+            value: "two messages take one JMAP id".into(),
+        });
     }
     conn.execute_batch(
         "PRAGMA defer_foreign_keys = ON;
@@ -129,7 +148,8 @@ pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption)
          DELETE FROM switch_dropped; DELETE FROM switch_reminders;",
     )?;
     {
-        let mut insert = conn.prepare("INSERT INTO switch_messages (old, new, thread) VALUES (?1, ?2, ?3)")?;
+        let mut insert =
+            conn.prepare("INSERT INTO switch_messages (old, new, thread) VALUES (?1, ?2, ?3)")?;
         for moved in &adoption.messages {
             insert.execute(params![moved.from, moved.to, moved.thread])?;
         }
@@ -199,8 +219,14 @@ pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption)
         params![account_id],
     )?;
     // A JMAP draft goes by its Email id.
-    conn.execute("UPDATE drafts SET draft_id = message_id WHERE account_id = ?1", params![account_id])?;
-    conn.execute("DELETE FROM remote_refs WHERE account_id = ?1", params![account_id])?;
+    conn.execute(
+        "UPDATE drafts SET draft_id = message_id WHERE account_id = ?1",
+        params![account_id],
+    )?;
+    conn.execute(
+        "DELETE FROM remote_refs WHERE account_id = ?1",
+        params![account_id],
+    )?;
     // Two old threads may become one JMAP thread. When both had a
     // reminder, the earlier one stays, so the person is not reminded late.
     // SQLite takes the bare column `subject` from the row MIN picked.
@@ -250,7 +276,11 @@ pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption)
         "DELETE FROM mailboxes WHERE account_id = ?1 AND id NOT IN (SELECT new FROM switch_mailboxes)",
         params![account_id],
     )?;
-    let renamed: HashMap<&str, &str> = adoption.mailboxes.iter().map(|(o, n)| (o.as_str(), n.as_str())).collect();
+    let renamed: HashMap<&str, &str> = adoption
+        .mailboxes
+        .iter()
+        .map(|(o, n)| (o.as_str(), n.as_str()))
+        .collect();
     let mut rules_off = 0;
     for mut rule in local_rules::list(conn, account_id)? {
         // A rule naming a mailbox the server lacks would fail on every
@@ -268,7 +298,12 @@ pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption)
             continue;
         }
         let mut changed = false;
-        for set in rule.action.add.iter_mut().chain(rule.action.remove.iter_mut()) {
+        for set in rule
+            .action
+            .add
+            .iter_mut()
+            .chain(rule.action.remove.iter_mut())
+        {
             if let MailSet::Mailbox(id) = set
                 && let Some(new) = renamed.get(id.as_str())
             {
@@ -281,7 +316,10 @@ pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption)
         }
     }
     for table in ["thread_mailboxes", "thread_categories", "threads"] {
-        conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), params![account_id])?;
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE account_id = ?1"),
+            params![account_id],
+        )?;
     }
     let threads: Vec<String> = conn
         .prepare("SELECT DISTINCT thread_id FROM messages WHERE account_id = ?1")?
@@ -292,20 +330,33 @@ pub fn adopt_jmap(conn: &Connection, account_id: AccountId, adoption: &Adoption)
     }
     if adoption.contacts_from_jmap {
         for table in ["contact_addresses", "contacts", "contact_books"] {
-            conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), params![account_id])?;
+            conn.execute(
+                &format!("DELETE FROM {table} WHERE account_id = ?1"),
+                params![account_id],
+            )?;
         }
-        conn.execute("DELETE FROM account_services WHERE account_id = ?1 AND service = 'carddav'", params![account_id])?;
+        conn.execute(
+            "DELETE FROM account_services WHERE account_id = ?1 AND service = 'carddav'",
+            params![account_id],
+        )?;
     }
     conn.execute(
         "UPDATE accounts SET provider = 'jmap', sync_state = NULL, backfill_cursor = NULL, backfill_done = 0, \
          backfill_extends = 0 WHERE id = ?1",
         params![account_id],
     )?;
-    conn.execute("DELETE FROM account_servers WHERE account_id = ?1", params![account_id])?;
+    conn.execute(
+        "DELETE FROM account_servers WHERE account_id = ?1",
+        params![account_id],
+    )?;
     jmap::save(conn, account_id, &adoption.saved)?;
     conn.execute_batch(
         "DELETE FROM switch_messages; DELETE FROM switch_threads; DELETE FROM switch_mailboxes; \
          DELETE FROM switch_dropped; DELETE FROM switch_reminders;",
     )?;
-    Ok(Some(Adopted { kept, dropped, rules_off }))
+    Ok(Some(Adopted {
+        kept,
+        dropped,
+        rules_off,
+    }))
 }

@@ -111,27 +111,48 @@ mod tests {
         use crate::fake::FakeNet;
         let net = |target: &str| {
             FakeNet::default()
-                .answer_srv("_imaps._tcp.example.org", vec![record(0, 1, 993, "imap.example.org.")])
-                .answer_srv("_submissions._tcp.example.org", vec![record(0, 1, 465, "smtp.example.org.")])
+                .answer_srv(
+                    "_imaps._tcp.example.org",
+                    vec![record(0, 1, 993, "imap.example.org.")],
+                )
+                .answer_srv(
+                    "_submissions._tcp.example.org",
+                    vec![record(0, 1, 465, "smtp.example.org.")],
+                )
                 .answer_srv("_pop3s._tcp.example.org", vec![record(0, 1, 995, target)])
         };
         let inside = lookup(&net("pop.example.org."), "example.org").await;
         let pop3 = inside[0].pop3.as_ref().expect("a POP3 server");
-        assert_eq!((pop3.host.as_str(), pop3.port, pop3.security), ("pop.example.org", 995, Security::Tls));
+        assert_eq!(
+            (pop3.host.as_str(), pop3.port, pop3.security),
+            ("pop.example.org", 995, Security::Tls)
+        );
         let outside = lookup(&net("pop.hoster.net."), "example.org").await;
-        assert_eq!(outside[0].pop3, None, "a host outside the domain never gets the password unasked");
+        assert_eq!(
+            outside[0].pop3, None,
+            "a host outside the domain never gets the password unasked"
+        );
     }
 
     #[tokio::test]
     async fn records_that_name_pop3_and_no_imap_give_a_pop3_candidate() {
         use crate::fake::FakeNet;
         let net = FakeNet::default()
-            .answer_srv("_submissions._tcp.example.org", vec![record(0, 1, 465, "smtp.example.org.")])
-            .answer_srv("_pop3s._tcp.example.org", vec![record(0, 1, 995, "pop.example.org.")]);
+            .answer_srv(
+                "_submissions._tcp.example.org",
+                vec![record(0, 1, 465, "smtp.example.org.")],
+            )
+            .answer_srv(
+                "_pop3s._tcp.example.org",
+                vec![record(0, 1, 995, "pop.example.org.")],
+            );
         let found = lookup(&net, "example.org").await;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].imap, None);
-        assert_eq!(found[0].pop3.as_ref().map(|s| s.host.as_str()), Some("pop.example.org"));
+        assert_eq!(
+            found[0].pop3.as_ref().map(|s| s.host.as_str()),
+            Some("pop.example.org")
+        );
         assert_eq!(found[0].smtp.host, "smtp.example.org");
         assert!(!found[0].confirm, "both inside the domain");
     }

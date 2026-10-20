@@ -10,7 +10,9 @@ use hickory_resolver::proto::rr::RData;
 use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
 use rustls_platform_verifier::BuilderVerifierExt;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
@@ -296,7 +298,11 @@ where
         // may hold.
         let budget = REPLY_LIMIT.checked_sub(all.len())? as u64;
         let mut bytes = Vec::new();
-        let read = (&mut *stream).take(budget).read_until(b'\n', &mut bytes).await.ok()?;
+        let read = (&mut *stream)
+            .take(budget)
+            .read_until(b'\n', &mut bytes)
+            .await
+            .ok()?;
         if read == 0 || !bytes.ends_with(b"\n") {
             return None;
         }

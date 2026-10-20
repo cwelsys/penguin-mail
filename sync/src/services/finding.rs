@@ -25,16 +25,35 @@ use crate::{BackendError, SyncError};
 const PROBE_LIMIT: Duration = Duration::from_secs(10);
 
 pub trait ServiceProbe: Send + Sync {
-    fn dav(&self, url: &str, user: &str, password: &str, kind: Kind) -> impl Future<Output = Result<(), BackendError>> + Send;
-    fn sieve(&self, host: &str, port: u16, user: &str, password: &str) -> impl Future<Output = Result<Extensions, BackendError>> + Send;
+    fn dav(
+        &self,
+        url: &str,
+        user: &str,
+        password: &str,
+        kind: Kind,
+    ) -> impl Future<Output = Result<(), BackendError>> + Send;
+    fn sieve(
+        &self,
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+    ) -> impl Future<Output = Result<Extensions, BackendError>> + Send;
 }
 
 /// The real clients.
 pub struct RealProbe;
 
 impl ServiceProbe for RealProbe {
-    async fn dav(&self, url: &str, user: &str, password: &str, kind: Kind) -> Result<(), BackendError> {
-        let client = DavClient::new(url, kind, mailrs_dav::Login::new(user, password)).map_err(|e| BackendError::Refused(e.to_string()))?;
+    async fn dav(
+        &self,
+        url: &str,
+        user: &str,
+        password: &str,
+        kind: Kind,
+    ) -> Result<(), BackendError> {
+        let client = DavClient::new(url, kind, mailrs_dav::Login::new(user, password))
+            .map_err(|e| BackendError::Refused(e.to_string()))?;
         let homes = client.homes().await.map_err(|e| match e {
             mailrs_dav::DavError::Unauthorized => BackendError::NeedsReauth,
             mailrs_dav::DavError::Network(detail) => BackendError::Offline(detail),
@@ -47,13 +66,24 @@ impl ServiceProbe for RealProbe {
         home.map(drop).ok_or(BackendError::Unsupported)
     }
 
-    async fn sieve(&self, host: &str, port: u16, user: &str, password: &str) -> Result<Extensions, BackendError> {
-        let client = ManageSieveClient::new(host, port, mailrs_sieve::client::Login::new(user, password));
-        client.capabilities().await.map(|c| c.sieve).map_err(|e| match e {
-            SieveError::Auth(_) => BackendError::NeedsReauth,
-            SieveError::Network(detail) => BackendError::Offline(detail),
-            other => BackendError::Refused(other.to_string()),
-        })
+    async fn sieve(
+        &self,
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+    ) -> Result<Extensions, BackendError> {
+        let client =
+            ManageSieveClient::new(host, port, mailrs_sieve::client::Login::new(user, password));
+        client
+            .capabilities()
+            .await
+            .map(|c| c.sieve)
+            .map_err(|e| match e {
+                SieveError::Auth(_) => BackendError::NeedsReauth,
+                SieveError::Network(detail) => BackendError::Offline(detail),
+                other => BackendError::Refused(other.to_string()),
+            })
     }
 }
 
@@ -101,7 +131,14 @@ fn users(imap_user: &str, address: &str) -> Vec<String> {
 
 /// The first hint that takes a login, or one that waits for the person's
 /// yes; failing both, why, the strongest reason any try gave.
-async fn dav<P: ServiceProbe>(probe: &P, hints: &[Hint], users: &[String], password: &str, kind: Kind, service: ServiceKind) -> Result<FoundService, Miss> {
+async fn dav<P: ServiceProbe>(
+    probe: &P,
+    hints: &[Hint],
+    users: &[String],
+    password: &str,
+    kind: Kind,
+    service: ServiceKind,
+) -> Result<FoundService, Miss> {
     let mut waiting = None;
     let mut missed: Option<Miss> = None;
     for hint in hints {
@@ -116,10 +153,17 @@ async fn dav<P: ServiceProbe>(probe: &P, hints: &[Hint], users: &[String], passw
             continue;
         }
         for user in users {
-            let tried = tokio::time::timeout(PROBE_LIMIT, probe.dav(&hint.url, user, password, kind)).await;
+            let tried =
+                tokio::time::timeout(PROBE_LIMIT, probe.dav(&hint.url, user, password, kind)).await;
             match miss_of(tried) {
                 None => {
-                    return Ok(FoundService { kind: service, url: hint.url.clone(), user_name: user.clone(), confirmed: true, source: source_word(hint.source).into() });
+                    return Ok(FoundService {
+                        kind: service,
+                        url: hint.url.clone(),
+                        user_name: user.clone(),
+                        confirmed: true,
+                        source: source_word(hint.source).into(),
+                    });
                 }
                 miss => missed = missed.max(miss),
             }
@@ -129,10 +173,19 @@ async fn dav<P: ServiceProbe>(probe: &P, hints: &[Hint], users: &[String], passw
     waiting.ok_or(missed.unwrap_or(Miss::NotFound))
 }
 
-async fn sieve<P: ServiceProbe>(probe: &P, hints: &[SieveHint], users: &[String], password: &str) -> Option<FoundService> {
+async fn sieve<P: ServiceProbe>(
+    probe: &P,
+    hints: &[SieveHint],
+    users: &[String],
+    password: &str,
+) -> Option<FoundService> {
     for hint in hints.iter().filter(|h| !h.confirm) {
         for user in users {
-            let tried = tokio::time::timeout(PROBE_LIMIT, probe.sieve(&hint.host, hint.port, user, password)).await;
+            let tried = tokio::time::timeout(
+                PROBE_LIMIT,
+                probe.sieve(&hint.host, hint.port, user, password),
+            )
+            .await;
             if let Ok(Ok(extensions)) = tried {
                 if !extensions.usable() {
                     return None;
@@ -150,22 +203,54 @@ async fn sieve<P: ServiceProbe>(probe: &P, hints: &[SieveHint], users: &[String]
     None
 }
 
-pub async fn find_services<N: Net, P: ServiceProbe>(net: &N, probe: &P, address: &str, provider_name: &str, imap_host: &str, imap_user: &str, password: &str) -> FoundServices {
+pub async fn find_services<N: Net, P: ServiceProbe>(
+    net: &N,
+    probe: &P,
+    address: &str,
+    provider_name: &str,
+    imap_host: &str,
+    imap_user: &str,
+    password: &str,
+) -> FoundServices {
     let hints = mailrs_discover::dav_hints(net, address, provider_name, imap_host).await;
     let users = users(imap_user, address);
     let (caldav, carddav, sieve) = tokio::join!(
-        dav(probe, &hints.caldav, &users, password, Kind::Calendar, ServiceKind::CalDav),
-        dav(probe, &hints.carddav, &users, password, Kind::AddressBook, ServiceKind::CardDav),
+        dav(
+            probe,
+            &hints.caldav,
+            &users,
+            password,
+            Kind::Calendar,
+            ServiceKind::CalDav
+        ),
+        dav(
+            probe,
+            &hints.carddav,
+            &users,
+            password,
+            Kind::AddressBook,
+            ServiceKind::CardDav
+        ),
         sieve(probe, &hints.sieve, &users, password),
     );
-    FoundServices { caldav: caldav.clone().ok(), carddav: carddav.clone().ok(), sieve, caldav_missed: caldav.err(), carddav_missed: carddav.err() }
+    FoundServices {
+        caldav: caldav.clone().ok(),
+        carddav: carddav.clone().ok(),
+        sieve,
+        caldav_missed: caldav.err(),
+        carddav_missed: carddav.err(),
+    }
 }
 
 /// Keeps what was found, leaving a URL the person typed as it is and a
 /// server found before when nothing was found now. Answers whether a
 /// confirmed server is new or moved, so the account's services need
 /// building again.
-pub async fn keep_found(db: &Db, account_id: AccountId, found: &FoundServices) -> Result<bool, SyncError> {
+pub async fn keep_found(
+    db: &Db,
+    account_id: AccountId,
+    found: &FoundServices,
+) -> Result<bool, SyncError> {
     let found = found.clone();
     Ok(db
         .write(move |c| {
@@ -177,7 +262,10 @@ pub async fn keep_found(db: &Db, account_id: AccountId, found: &FoundServices) -
                 services::save_miss(c, account_id, kind, missed.filter(|_| found.is_none()))?;
             }
             let mut changed = false;
-            for new in [found.caldav, found.carddav, found.sieve].into_iter().flatten() {
+            for new in [found.caldav, found.carddav, found.sieve]
+                .into_iter()
+                .flatten()
+            {
                 let old = held.iter().find(|h| h.kind == new.kind);
                 if old.is_some_and(|o| o.source == "typed") || old == Some(&new) {
                     continue;
@@ -202,21 +290,29 @@ pub async fn keep_found(db: &Db, account_id: AccountId, found: &FoundServices) -
 /// password instead of refreshing.
 /// Answers what the account can use, and whether a confirmed server is
 /// new or moved.
-pub async fn keep_oauth_table(db: &Db, account: &mailrs_domain::Account, session_url: &str) -> Result<(FoundServices, bool), SyncError> {
+pub async fn keep_oauth_table(
+    db: &Db,
+    account: &mailrs_domain::Account,
+    session_url: &str,
+) -> Result<(FoundServices, bool), SyncError> {
     let services = mailrs_discover::jmap_named(account.provider_name())
         .and_then(|p| p.imap_host)
         .map(|host| mailrs_discover::services_of(&host))
         .unwrap_or_default();
     let row = |kind, url: Option<String>| {
-        url.filter(|url| mailrs_dav::shares_site(session_url, url)).map(|url| FoundService {
-            kind,
-            url,
-            user_name: account.email.clone(),
-            confirmed: true,
-            source: source_word(Source::Table).into(),
-        })
+        url.filter(|url| mailrs_dav::shares_site(session_url, url))
+            .map(|url| FoundService {
+                kind,
+                url,
+                user_name: account.email.clone(),
+                confirmed: true,
+                source: source_word(Source::Table).into(),
+            })
     };
-    let table = [row(ServiceKind::CalDav, services.caldav), row(ServiceKind::CardDav, services.carddav)];
+    let table = [
+        row(ServiceKind::CalDav, services.caldav),
+        row(ServiceKind::CardDav, services.carddav),
+    ];
     let account_id = account.id;
     Ok(db
         .write(move |c| {
@@ -255,20 +351,57 @@ pub async fn keep_oauth_table(db: &Db, account: &mailrs_domain::Account, session
 }
 
 /// A URL the person typed for `kind`, checked with the login and kept.
-pub async fn use_typed<P: ServiceProbe>(probe: &P, db: &Db, account_id: AccountId, kind: ServiceKind, url: &str, user: &str, password: &str) -> Result<FoundService, SyncError> {
-    let url = url.trim();
-    if url.starts_with("http://") {
-        return Err(BackendError::Refused(mailrs_domain::translate::gettext("Penguin Mail reaches calendar and contact servers over HTTPS only.")).into());
-    }
-    let url = match url.contains("://") {
-        true => url.to_string(),
-        false => format!("https://{url}"),
+pub async fn use_typed<P: ServiceProbe>(
+    probe: &P,
+    db: &Db,
+    account_id: AccountId,
+    kind: ServiceKind,
+    url: &str,
+    user: &str,
+    password: &str,
+) -> Result<FoundService, SyncError> {
+    let url = https_url(url).ok_or_else(|| BackendError::Refused(https_only()))?;
+    let found = typed(probe, kind, url, user, password).await?;
+    let kept = found.clone();
+    db.write(move |c| services::save(c, account_id, &kept))
+        .await?;
+    Ok(found)
+}
+
+/// What an address under any scheme but HTTPS is refused with.
+pub(crate) fn https_only() -> String {
+    mailrs_domain::translate::gettext(
+        "Penguin Mail reaches calendar and contact servers over HTTPS only.",
+    )
+}
+
+/// A CalDAV or CardDAV address as the person typed it, in the form the
+/// client takes: a bare host stands for its root, over HTTPS. `None` for
+/// an address under any other scheme, which nothing is sent to.
+pub(crate) fn https_url(typed: &str) -> Option<String> {
+    let typed = typed.trim();
+    let url = match typed.split_once("://") {
+        Some((scheme, _)) if scheme.eq_ignore_ascii_case("https") => typed.to_string(),
+        Some(_) => return None,
+        None => format!("https://{typed}"),
     };
-    let url = match url.trim_end_matches('/').matches('/').count() {
+    Some(match url.trim_end_matches('/').matches('/').count() {
         // "https://host" becomes "https://host/".
         2 => format!("{}/", url.trim_end_matches('/')),
         _ => url,
-    };
+    })
+}
+
+/// The server at `url` for `kind`, once it took the login. The person
+/// typed the address, which is their yes to sending the password there
+/// and nowhere else. Nothing is kept.
+pub(crate) async fn typed<P: ServiceProbe>(
+    probe: &P,
+    kind: ServiceKind,
+    url: String,
+    user: &str,
+    password: &str,
+) -> Result<FoundService, SyncError> {
     let dav_kind = match kind {
         ServiceKind::CalDav => Kind::Calendar,
         ServiceKind::CardDav => Kind::AddressBook,
@@ -277,27 +410,47 @@ pub async fn use_typed<P: ServiceProbe>(probe: &P, db: &Db, account_id: AccountI
     tokio::time::timeout(PROBE_LIMIT, probe.dav(&url, user, password, dav_kind))
         .await
         .map_err(|_| BackendError::Offline("the server took too long".into()))??;
-    let found = FoundService { kind, url, user_name: user.to_string(), confirmed: true, source: "typed".into() };
-    let kept = found.clone();
-    db.write(move |c| services::save(c, account_id, &kept)).await?;
-    Ok(found)
+    Ok(FoundService {
+        kind,
+        url,
+        user_name: user.to_string(),
+        confirmed: true,
+        source: "typed".into(),
+    })
 }
 
 /// The person said yes to the server kept for `kind`: try the login
 /// there now, and use it once it works.
-pub async fn confirm_found<P: ServiceProbe>(probe: &P, db: &Db, account_id: AccountId, kind: ServiceKind, password: &str) -> Result<(), SyncError> {
+pub async fn confirm_found<P: ServiceProbe>(
+    probe: &P,
+    db: &Db,
+    account_id: AccountId,
+    kind: ServiceKind,
+    password: &str,
+) -> Result<(), SyncError> {
     let held = db.read(move |c| services::load(c, account_id)).await?;
-    let mut row = held.into_iter().find(|h| h.kind == kind).ok_or(BackendError::NotFound)?;
+    let mut row = held
+        .into_iter()
+        .find(|h| h.kind == kind)
+        .ok_or(BackendError::NotFound)?;
     match kind {
         ServiceKind::CalDav | ServiceKind::CardDav => {
-            let dav_kind = if kind == ServiceKind::CalDav { Kind::Calendar } else { Kind::AddressBook };
-            tokio::time::timeout(PROBE_LIMIT, probe.dav(&row.url, &row.user_name, password, dav_kind))
-                .await
-                .map_err(|_| BackendError::Offline("the server took too long".into()))??;
+            let dav_kind = if kind == ServiceKind::CalDav {
+                Kind::Calendar
+            } else {
+                Kind::AddressBook
+            };
+            tokio::time::timeout(
+                PROBE_LIMIT,
+                probe.dav(&row.url, &row.user_name, password, dav_kind),
+            )
+            .await
+            .map_err(|_| BackendError::Offline("the server took too long".into()))??;
         }
         ServiceKind::Sieve => return Err(BackendError::Unsupported.into()),
     }
     row.confirmed = true;
-    db.write(move |c| services::save(c, account_id, &row)).await?;
+    db.write(move |c| services::save(c, account_id, &row))
+        .await?;
     Ok(())
 }

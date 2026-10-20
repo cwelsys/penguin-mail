@@ -11,14 +11,21 @@ pub(super) fn rules(s: &mut GraphState) -> Answer<Vec<MessageRule>> {
 
 pub(super) fn create_rule(s: &mut GraphState, rule: &MessageRule) -> Answer<MessageRule> {
     s.refuses(Area::Rules)?;
-    let made = MessageRule { id: s.new_id("rule"), ..rule.clone() };
+    let made = MessageRule {
+        id: s.new_id("rule"),
+        ..rule.clone()
+    };
     s.rules.push(made.clone());
     Ok(made)
 }
 
 pub(super) fn delete_rule(s: &mut GraphState, id: &str) -> Answer<()> {
     s.refuses(Area::Rules)?;
-    let at = s.rules.iter().position(|r| r.id == id).ok_or(GraphError::NotFound)?;
+    let at = s
+        .rules
+        .iter()
+        .position(|r| r.id == id)
+        .ok_or(GraphError::NotFound)?;
     s.rules.remove(at);
     Ok(())
 }
@@ -28,7 +35,10 @@ pub(super) fn automatic_replies(s: &mut GraphState) -> Answer<AutomaticReplies> 
     Ok(s.replies.clone())
 }
 
-pub(super) fn set_automatic_replies(s: &mut GraphState, replies: &AutomaticReplies) -> Answer<AutomaticReplies> {
+pub(super) fn set_automatic_replies(
+    s: &mut GraphState,
+    replies: &AutomaticReplies,
+) -> Answer<AutomaticReplies> {
     s.refuses(Area::Replies)?;
     s.replies_sent.push(replies.clone());
     let keeps = match s.reply_writes {
@@ -36,7 +46,9 @@ pub(super) fn set_automatic_replies(s: &mut GraphState, replies: &AutomaticRepli
         ReplyWrites::Ignored => false,
         ReplyWrites::Personal => match replies.status.as_str() {
             "alwaysEnabled" => false,
-            "disabled" => s.replies.status != "scheduled" || replies.scheduled_start_date_time.is_some(),
+            "disabled" => {
+                s.replies.status != "scheduled" || replies.scheduled_start_date_time.is_some()
+            }
             _ => true,
         },
     };
@@ -54,11 +66,15 @@ pub(super) fn overrides(s: &mut GraphState) -> Answer<Vec<Override>> {
 /// A sender has one override: a second for the same address replaces it.
 pub(super) fn set_override(s: &mut GraphState, address: &str, other: bool) -> Answer<Override> {
     s.refuses(Area::Rules)?;
-    s.overrides.retain(|o| o.sender_email_address.address.as_deref() != Some(address));
+    s.overrides
+        .retain(|o| o.sender_email_address.address.as_deref() != Some(address));
     let made = Override {
         id: s.new_id("override"),
         classify_as: if other { "other" } else { "focused" }.into(),
-        sender_email_address: EmailAddress { name: None, address: Some(address.to_string()) },
+        sender_email_address: EmailAddress {
+            name: None,
+            address: Some(address.to_string()),
+        },
     };
     s.overrides.push(made.clone());
     Ok(made)
@@ -66,7 +82,11 @@ pub(super) fn set_override(s: &mut GraphState, address: &str, other: bool) -> An
 
 pub(super) fn delete_override(s: &mut GraphState, id: &str) -> Answer<()> {
     s.refuses(Area::Rules)?;
-    let at = s.overrides.iter().position(|o| o.id == id).ok_or(GraphError::NotFound)?;
+    let at = s
+        .overrides
+        .iter()
+        .position(|o| o.id == id)
+        .ok_or(GraphError::NotFound)?;
     s.overrides.remove(at);
     Ok(())
 }
@@ -91,7 +111,10 @@ mod tests {
     #[tokio::test]
     async fn deleting_an_unknown_rule_is_not_found() {
         let fake = FakeGraph::new();
-        assert!(matches!(fake.delete_rule("nope").await, Err(GraphError::NotFound)));
+        assert!(matches!(
+            fake.delete_rule("nope").await,
+            Err(GraphError::NotFound)
+        ));
     }
 
     #[tokio::test]
@@ -101,6 +124,9 @@ mod tests {
         assert_eq!(replies.status, "disabled");
         replies.status = "alwaysEnabled".into();
         fake.set_automatic_replies(&replies).await.unwrap();
-        assert_eq!(fake.automatic_replies().await.unwrap().status, "alwaysEnabled");
+        assert_eq!(
+            fake.automatic_replies().await.unwrap().status,
+            "alwaysEnabled"
+        );
     }
 }

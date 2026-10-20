@@ -12,11 +12,13 @@ use crate::BackendError;
 use crate::services::AutoReplyService;
 
 fn millis(at: Option<&str>) -> Option<EpochMillis> {
-    at.and_then(|at| DateTime::parse_from_rfc3339(at).ok()).map(|at| at.timestamp_millis())
+    at.and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.timestamp_millis())
 }
 
 fn date(at: Option<EpochMillis>) -> Option<String> {
-    at.and_then(DateTime::<Utc>::from_timestamp_millis).map(|at| at.to_rfc3339_opts(SecondsFormat::Secs, true))
+    at.and_then(DateTime::<Utc>::from_timestamp_millis)
+        .map(|at| at.to_rfc3339_opts(SecondsFormat::Secs, true))
 }
 
 /// The reply as the app shows it. A reply written elsewhere in HTML
@@ -40,7 +42,10 @@ fn shown(reply: &VacationResponse) -> Vacation {
 
 /// The local date `at` falls on.
 fn day_of(at: EpochMillis) -> Option<NaiveDate> {
-    Local.timestamp_millis_opt(at).single().map(|at| at.date_naive())
+    Local
+        .timestamp_millis_opt(at)
+        .single()
+        .map(|at| at.date_naive())
 }
 
 /// What turns `held`, the server's reply, into `wanted`: only the fields
@@ -59,7 +64,8 @@ fn patch(held: &VacationResponse, wanted: &Vacation) -> VacationPatch {
         is_enabled: (wanted.enabled != was.enabled).then_some(wanted.enabled),
         from_date: (first_day(wanted.start) != first_day(was.start)).then(|| date(wanted.start)),
         to_date: (last_day(wanted.end) != last_day(was.end)).then(|| date(wanted.end)),
-        subject: (subject != was.subject.trim()).then(|| Some(subject.to_string()).filter(|s| !s.is_empty())),
+        subject: (subject != was.subject.trim())
+            .then(|| Some(subject.to_string()).filter(|s| !s.is_empty())),
         text_body: (wanted.body != was.body).then(|| Some(wanted.body.clone())),
         html_body: (wanted.body != was.body && held.html_body.is_some()).then_some(None),
     }

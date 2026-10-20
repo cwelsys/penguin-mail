@@ -15,8 +15,9 @@ use mailrs_sieve::client::{Login as SieveLogin, ManageSieveClient};
 use mailrs_store::services::{FoundService, ServiceKind};
 
 use super::{
-    AccountServices, AnyAutoReply, AnyCalendar, AnyContacts, AnyDav, AnyIdentities, AnyJmap, AnyMail, AnyRules,
-    AnySieve, CalDav, CardDav, Jmap, JmapSettings, JmapSieve, LocalRules, RulesBeside, SERVER_REPLY_SCRIPT, SieveRules,
+    AccountServices, AnyAutoReply, AnyCalendar, AnyContacts, AnyDav, AnyIdentities, AnyJmap,
+    AnyMail, AnyRules, AnySieve, CalDav, CardDav, Jmap, JmapSettings, JmapSieve, LocalRules,
+    RulesBeside, SERVER_REPLY_SCRIPT, SieveRules,
 };
 
 /// A calendar, contacts or rules server found for the account and
@@ -68,7 +69,11 @@ impl AccountServices {
     /// only one script runs, so the two would turn each other off. With
     /// no Sieve on the session, JMAP's own reply wins over one a
     /// ManageSieve server brings with its rules.
-    pub(crate) fn jmap_from(client: impl Into<AnyJmap>, settings: JmapSettings, beside: Beside) -> AccountServices {
+    pub(crate) fn jmap_from(
+        client: impl Into<AnyJmap>,
+        settings: JmapSettings,
+        beside: Beside,
+    ) -> AccountServices {
         let offers = |capability: &str| settings.capabilities.iter().any(|c| c == capability);
         let (contacts, calendars, sieve, vacation) = (
             offers(mailrs_jmap::CONTACTS),
@@ -98,7 +103,9 @@ impl AccountServices {
             .beside_server_reply(vacation.then_some(SERVER_REPLY_SCRIPT));
             services = services.with_auto_reply(AnyAutoReply::JmapSieve(rules.clone()));
             services = match (&beside.local, beside.local_kept) {
-                (Some(local), true) => services.with_rules(AnyRules::Beside(RulesBeside::new(rules, local.clone()))),
+                (Some(local), true) => {
+                    services.with_rules(AnyRules::Beside(RulesBeside::new(rules, local.clone())))
+                }
                 _ => services.with_rules(AnyRules::JmapSieve(rules)),
             };
         }
@@ -116,7 +123,10 @@ impl AccountServices {
     }
 
     fn with_found(self, beside: &Beside) -> AccountServices {
-        beside.found.iter().fold(self, |services, found| services.attach(found, beside))
+        beside
+            .found
+            .iter()
+            .fold(self, |services, found| services.attach(found, beside))
     }
 
     fn or_local_rules(self, local: Option<LocalRules>) -> AccountServices {
@@ -139,9 +149,19 @@ impl AccountServices {
         };
         match service.kind {
             ServiceKind::CalDav => {
-                match DavClient::new(&service.url, DavKind::Calendar, DavLogin::new(&service.user_name, secret)).map(with_bearer) {
+                match DavClient::new(
+                    &service.url,
+                    DavKind::Calendar,
+                    DavLogin::new(&service.user_name, secret),
+                )
+                .map(with_bearer)
+                {
                     Ok(client) => {
-                        let calendar = CalDav::new(Arc::new(AnyDav::from(client)), self.mail.clone(), vec![beside.address.clone()]);
+                        let calendar = CalDav::new(
+                            Arc::new(AnyDav::from(client)),
+                            self.mail.clone(),
+                            vec![beside.address.clone()],
+                        );
                         self.with_calendar(AnyCalendar::Dav(calendar))
                     }
                     Err(err) => {
@@ -151,8 +171,16 @@ impl AccountServices {
                 }
             }
             ServiceKind::CardDav => {
-                match DavClient::new(&service.url, DavKind::AddressBook, DavLogin::new(&service.user_name, secret)).map(with_bearer) {
-                    Ok(client) => self.with_contacts(AnyContacts::Dav(CardDav::new(Arc::new(AnyDav::from(client))))),
+                match DavClient::new(
+                    &service.url,
+                    DavKind::AddressBook,
+                    DavLogin::new(&service.user_name, secret),
+                )
+                .map(with_bearer)
+                {
+                    Ok(client) => self.with_contacts(AnyContacts::Dav(CardDav::new(Arc::new(
+                        AnyDav::from(client),
+                    )))),
                     Err(err) => {
                         tracing::warn!(account = id, %err, "could not set up the contacts server");
                         self
@@ -165,14 +193,16 @@ impl AccountServices {
                     Some((host, port)) => (host, port.parse().unwrap_or(mailrs_sieve::PORT)),
                     None => (service.url.as_str(), mailrs_sieve::PORT),
                 };
-                let client = ManageSieveClient::new(host, port, SieveLogin::new(&service.user_name, secret));
+                let client =
+                    ManageSieveClient::new(host, port, SieveLogin::new(&service.user_name, secret));
                 let rules = SieveRules::new(
                     Arc::new(AnySieve::from(client)),
                     self.mail.clone(),
                     beside.address.clone(),
                     beside.provider_name.clone(),
                 );
-                self.with_rules(AnyRules::Sieve(rules.clone())).with_auto_reply(AnyAutoReply::Sieve(rules))
+                self.with_rules(AnyRules::Sieve(rules.clone()))
+                    .with_auto_reply(AnyAutoReply::Sieve(rules))
             }
         }
     }
@@ -188,7 +218,9 @@ mod tests {
 
     use super::{Beside, FoundServer};
     use crate::fake::FakeJmap;
-    use crate::{AccountServices, AnyAutoReply, AnyCalendar, AnyContacts, AnyRules, JmapSettings, LocalRules};
+    use crate::{
+        AccountServices, AnyAutoReply, AnyCalendar, AnyContacts, AnyRules, JmapSettings, LocalRules,
+    };
 
     fn settings(offers: &[&str]) -> JmapSettings {
         JmapSettings {
@@ -202,8 +234,18 @@ mod tests {
     }
 
     fn found(kind: ServiceKind, url: &str) -> FoundServer {
-        let service = FoundService { kind, url: url.into(), user_name: "me".into(), confirmed: true, source: "table".into() };
-        FoundServer { service, secret: "app password".into(), bearer: None }
+        let service = FoundService {
+            kind,
+            url: url.into(),
+            user_name: "me".into(),
+            confirmed: true,
+            source: "table".into(),
+        };
+        FoundServer {
+            service,
+            secret: "app password".into(),
+            bearer: None,
+        }
     }
 
     /// A JMAP account whose session offers `offers`, with `found` beside
@@ -227,13 +269,23 @@ mod tests {
     fn a_session_with_sieve_keeps_the_reply_in_the_rules_script() {
         let services = jmap(&[SIEVE, VACATION], Vec::new(), false);
         assert!(matches!(services.rules, Some(AnyRules::JmapSieve(_))));
-        assert!(matches!(services.auto_reply, Some(AnyAutoReply::JmapSieve(_))), "not JMAP's own reply");
+        assert!(
+            matches!(services.auto_reply, Some(AnyAutoReply::JmapSieve(_))),
+            "not JMAP's own reply"
+        );
     }
 
     #[test]
     fn a_session_without_sieve_answers_with_its_own_reply_over_a_sieve_server() {
-        let services = jmap(&[VACATION], vec![found(ServiceKind::Sieve, "sieve.example.com:4190")], false);
-        assert!(matches!(services.rules, Some(AnyRules::Sieve(_))), "the rules run on the found server");
+        let services = jmap(
+            &[VACATION],
+            vec![found(ServiceKind::Sieve, "sieve.example.com:4190")],
+            false,
+        );
+        assert!(
+            matches!(services.rules, Some(AnyRules::Sieve(_))),
+            "the rules run on the found server"
+        );
         assert!(matches!(services.auto_reply, Some(AnyAutoReply::Jmap(_))));
     }
 
@@ -242,7 +294,10 @@ mod tests {
         let services = jmap(&[SIEVE], Vec::new(), true);
         assert!(matches!(services.rules, Some(AnyRules::Beside(_))));
         let services = jmap(&[], Vec::new(), true);
-        assert!(matches!(services.rules, Some(AnyRules::Local(_))), "no server runs rules");
+        assert!(
+            matches!(services.rules, Some(AnyRules::Local(_))),
+            "no server runs rules"
+        );
         assert!(services.auto_reply.is_none());
     }
 
@@ -264,9 +319,14 @@ mod tests {
     /// Sieve gets the script's reply, as a real one does.
     #[test]
     fn the_fake_is_set_up_as_a_real_account() {
-        let fake = FakeJmap::new().with_sieve(&["fileinto", "vacation"]).with_capability(VACATION);
+        let fake = FakeJmap::new()
+            .with_sieve(&["fileinto", "vacation"])
+            .with_capability(VACATION);
         let services = AccountServices::fake_jmap(Arc::new(fake));
         assert!(matches!(services.rules, Some(AnyRules::JmapSieve(_))));
-        assert!(matches!(services.auto_reply, Some(AnyAutoReply::JmapSieve(_))));
+        assert!(matches!(
+            services.auto_reply,
+            Some(AnyAutoReply::JmapSieve(_))
+        ));
     }
 }

@@ -1,4 +1,5 @@
-//! The Dock badge's platform boundary; other desktops use the tray.
+//! The Dock badge's platform boundary: the macOS Dock, or a Linux dock
+//! that draws badges.
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -6,10 +7,6 @@ mod macos;
 pub(super) use macos::Badge;
 
 #[cfg(not(target_os = "macos"))]
-#[derive(Default)]
-pub(super) struct Badge {}
-
+mod linux;
 #[cfg(not(target_os = "macos"))]
-impl Badge {
-    pub(super) fn show(&self, _unread: i64) {}
-}
+pub(super) use linux::Badge;

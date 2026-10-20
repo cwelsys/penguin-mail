@@ -11,8 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use mailrs_domain::{EpochMillis, Target};
-use tokio::io::AsyncWriteExt;
 use mailrs_mime::address::parse_address_list;
+use tokio::io::AsyncWriteExt;
 
 use crate::{Accounts, MailActions, SyncError};
 
@@ -55,7 +55,11 @@ impl<A: Accounts> MailActions<A> {
     /// `export_mbox` into the file at `path`, written beside it under a
     /// temporary name and renamed over it when every message is in, so a
     /// failed export leaves what was there. Answers the file's length.
-    pub async fn export_mbox_file(&self, targets: &[Target], path: &Path) -> Result<u64, SyncError> {
+    pub async fn export_mbox_file(
+        &self,
+        targets: &[Target],
+        path: &Path,
+    ) -> Result<u64, SyncError> {
         let mut file = Replacing::create(path).await.map_err(SyncError::io)?;
         self.export_mbox_to(targets, file.file()).await?;
         file.finish().await.map_err(SyncError::io)
@@ -98,8 +102,15 @@ impl Replacing {
         if let Ok(meta) = &found
             && !meta.is_file()
         {
-            let file = tokio::fs::OpenOptions::new().write(true).open(&path).await?;
-            return Ok(Replacing { file: Some(Counted::new(file)), partial: None, path });
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .await?;
+            return Ok(Replacing {
+                file: Some(Counted::new(file)),
+                partial: None,
+                path,
+            });
         }
         let mut partial = path.as_os_str().to_owned();
         partial.push(".part");
@@ -109,7 +120,11 @@ impl Replacing {
         if let Ok(meta) = found {
             file.set_permissions(meta.permissions()).await?;
         }
-        Ok(Replacing { file: Some(Counted::new(file)), partial: Some(partial), path })
+        Ok(Replacing {
+            file: Some(Counted::new(file)),
+            partial: Some(partial),
+            path,
+        })
     }
 
     /// Where to write.
@@ -156,11 +171,15 @@ async fn through_links(path: &Path) -> PathBuf {
     let mut path = path.to_path_buf();
     // Past this many, a loop of links answers the last one read.
     for _ in 0..32 {
-        let Ok(meta) = tokio::fs::symlink_metadata(&path).await else { break };
+        let Ok(meta) = tokio::fs::symlink_metadata(&path).await else {
+            break;
+        };
         if !meta.file_type().is_symlink() {
             break;
         }
-        let Ok(next) = tokio::fs::read_link(&path).await else { break };
+        let Ok(next) = tokio::fs::read_link(&path).await else {
+            break;
+        };
         path = match path.parent() {
             Some(parent) if next.is_relative() => parent.join(next),
             _ => next,
@@ -209,11 +228,17 @@ impl tokio::io::AsyncWrite for Counted {
         polled
     }
 
-    fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
         std::pin::Pin::new(&mut self.file).poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
         std::pin::Pin::new(&mut self.file).poll_shutdown(cx)
     }
 }

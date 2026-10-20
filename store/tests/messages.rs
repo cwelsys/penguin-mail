@@ -158,10 +158,7 @@ fn label_changes_report_the_thread_and_skip_unknown_messages() {
     )
     .unwrap();
     assert_eq!(touched.threads.into_iter().collect::<Vec<_>>(), ["t1"]);
-    assert_eq!(
-        labels_of(&conn, id, "a"),
-        ["INBOX", "STARRED"]
-    );
+    assert_eq!(labels_of(&conn, id, "a"), ["INBOX", "STARRED"]);
     let unknown = messages::apply(&conn, id, &[Change::label("zzz", "INBOX", true)]).unwrap();
     assert!(unknown.threads.is_empty());
     assert!(
@@ -343,10 +340,7 @@ fn a_change_set_refreshes_what_it_touched_and_reports_what_it_did() {
         }],
         "b was in the inbox already, and zzz is not stored"
     );
-    assert_eq!(
-        labels_of(&conn, id, "a"),
-        ["INBOX", "STARRED"]
-    );
+    assert_eq!(labels_of(&conn, id, "a"), ["INBOX", "STARRED"]);
     let t1 = threads::get_thread(&conn, id, "t1").unwrap().unwrap();
     assert!(!t1.unread && t1.starred);
 
@@ -396,7 +390,16 @@ fn a_mailbox_met_before_the_listing_takes_its_role_from_the_listing() {
 #[test]
 fn a_stored_message_reads_back_with_its_roles() {
     let (conn, account) = db();
-    store(&conn, &[meta(account, "a", "t1", 100, &["INBOX", "STARRED", "Label_1"])]);
+    store(
+        &conn,
+        &[meta(
+            account,
+            "a",
+            "t1",
+            100,
+            &["INBOX", "STARRED", "Label_1"],
+        )],
+    );
     let read = messages::by_ids(&conn, account, &["a".into()]).unwrap();
     assert_eq!(read[0].roles, [Role::Inbox]);
     assert!(read[0].is_flagged());
@@ -422,6 +425,36 @@ fn sent_copies_are_found_by_message_id_in_either_spelling() {
     };
     assert_eq!(found("s1@example.com"), ["s1"]);
     assert_eq!(found("s2@example.com"), ["s2"]);
-    assert!(found("r1@example.com").is_empty(), "mail that came in is not Sent");
+    assert!(
+        found("r1@example.com").is_empty(),
+        "mail that came in is not Sent"
+    );
     assert!(found("nobody@example.com").is_empty());
+}
+
+/// What a notification still waits on: mail unread and in the Inbox. A
+/// read message, one filed out of the Inbox, and one the store lost all
+/// drop out, in one query over the ids asked.
+#[test]
+fn unread_in_inbox_keeps_only_the_mail_still_waiting_to_be_read() {
+    let (conn, id) = db();
+    store(
+        &conn,
+        &[
+            meta(id, "a", "t1", 100, &["INBOX", "UNREAD"]),
+            meta(id, "b", "t2", 200, &["INBOX"]),
+            meta(id, "c", "t3", 300, &["UNREAD"]),
+            meta(id, "d", "t4", 400, &["INBOX", "UNREAD"]),
+        ],
+    );
+    let asked: Vec<String> = ["a", "b", "c", "gone"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let still = messages::unread_in_inbox(&conn, id, &asked).unwrap();
+    assert_eq!(
+        still,
+        HashSet::from(["a".to_string()]),
+        "only what was asked, and only unread Inbox mail"
+    );
 }

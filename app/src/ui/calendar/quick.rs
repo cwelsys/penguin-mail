@@ -68,7 +68,9 @@ pub fn retitled(text: &str, from: TypeChoice, to: TypeChoice) -> Option<String> 
 /// name, and under it the account's address once the choices span more
 /// than one account, where two may share a name such as "Personal".
 pub fn choice_lines(choices: &[(AccountId, String, Calendar)]) -> Vec<(String, Option<String>)> {
-    let several = choices.iter().any(|(a, _, _)| Some(a) != choices.first().map(|(a, _, _)| a));
+    let several = choices
+        .iter()
+        .any(|(a, _, _)| Some(a) != choices.first().map(|(a, _, _)| a));
     choices
         .iter()
         .map(|(_, address, calendar)| (calendar.name.clone(), several.then(|| address.clone())))
@@ -79,7 +81,10 @@ pub fn choice_lines(choices: &[(AccountId, String, Calendar)]) -> Vec<(String, O
 /// where the list shows one.
 pub fn spoken_choice(name: &str, account: Option<&str>) -> String {
     match account {
-        Some(account) => fill(&gettext("{name}, {account}"), &[("name", name), ("account", account)]),
+        Some(account) => fill(
+            &gettext("{name}, {account}"),
+            &[("name", name), ("account", account)],
+        ),
         None => name.to_string(),
     }
 }
@@ -99,7 +104,10 @@ impl ChoiceView {
             .css_classes(["checked-dot"])
             .valign(gtk::Align::Center)
             .build();
-        let name = gtk::Label::builder().xalign(0.0).css_classes(["caption"]).build();
+        let name = gtk::Label::builder()
+            .xalign(0.0)
+            .css_classes(["caption"])
+            .build();
         let account = gtk::Label::builder()
             .xalign(0.0)
             .css_classes(["caption", "quick-account"])
@@ -114,11 +122,17 @@ impl ChoiceView {
         let widget = gtk::Box::builder().spacing(8).build();
         widget.append(&dot);
         widget.append(&lines);
-        ChoiceView { widget, dot, name, account }
+        ChoiceView {
+            widget,
+            dot,
+            name,
+            account,
+        }
     }
 
     fn show(&self, colour: &str, name: &str, account: Option<&str>) {
-        self.dot.set_css_classes(&["checked-dot", &tint::css_class(colour)]);
+        self.dot
+            .set_css_classes(&["checked-dot", &tint::css_class(colour)]);
         self.name.set_label(name);
         self.account.set_label(account.unwrap_or_default());
         self.account.set_visible(account.is_some());
@@ -267,7 +281,9 @@ impl Quick {
         let weak = Rc::downgrade(&this);
         this.list.connect_row_activated(move |_, row| {
             let Some(this) = weak.upgrade() else { return };
-            let Ok(index) = usize::try_from(row.index()) else { return };
+            let Ok(index) = usize::try_from(row.index()) else {
+                return;
+            };
             this.show_calendar(index);
             this.show_kinds();
             if let Some(list) = this.calendar_button.popover() {
@@ -290,7 +306,9 @@ impl Quick {
             if this.quiet.get() {
                 return;
             }
-            let choice = group.active_name().map_or(TypeChoice::Event, |n| toggle_choice(&n));
+            let choice = group
+                .active_name()
+                .map_or(TypeChoice::Event, |n| toggle_choice(&n));
             this.pick_kind(choice);
         });
         let (t, s) = (this.title.clone(), this.save.clone());
@@ -336,7 +354,10 @@ impl Quick {
     /// More Details. `types` holds, for each choice, the types its type
     /// switch offers, or `None` for a calendar that takes events alone;
     /// `when` words the time for each type.
-    #[expect(clippy::too_many_arguments, reason = "each is a separate part of what the popover shows")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each is a separate part of what the popover shows"
+    )]
     pub fn show(
         self: &Rc<Self>,
         anchor: &gtk::Widget,
@@ -404,7 +425,9 @@ impl Quick {
     /// Shows the calendar at `index` among the choices as the one picked.
     fn show_calendar(&self, index: usize) {
         let choices = self.choices.borrow();
-        let Some((_, _, calendar)) = choices.get(index) else { return };
+        let Some((_, _, calendar)) = choices.get(index) else {
+            return;
+        };
         self.picked.set(index);
         let lines = choice_lines(&choices);
         let account = lines.get(index).and_then(|(_, account)| account.as_deref());
@@ -414,7 +437,10 @@ impl Quick {
         }
         name(
             &self.calendar_button,
-            &fill(&gettext("Calendar: {name}"), &[("name", &spoken_choice(&calendar.name, account))]),
+            &fill(
+                &gettext("Calendar: {name}"),
+                &[("name", &spoken_choice(&calendar.name, account))],
+            ),
         );
     }
 
@@ -422,13 +448,21 @@ impl Quick {
     /// the type picked where it still can, and hides it on a calendar
     /// that takes events alone.
     fn show_kinds(&self) {
-        let types = self.types.borrow().get(self.picked.get()).cloned().flatten();
+        let types = self
+            .types
+            .borrow()
+            .get(self.picked.get())
+            .cloned()
+            .flatten();
         let list = types.clone().unwrap_or_default();
         let kept = draft::kept_type(self.kind.get(), &list);
         self.quiet.set(true);
         self.kinds.remove_all();
         for choice in &list {
-            let toggle = adw::Toggle::builder().name(toggle_name(*choice)).label(type_label(*choice)).build();
+            let toggle = adw::Toggle::builder()
+                .name(toggle_name(*choice))
+                .label(type_label(*choice))
+                .build();
             self.kinds.add(toggle);
         }
         self.kinds.set_active_name(Some(toggle_name(kept)));
@@ -523,23 +557,45 @@ mod tests {
         assert_eq!(clamp_span(100.0, 60.0, 500.0), (100.0, 60.0));
     }
 
-    fn entry(account: AccountId, address: &str, id: &str, name: &str) -> (AccountId, String, Calendar) {
-        (account, address.into(), Calendar { id: id.into(), name: name.into(), ..Calendar::default() })
+    fn entry(
+        account: AccountId,
+        address: &str,
+        id: &str,
+        name: &str,
+    ) -> (AccountId, String, Calendar) {
+        (
+            account,
+            address.into(),
+            Calendar {
+                id: id.into(),
+                name: name.into(),
+                ..Calendar::default()
+            },
+        )
     }
 
     #[test]
     fn an_empty_title_takes_the_new_types_name() {
-        assert_eq!(retitled("", TypeChoice::Event, TypeChoice::Focus).as_deref(), Some("Focus time"));
+        assert_eq!(
+            retitled("", TypeChoice::Event, TypeChoice::Focus).as_deref(),
+            Some("Focus time")
+        );
         assert_eq!(
             retitled("Focus time", TypeChoice::Focus, TypeChoice::OutOfOffice).as_deref(),
             Some("Out of office")
         );
-        assert_eq!(retitled("Out of office", TypeChoice::OutOfOffice, TypeChoice::Event).as_deref(), Some(""));
+        assert_eq!(
+            retitled("Out of office", TypeChoice::OutOfOffice, TypeChoice::Event).as_deref(),
+            Some("")
+        );
     }
 
     #[test]
     fn a_typed_title_stays_when_the_type_changes() {
-        assert_eq!(retitled("Deep work", TypeChoice::Focus, TypeChoice::OutOfOffice), None);
+        assert_eq!(
+            retitled("Deep work", TypeChoice::Focus, TypeChoice::OutOfOffice),
+            None
+        );
     }
 
     #[test]
@@ -551,13 +607,22 @@ mod tests {
 
     #[test]
     fn one_accounts_calendars_go_by_their_names() {
-        let choices = [entry(1, "me@example.com", "me@example.com", "Personal"), entry(1, "me@example.com", "team", "Team")];
-        assert_eq!(choice_lines(&choices), [("Personal".to_string(), None), ("Team".to_string(), None)]);
+        let choices = [
+            entry(1, "me@example.com", "me@example.com", "Personal"),
+            entry(1, "me@example.com", "team", "Team"),
+        ];
+        assert_eq!(
+            choice_lines(&choices),
+            [("Personal".to_string(), None), ("Team".to_string(), None)]
+        );
     }
 
     #[test]
     fn calendars_of_several_accounts_carry_their_address_under_the_name() {
-        let choices = [entry(1, "me@example.com", "me@example.com", "Personal"), entry(2, "me@work.pt", "me@work.pt", "Personal")];
+        let choices = [
+            entry(1, "me@example.com", "me@example.com", "Personal"),
+            entry(2, "me@work.pt", "me@work.pt", "Personal"),
+        ];
         assert_eq!(
             choice_lines(&choices),
             [
@@ -569,7 +634,10 @@ mod tests {
 
     #[test]
     fn a_calendar_with_an_account_says_both_out_loud() {
-        assert_eq!(spoken_choice("Personal", Some("me@work.pt")), "Personal, me@work.pt");
+        assert_eq!(
+            spoken_choice("Personal", Some("me@work.pt")),
+            "Personal, me@work.pt"
+        );
         assert_eq!(spoken_choice("Personal", None), "Personal");
     }
 }

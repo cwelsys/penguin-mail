@@ -13,7 +13,7 @@ use gtk::{gdk, gio, glib};
 use mailrs_domain::calendar::Calendar;
 use mailrs_domain::calendar::list;
 use mailrs_domain::translate::{date_locale, fill, fill_plural, gettext};
-use mailrs_domain::{Account, AccountId, EpochMillis};
+use mailrs_domain::{Account, AccountId, AccountState, EpochMillis, Provider};
 use mailrs_store::services::Miss;
 use mailrs_sync::{Missing, Offers, Waiting, Withheld};
 
@@ -55,6 +55,25 @@ pub struct SidebarAccount {
     /// holiday calendars (`Offers::subscriptions`). When it does not, Add
     /// Calendar offers only New Calendar and the rows lose Unsubscribe.
     pub subscribes: bool,
+    pub provider: Provider,
+    pub state: AccountState,
+}
+
+impl SidebarAccount {
+    /// The account holds calendars and no mail. The mail sidebar has no
+    /// heading for it, so its heading here carries Sign In Again and
+    /// Remove Account.
+    pub fn calendar_only(&self) -> bool {
+        !self.provider.serves_mail()
+    }
+
+    /// A calendar account whose server stopped taking its password: the
+    /// calendars the copy still holds stay listed, with a line saying so
+    /// and Sign In Again under them. A mail account in that state is asked
+    /// in the mail window.
+    fn needs_sign_in(&self) -> bool {
+        self.calendar_only() && self.state == AccountState::NeedsReauth
+    }
 }
 
 /// The sidebar's rows from each account's provider offers, its own
@@ -90,6 +109,8 @@ pub fn sidebar_accounts(
                 hidden: Vec::new(),
                 changeable: offers.calendar_list,
                 subscribes: offers.subscriptions,
+                provider: account.provider,
+                state: account.state,
             }
         })
         .collect()
@@ -118,16 +139,22 @@ pub fn take_off_the_list(
 
 /// Whether an account keeps its heading in the list: not once every
 /// calendar it has is off the list, since the heading would stand over
-/// nothing. Hidden Calendars still brings them back.
+/// nothing. Hidden Calendars still brings them back. A calendar account
+/// keeps its heading all the same: Sign In Again and Remove Account are
+/// nowhere else.
 pub fn shows_heading(account: &SidebarAccount) -> bool {
-    !matches!(&account.reach, CalendarReach::Calendars(list) if list.is_empty() && !account.hidden.is_empty())
+    account.calendar_only()
+        || !matches!(&account.reach, CalendarReach::Calendars(list) if list.is_empty() && !account.hidden.is_empty())
 }
 
 /// Whether `change` alters what the next-event card at the foot of the
 /// mail sidebar shows: which calendars count, or their colour. A choice
 /// that opens a dialog changes nothing yet.
 pub fn redraws_next_event(change: &ListChange) -> bool {
-    matches!(change, ListChange::Shown { .. } | ListChange::Listed { .. } | ListChange::Color { .. })
+    matches!(
+        change,
+        ListChange::Shown { .. } | ListChange::Listed { .. } | ListChange::Color { .. }
+    )
 }
 
 /// One item of a calendar row's menu.
@@ -170,7 +197,12 @@ pub fn row_menu(calendar: &Calendar, changeable: bool, subscribes: bool) -> Vec<
 pub fn adding_accounts(rows: &[SidebarAccount]) -> Vec<(AccountId, String)> {
     rows.iter()
         .filter(|row| row.changeable)
-        .filter(|row| matches!(row.reach, CalendarReach::Calendars(_) | CalendarReach::PrimaryOnly(_)))
+        .filter(|row| {
+            matches!(
+                row.reach,
+                CalendarReach::Calendars(_) | CalendarReach::PrimaryOnly(_)
+            )
+        })
         .map(|row| (row.id, row.address.clone()))
         .collect()
 }
@@ -189,7 +221,10 @@ pub fn in_view(kind: ViewKind, day: NaiveDate) -> Option<(NaiveDate, NaiveDate)>
         ViewKind::Day | ViewKind::Agenda | ViewKind::Month => None,
         ViewKind::Week => {
             let range = Range::around(kind, day);
-            Some((range.first, range.first + Days::new(u64::from(range.days) - 1)))
+            Some((
+                range.first,
+                range.first + Days::new(u64::from(range.days) - 1),
+            ))
         }
     }
 }
@@ -277,7 +312,10 @@ pub fn waiting_accounts(accounts: &[(Account, Offers, Withheld)]) -> Vec<Account
 /// [`crate::locale_time::week_start_weekday`] starts: the mini month's
 /// own copy of `range::week_start_of` (private there).
 fn week_start_of(day: NaiveDate) -> NaiveDate {
-    mailrs_domain::calendar::week::week_start_on_or_before(day, crate::locale_time::week_start_weekday())
+    mailrs_domain::calendar::week::week_start_on_or_before(
+        day,
+        crate::locale_time::week_start_weekday(),
+    )
 }
 
 /// The 1st of the month `step` months from the one `month` falls in, for
@@ -341,19 +379,40 @@ pub enum AddKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListChange {
     /// Ticked or unticked a calendar's check.
-    Shown { account: AccountId, calendar: String, shown: bool },
+    Shown {
+        account: AccountId,
+        calendar: String,
+        shown: bool,
+    },
     /// Took a calendar off the list, or put it back.
-    Listed { account: AccountId, calendar: String, listed: bool },
+    Listed {
+        account: AccountId,
+        calendar: String,
+        listed: bool,
+    },
     /// Gave a calendar a colour of its own, or `None` for the provider's.
-    Color { account: AccountId, calendar: String, color: Option<String> },
+    Color {
+        account: AccountId,
+        calendar: String,
+        color: Option<String>,
+    },
     /// Folded an account's calendars under its heading, or opened them.
     Folded { address: String, folded: bool },
     /// Asked to rename a calendar, which opens a dialog.
-    Rename { account: AccountId, calendar: String },
+    Rename {
+        account: AccountId,
+        calendar: String,
+    },
     /// Asked to delete a calendar, which asks first.
-    Delete { account: AccountId, calendar: String },
+    Delete {
+        account: AccountId,
+        calendar: String,
+    },
     /// Asked to unsubscribe from a calendar, which asks first.
-    Unsubscribe { account: AccountId, calendar: String },
+    Unsubscribe {
+        account: AccountId,
+        calendar: String,
+    },
     /// Asked to add a calendar to an account, which opens a dialog.
     Add { account: AccountId, kind: AddKind },
 }
@@ -497,7 +556,10 @@ impl CalendarSidebar {
             .can_focus(false)
             .accessible_role(gtk::AccessibleRole::Presentation)
             .build();
-        let overlay = gtk::Overlay::builder().child(&scroller).vexpand(true).build();
+        let overlay = gtk::Overlay::builder()
+            .child(&scroller)
+            .vexpand(true)
+            .build();
         overlay.add_overlay(&fade);
         let adjustment = scroller.vadjustment();
         let show_fade = {
@@ -529,7 +591,10 @@ impl CalendarSidebar {
             .build();
         crate::ui::name(&previous, &gettext("Previous Month"));
         crate::ui::name(&next, &gettext("Next Month"));
-        let header = gtk::Box::builder().spacing(0).css_classes(["mini-month-header"]).build();
+        let header = gtk::Box::builder()
+            .spacing(0)
+            .css_classes(["mini-month-header"])
+            .build();
         header.append(&month_title);
         header.append(&previous);
         header.append(&next);
@@ -756,13 +821,22 @@ impl CalendarSidebar {
         let when_row = gtk::Box::builder().spacing(0).build();
         when_row.append(
             &gtk::Label::builder()
-                .label(words::waiting_when_words(w.start, w.all_day, &chrono::Local))
+                .label(words::waiting_when_words(
+                    w.start,
+                    w.all_day,
+                    &chrono::Local,
+                ))
                 .css_classes(["waiting-when", "dim-label"])
                 .xalign(0.0)
                 .build(),
         );
         if let Some(thread_id) = &w.thread_id {
-            when_row.append(&gtk::Label::builder().label(" · ").css_classes(["waiting-when", "dim-label"]).build());
+            when_row.append(
+                &gtk::Label::builder()
+                    .label(" · ")
+                    .css_classes(["waiting-when", "dim-label"])
+                    .build(),
+            );
             // A child label, since GTK names a button after its own label
             // over the name set below, and each card's door must say
             // which event's mail it opens.
@@ -777,8 +851,11 @@ impl CalendarSidebar {
                 .valign(gtk::Align::Center)
                 .build();
             crate::ui::name(&mail_button, &words::waiting_mail_name(&w.title));
-            let (on_open_mail, account_id, thread_id) =
-                (Rc::clone(&self.on_open_mail), w.account_id, thread_id.clone());
+            let (on_open_mail, account_id, thread_id) = (
+                Rc::clone(&self.on_open_mail),
+                w.account_id,
+                thread_id.clone(),
+            );
             mail_button.connect_clicked(move |_| on_open_mail(account_id, thread_id.clone()));
             when_row.append(&mail_button);
         }
@@ -803,7 +880,11 @@ impl CalendarSidebar {
             .css_classes(["waiting-card"])
             .activatable(true)
             .build();
-        crate::ui::describe(&row, &w.title, &words::waiting_card_detail(w.start, w.all_day, &chrono::Local));
+        crate::ui::describe(
+            &row,
+            &w.title,
+            &words::waiting_card_detail(w.start, w.all_day, &chrono::Local),
+        );
         row
     }
 
@@ -927,14 +1008,33 @@ impl CalendarSidebar {
                     body.append(&dim_line(reason));
                 }
             }
-            let folded = self.folded.borrow().contains(&account.address.to_lowercase());
+            if account.needs_sign_in() {
+                body.append(&dim_line(&gettext("The server refused the password")));
+                body.append(&sign_in_row(account));
+            }
+            let folded = self
+                .folded
+                .borrow()
+                .contains(&account.address.to_lowercase());
             let revealer = gtk::Revealer::builder()
                 .child(&body)
                 .reveal_child(!folded)
                 .transition_type(gtk::RevealerTransitionType::SlideDown)
                 .transition_duration(150)
                 .build();
-            self.calendar_list.append(&self.heading(&account.address, folded, &revealer));
+            let heading = self.heading(&account.address, folded, &revealer);
+            if account.calendar_only() {
+                let line = gtk::Box::builder()
+                    .spacing(2)
+                    .css_classes(["calendar-account"])
+                    .build();
+                heading.set_hexpand(true);
+                line.append(&heading);
+                line.append(&account_menu(account));
+                self.calendar_list.append(&line);
+            } else {
+                self.calendar_list.append(&heading);
+            }
             self.calendar_list.append(&revealer);
         }
         let adding = adding_accounts(accounts);
@@ -995,10 +1095,17 @@ impl CalendarSidebar {
         if folded {
             button.add_css_class("folded");
         }
-        crate::ui::describe(&button, address, &gettext("Show or hide this account's calendars"));
+        crate::ui::describe(
+            &button,
+            address,
+            &gettext("Show or hide this account's calendars"),
+        );
         button.update_state(&[gtk::accessible::State::Expanded(Some(!folded))]);
-        let (folded_set, on_change, revealer) =
-            (Rc::clone(&self.folded), Rc::clone(&self.on_change), revealer.clone());
+        let (folded_set, on_change, revealer) = (
+            Rc::clone(&self.folded),
+            Rc::clone(&self.on_change),
+            revealer.clone(),
+        );
         let address = address.to_string();
         button.connect_clicked(move |button| {
             let key = address.to_lowercase();
@@ -1040,7 +1147,11 @@ impl CalendarSidebar {
             .build();
         // Two accounts can each have a calendar called Personal; the
         // account address tells them apart.
-        crate::ui::describe(&check, &calendar.name, &calendar_detail(address, calendar.access.can_write()));
+        crate::ui::describe(
+            &check,
+            &calendar.name,
+            &calendar_detail(address, calendar.access.can_write()),
+        );
         let label = gtk::Label::builder()
             .label(&calendar.name)
             .css_classes(["calendar-name"])
@@ -1059,21 +1170,31 @@ impl CalendarSidebar {
         }
         let options = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .menu_model(&calendar_menu(account_id, calendar, account.changeable, account.subscribes))
+            .menu_model(&calendar_menu(
+                account_id,
+                calendar,
+                account.changeable,
+                account.subscribes,
+            ))
             .css_classes(["flat", "circular", "calendar-options"])
             .valign(gtk::Align::Center)
             .tooltip_text(gettext("Calendar options"))
             .build();
         crate::ui::name(
             &options,
-            &fill(&gettext("Options for {calendar}"), &[("calendar", &calendar.name)]),
+            &fill(
+                &gettext("Options for {calendar}"),
+                &[("calendar", &calendar.name)],
+            ),
         );
         crate::ui::name_menu_items_of(&options);
         row.append(&options);
         // A right click or a long press anywhere on the row opens the
         // same menu, from the button, which shows while the pointer is
         // on the row.
-        let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+        let click = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .build();
         let menu = options.clone();
         click.connect_pressed(move |_, _, _, _| menu.popup());
         row.add_controller(click);
@@ -1117,10 +1238,69 @@ impl CalendarSidebar {
     }
 }
 
+/// The window's action that signs an account in again, taking its id.
+const SIGN_IN_AGAIN: &str = "win.account-reconnect";
+/// The window's action that asks before removing an account.
+const REMOVE_ACCOUNT: &str = "win.account-remove";
+
+/// Sign In Again under a calendar account whose server refused its
+/// password, which opens Add Account on that account's server.
+fn sign_in_row(account: &SidebarAccount) -> gtk::Button {
+    let button = gtk::Button::builder()
+        .label(gettext("Sign In Again"))
+        .css_classes(["flat"])
+        .halign(gtk::Align::Start)
+        .action_name(SIGN_IN_AGAIN)
+        .action_target(&account.id.to_variant())
+        .build();
+    crate::ui::name(
+        &button,
+        &fill(
+            &gettext("Sign in again to {account}"),
+            &[("account", &account.address)],
+        ),
+    );
+    button
+}
+
+/// The menu on a calendar account's heading: what the mail sidebar's
+/// heading offers an account, of which a calendar account has only how it
+/// signs in and whether it stays.
+fn account_menu(account: &SidebarAccount) -> gtk::MenuButton {
+    let menu = gio::Menu::new();
+    for (label, action) in [
+        (gettext("Sign In Again…"), SIGN_IN_AGAIN),
+        (gettext("Remove Account…"), REMOVE_ACCOUNT),
+    ] {
+        let item = gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some(action), Some(&account.id.to_variant()));
+        let section = gio::Menu::new();
+        section.append_item(&item);
+        menu.append_section(None, &section);
+    }
+    let options = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .menu_model(&menu)
+        .css_classes(["flat", "circular", "calendar-options"])
+        .valign(gtk::Align::Center)
+        .margin_top(14)
+        .tooltip_text(gettext("Account options"))
+        .build();
+    crate::ui::name(
+        &options,
+        &fill(
+            &gettext("Options for {account}"),
+            &[("account", &account.address)],
+        ),
+    );
+    crate::ui::name_menu_items_of(&options);
+    options
+}
+
 fn chevron_icon(folded: bool) -> &'static str {
     match folded {
-        true => "pan-end-symbolic",
-        false => "pan-down-symbolic",
+        true => "penguin-mail-chevron-right-symbolic",
+        false => "penguin-mail-chevron-down-symbolic",
     }
 }
 
@@ -1129,26 +1309,45 @@ fn chevron_icon(folded: bool) -> &'static str {
 fn list_actions(on_change: &Rc<OnChange>) -> gio::SimpleActionGroup {
     let actions = gio::SimpleActionGroup::new();
     for (name, listed) in [("hide", false), ("unhide", true)] {
-        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::new("(xs)").expect("a valid type")));
+        let action = gio::SimpleAction::new(
+            name,
+            Some(glib::VariantTy::new("(xs)").expect("a valid type")),
+        );
         let on_change = Rc::clone(on_change);
         action.connect_activate(move |_, target| {
             if let Some((account, calendar)) = target.and_then(|t| t.get::<(AccountId, String)>()) {
-                on_change(ListChange::Listed { account, calendar, listed });
+                on_change(ListChange::Listed {
+                    account,
+                    calendar,
+                    listed,
+                });
             }
         });
         actions.add_action(&action);
     }
-    let color = gio::SimpleAction::new("color", Some(glib::VariantTy::new("(xss)").expect("a valid type")));
+    let color = gio::SimpleAction::new(
+        "color",
+        Some(glib::VariantTy::new("(xss)").expect("a valid type")),
+    );
     let on_color = Rc::clone(on_change);
     color.connect_activate(move |_, target| {
-        if let Some((account, calendar, color)) = target.and_then(|t| t.get::<(AccountId, String, String)>()) {
+        if let Some((account, calendar, color)) =
+            target.and_then(|t| t.get::<(AccountId, String, String)>())
+        {
             let color = (!color.is_empty()).then_some(color);
-            on_color(ListChange::Color { account, calendar, color });
+            on_color(ListChange::Color {
+                account,
+                calendar,
+                color,
+            });
         }
     });
     actions.add_action(&color);
     for name in ["rename", "delete", "unsubscribe"] {
-        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::new("(xs)").expect("a valid type")));
+        let action = gio::SimpleAction::new(
+            name,
+            Some(glib::VariantTy::new("(xs)").expect("a valid type")),
+        );
         let on_change = Rc::clone(on_change);
         action.connect_activate(move |action, target| {
             if let Some((account, calendar)) = target.and_then(|t| t.get::<(AccountId, String)>()) {
@@ -1161,7 +1360,11 @@ fn list_actions(on_change: &Rc<OnChange>) -> gio::SimpleActionGroup {
         });
         actions.add_action(&action);
     }
-    for (name, kind) in [("new", AddKind::New), ("subscribe", AddKind::Subscribe), ("holidays", AddKind::Holidays)] {
+    for (name, kind) in [
+        ("new", AddKind::New),
+        ("subscribe", AddKind::Subscribe),
+        ("holidays", AddKind::Holidays),
+    ] {
         let action = gio::SimpleAction::new(name, Some(glib::VariantTy::INT64));
         let on_change = Rc::clone(on_change);
         action.connect_activate(move |_, target| {
@@ -1180,7 +1383,10 @@ fn list_actions(on_change: &Rc<OnChange>) -> gio::SimpleActionGroup {
 pub fn calendar_detail(address: &str, writable: bool) -> String {
     match writable {
         true => address.to_string(),
-        false => fill(&gettext("{address}. You can only read this calendar"), &[("address", address)]),
+        false => fill(
+            &gettext("{address}. You can only read this calendar"),
+            &[("address", address)],
+        ),
     }
 }
 
@@ -1214,8 +1420,18 @@ fn add_menu(accounts: &[(AccountId, String, bool)]) -> gtk::MenuButton {
         menu.append_section(heading, &section);
     }
     let content = gtk::Box::builder().spacing(6).build();
-    content.append(&gtk::Image::builder().icon_name("list-add-symbolic").pixel_size(14).build());
-    content.append(&gtk::Label::builder().label(gettext("Add Calendar")).css_classes(["calendar-name"]).build());
+    content.append(
+        &gtk::Image::builder()
+            .icon_name("list-add-symbolic")
+            .pixel_size(14)
+            .build(),
+    );
+    content.append(
+        &gtk::Label::builder()
+            .label(gettext("Add Calendar"))
+            .css_classes(["calendar-name"])
+            .build(),
+    );
     let button = gtk::MenuButton::builder()
         .child(&content)
         .menu_model(&menu)
@@ -1232,7 +1448,12 @@ fn add_menu(accounts: &[(AccountId, String, bool)]) -> gtk::MenuButton {
 /// Gmail's label colours and the calendar's own colour back, and for a
 /// calendar the account owns, Rename and Delete in a section of their
 /// own.
-fn calendar_menu(account_id: AccountId, calendar: &Calendar, changeable: bool, subscribes: bool) -> gio::Menu {
+fn calendar_menu(
+    account_id: AccountId,
+    calendar: &Calendar,
+    changeable: bool,
+    subscribes: bool,
+) -> gio::Menu {
     let items = row_menu(calendar, changeable, subscribes);
     let target = (account_id, calendar.id.as_str()).to_variant();
     let calendar = calendar.id.as_str();
@@ -1264,7 +1485,11 @@ fn calendar_menu(account_id: AccountId, calendar: &Calendar, changeable: bool, s
     for (item, label, action) in [
         (RowItem::Rename, gettext("Rename…"), "calendars.rename"),
         (RowItem::Delete, gettext("Delete…"), "calendars.delete"),
-        (RowItem::Unsubscribe, gettext("Unsubscribe…"), "calendars.unsubscribe"),
+        (
+            RowItem::Unsubscribe,
+            gettext("Unsubscribe…"),
+            "calendars.unsubscribe",
+        ),
     ] {
         if items.contains(&item) {
             let entry = gio::MenuItem::new(Some(&label), None);
@@ -1288,7 +1513,10 @@ fn hidden_menu(accounts: &[SidebarAccount]) -> gtk::MenuButton {
         let section = gio::Menu::new();
         for calendar in &account.hidden {
             let item = gio::MenuItem::new(
-                Some(&fill(&gettext("Show {calendar}"), &[("calendar", &calendar.name)])),
+                Some(&fill(
+                    &gettext("Show {calendar}"),
+                    &[("calendar", &calendar.name)],
+                )),
                 None,
             );
             item.set_action_and_target_value(
@@ -1342,7 +1570,6 @@ fn dim_line(text: &str) -> gtk::Label {
         .wrap(true)
         .build()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1413,12 +1640,15 @@ mod tests {
 
     #[test]
     fn a_fully_granted_account_lists_every_calendar() {
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            Withheld::NONE,
-            vec![calendar("primary"), calendar("team")],
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar("primary"), calendar("team")],
+            )],
+            |_| None,
+        );
         assert_eq!(
             rows,
             vec![SidebarAccount {
@@ -1428,8 +1658,64 @@ mod tests {
                 hidden: Vec::new(),
                 changeable: true,
                 subscribes: true,
+                provider: Provider::Gmail,
+                state: AccountState::Ok,
             }]
         );
+    }
+
+    #[test]
+    fn a_calendar_account_carries_the_account_menu_and_says_when_it_needs_to_sign_in() {
+        let calendar_account = |id, name| Account {
+            provider: Provider::CalDav,
+            ..account(id, name)
+        };
+        let refused = |account| Account {
+            state: AccountState::NeedsReauth,
+            ..account
+        };
+        let row = |account, held: &str| {
+            (
+                account,
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar(held)],
+            )
+        };
+        let rows = sidebar_accounts(
+            &[
+                row(refused(account(1, "dana@example.com")), "primary"),
+                row(calendar_account(4, "dana@cloud.example.org"), "family"),
+                row(
+                    refused(calendar_account(5, "robin@cloud.example.org")),
+                    "personal",
+                ),
+            ],
+            |_| None,
+        );
+        assert_eq!(
+            rows.iter()
+                .map(SidebarAccount::calendar_only)
+                .collect::<Vec<_>>(),
+            [false, true, true]
+        );
+        assert_eq!(
+            rows.iter()
+                .map(SidebarAccount::needs_sign_in)
+                .collect::<Vec<_>>(),
+            [false, false, true],
+            "the mail window asks a mail account"
+        );
+        // What the copy holds stays on the list, to show or hide as before.
+        assert_eq!(
+            rows[2].reach,
+            CalendarReach::Calendars(vec![calendar("personal")])
+        );
+        let unlisted = HashMap::from([(5, HashSet::from(["personal".to_string()]))]);
+        let hidden = take_off_the_list(rows, &unlisted);
+        assert_eq!(hidden[2].reach, CalendarReach::Calendars(Vec::new()));
+        assert_eq!(hidden[2].hidden, vec![calendar("personal")]);
+        assert!(shows_heading(&hidden[2]), "Sign In Again stays reachable");
     }
 
     #[test]
@@ -1438,12 +1724,15 @@ mod tests {
             calendar: true,
             ..Withheld::NONE
         };
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            withheld,
-            vec![calendar("primary")],
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                withheld,
+                vec![calendar("primary")],
+            )],
+            |_| None,
+        );
         assert_eq!(rows[0].reach, CalendarReach::Withheld);
     }
 
@@ -1453,12 +1742,15 @@ mod tests {
             calendar_list: true,
             ..Withheld::NONE
         };
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            withheld,
-            vec![calendar("primary")],
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                withheld,
+                vec![calendar("primary")],
+            )],
+            |_| None,
+        );
         assert_eq!(
             rows[0].reach,
             CalendarReach::PrimaryOnly(vec![calendar("primary")])
@@ -1471,12 +1763,15 @@ mod tests {
             calendar: false,
             ..Offers::EVERYTHING
         };
-        let rows = sidebar_accounts(&[(
-            imap(1, "dana@fastmail.example"),
-            offers,
-            Withheld::NONE,
-            Vec::new(),
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                imap(1, "dana@fastmail.example"),
+                offers,
+                Withheld::NONE,
+                Vec::new(),
+            )],
+            |_| None,
+        );
         assert_eq!(
             rows[0].reach,
             CalendarReach::NotOffered(crate::offered::reason(
@@ -1489,12 +1784,15 @@ mod tests {
 
     #[test]
     fn an_account_not_started_yet_reads_as_fully_granted() {
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            crate::offered::offers_for(None),
-            crate::offered::withheld_for(None),
-            Vec::new(),
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                crate::offered::offers_for(None),
+                crate::offered::withheld_for(None),
+                Vec::new(),
+            )],
+            |_| None,
+        );
         assert_eq!(rows[0].reach, CalendarReach::Calendars(Vec::new()));
     }
 
@@ -1509,12 +1807,15 @@ mod tests {
 
     #[test]
     fn a_calendar_taken_off_the_list_moves_to_hidden_calendars() {
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            Withheld::NONE,
-            vec![calendar("primary"), calendar("holidays")],
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar("primary"), calendar("holidays")],
+            )],
+            |_| None,
+        );
         let unlisted = HashMap::from([(1, HashSet::from(["holidays".to_string()]))]);
         let rows = take_off_the_list(rows, &unlisted);
         assert_eq!(listed_ids(&rows[0].reach), vec!["primary"]);
@@ -1523,12 +1824,15 @@ mod tests {
 
     #[test]
     fn an_account_with_nothing_unlisted_hides_nothing() {
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            Withheld::NONE,
-            vec![calendar("primary")],
-        )], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar("primary")],
+            )],
+            |_| None,
+        );
         let rows = take_off_the_list(rows, &HashMap::new());
         assert_eq!(listed_ids(&rows[0].reach), vec!["primary"]);
         assert!(rows[0].hidden.is_empty());
@@ -1536,10 +1840,23 @@ mod tests {
 
     #[test]
     fn hidden_calendars_list_every_accounts_own() {
-        let rows = sidebar_accounts(&[
-            (account(1, "dana@example.com"), Offers::EVERYTHING, Withheld::NONE, vec![calendar("a")]),
-            (account(2, "d.reyes@uni.example"), Offers::EVERYTHING, Withheld::NONE, vec![calendar("b")]),
-        ], |_| None);
+        let rows = sidebar_accounts(
+            &[
+                (
+                    account(1, "dana@example.com"),
+                    Offers::EVERYTHING,
+                    Withheld::NONE,
+                    vec![calendar("a")],
+                ),
+                (
+                    account(2, "d.reyes@uni.example"),
+                    Offers::EVERYTHING,
+                    Withheld::NONE,
+                    vec![calendar("b")],
+                ),
+            ],
+            |_| None,
+        );
         let unlisted = HashMap::from([
             (1, HashSet::from(["a".to_string()])),
             (2, HashSet::from(["b".to_string()])),
@@ -1550,127 +1867,286 @@ mod tests {
 
     #[test]
     fn an_account_with_every_calendar_hidden_loses_its_heading() {
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            Withheld::NONE,
-            vec![calendar("primary")],
-        )], |_| None);
-        let rows = take_off_the_list(rows, &HashMap::from([(1, HashSet::from(["primary".to_string()]))]));
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar("primary")],
+            )],
+            |_| None,
+        );
+        let rows = take_off_the_list(
+            rows,
+            &HashMap::from([(1, HashSet::from(["primary".to_string()]))]),
+        );
         assert!(!shows_heading(&rows[0]));
-        assert_eq!(hidden_count(&rows), 1, "Hidden Calendars still brings it back");
+        assert_eq!(
+            hidden_count(&rows),
+            1,
+            "Hidden Calendars still brings it back"
+        );
+    }
+
+    #[test]
+    fn a_calendar_account_with_every_calendar_hidden_keeps_its_heading() {
+        let dana = Account {
+            provider: Provider::CalDav,
+            ..account(4, "dana@cloud.example.org")
+        };
+        let rows = sidebar_accounts(
+            &[(
+                dana,
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar("family")],
+            )],
+            |_| None,
+        );
+        let rows = take_off_the_list(
+            rows,
+            &HashMap::from([(4, HashSet::from(["family".to_string()]))]),
+        );
+        assert_eq!(hidden_count(&rows), 1);
+        assert!(
+            shows_heading(&rows[0]),
+            "Sign In Again and Remove Account are nowhere else"
+        );
     }
 
     #[test]
     fn an_account_with_a_calendar_left_keeps_its_heading() {
-        let rows = sidebar_accounts(&[(
-            account(1, "dana@example.com"),
-            Offers::EVERYTHING,
-            Withheld::NONE,
-            vec![calendar("primary"), calendar("team")],
-        )], |_| None);
-        let rows = take_off_the_list(rows, &HashMap::from([(1, HashSet::from(["team".to_string()]))]));
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                vec![calendar("primary"), calendar("team")],
+            )],
+            |_| None,
+        );
+        let rows = take_off_the_list(
+            rows,
+            &HashMap::from([(1, HashSet::from(["team".to_string()]))]),
+        );
         assert!(shows_heading(&rows[0]));
     }
 
     #[test]
     fn an_account_not_synced_yet_keeps_its_heading() {
-        let rows = sidebar_accounts(&[(account(1, "dana@example.com"), Offers::EVERYTHING, Withheld::NONE, Vec::new())], |_| None);
+        let rows = sidebar_accounts(
+            &[(
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+                Vec::new(),
+            )],
+            |_| None,
+        );
         assert!(shows_heading(&rows[0]));
     }
 
     #[test]
     fn a_change_to_what_shows_or_its_colour_redraws_the_next_event() {
         let (account, calendar) = (1, "team".to_string());
-        assert!(redraws_next_event(&ListChange::Color { account, calendar: calendar.clone(), color: None }));
-        assert!(redraws_next_event(&ListChange::Listed { account, calendar: calendar.clone(), listed: false }));
-        assert!(redraws_next_event(&ListChange::Shown { account, calendar, shown: false }));
-        assert!(!redraws_next_event(&ListChange::Folded { address: "dana@example.com".into(), folded: true }));
+        assert!(redraws_next_event(&ListChange::Color {
+            account,
+            calendar: calendar.clone(),
+            color: None
+        }));
+        assert!(redraws_next_event(&ListChange::Listed {
+            account,
+            calendar: calendar.clone(),
+            listed: false
+        }));
+        assert!(redraws_next_event(&ListChange::Shown {
+            account,
+            calendar,
+            shown: false
+        }));
+        assert!(!redraws_next_event(&ListChange::Folded {
+            address: "dana@example.com".into(),
+            folded: true
+        }));
     }
 
     #[test]
     fn an_owned_calendar_can_be_renamed_and_deleted_from_its_menu() {
         assert_eq!(
             row_menu(&calendar("team"), true, true),
-            [RowItem::Hide, RowItem::Color, RowItem::Rename, RowItem::Delete]
+            [
+                RowItem::Hide,
+                RowItem::Color,
+                RowItem::Rename,
+                RowItem::Delete
+            ]
         );
     }
 
     #[test]
     fn the_primary_calendar_is_renamed_but_never_deleted() {
-        let primary = Calendar { primary: true, ..calendar("primary") };
-        assert_eq!(row_menu(&primary, true, true), [RowItem::Hide, RowItem::Color, RowItem::Rename]);
+        let primary = Calendar {
+            primary: true,
+            ..calendar("primary")
+        };
+        assert_eq!(
+            row_menu(&primary, true, true),
+            [RowItem::Hide, RowItem::Color, RowItem::Rename]
+        );
     }
 
     #[test]
     fn a_subscribed_or_shared_calendar_offers_unsubscribe_in_place_of_delete() {
         for access in [Access::Reader, Access::Writer, Access::FreeBusy] {
-            let other = Calendar { access, ..calendar("fixtures") };
-            assert_eq!(row_menu(&other, true, true), [RowItem::Hide, RowItem::Color, RowItem::Unsubscribe], "{access:?}");
+            let other = Calendar {
+                access,
+                ..calendar("fixtures")
+            };
+            assert_eq!(
+                row_menu(&other, true, true),
+                [RowItem::Hide, RowItem::Color, RowItem::Unsubscribe],
+                "{access:?}"
+            );
         }
     }
 
     #[test]
     fn an_account_that_cannot_change_its_list_keeps_hide_and_nothing_else() {
         for access in [Access::Owner, Access::Reader] {
-            let held = Calendar { access, ..calendar("team") };
+            let held = Calendar {
+                access,
+                ..calendar("team")
+            };
             assert_eq!(row_menu(&held, false, true), [RowItem::Hide], "{access:?}");
         }
     }
 
     #[test]
     fn calendars_are_not_added_to_an_account_that_cannot_change_its_list() {
-        let fixed = Offers { calendar_list: false, ..Offers::EVERYTHING };
-        let rows = sidebar_accounts(&[
-            (account(1, "dana@example.com"), Offers::EVERYTHING, Withheld::NONE, vec![calendar("primary")]),
-            (account(2, "ana@outlook.example"), fixed, Withheld::NONE, vec![calendar("primary")]),
-        ], |_| None);
-        assert_eq!(adding_accounts(&rows), [(1, "dana@example.com".to_string())]);
+        let fixed = Offers {
+            calendar_list: false,
+            ..Offers::EVERYTHING
+        };
+        let rows = sidebar_accounts(
+            &[
+                (
+                    account(1, "dana@example.com"),
+                    Offers::EVERYTHING,
+                    Withheld::NONE,
+                    vec![calendar("primary")],
+                ),
+                (
+                    account(2, "ana@outlook.example"),
+                    fixed,
+                    Withheld::NONE,
+                    vec![calendar("primary")],
+                ),
+            ],
+            |_| None,
+        );
+        assert_eq!(
+            adding_accounts(&rows),
+            [(1, "dana@example.com".to_string())]
+        );
     }
 
     #[test]
     fn a_read_only_calendar_says_its_address_and_that_it_only_reads() {
-        assert_eq!(calendar_detail("dana@example.com", true), "dana@example.com");
-        assert_eq!(calendar_detail("dana@example.com", false), "dana@example.com. You can only read this calendar");
+        assert_eq!(
+            calendar_detail("dana@example.com", true),
+            "dana@example.com"
+        );
+        assert_eq!(
+            calendar_detail("dana@example.com", false),
+            "dana@example.com. You can only read this calendar"
+        );
     }
 
     #[test]
     fn add_calendar_offers_subscriptions_only_where_the_provider_takes_them() {
-        assert_eq!(add_items(true), [AddKind::New, AddKind::Subscribe, AddKind::Holidays]);
+        assert_eq!(
+            add_items(true),
+            [AddKind::New, AddKind::Subscribe, AddKind::Holidays]
+        );
         assert_eq!(add_items(false), [AddKind::New]);
     }
 
     #[test]
     fn an_account_with_no_subscriptions_offers_no_unsubscribe() {
-        let other = Calendar { access: Access::Reader, ..calendar("team") };
-        assert_eq!(row_menu(&other, true, false), [RowItem::Hide, RowItem::Color]);
+        let other = Calendar {
+            access: Access::Reader,
+            ..calendar("team")
+        };
+        assert_eq!(
+            row_menu(&other, true, false),
+            [RowItem::Hide, RowItem::Color]
+        );
     }
 
     #[test]
     fn calendars_are_added_to_accounts_that_have_a_calendar() {
-        let rows = sidebar_accounts(&[
-            (account(1, "dana@example.com"), Offers::EVERYTHING, Withheld::NONE, vec![calendar("primary")]),
-            (
-                account(2, "old@example.com"),
-                Offers::EVERYTHING,
-                Withheld { calendar_list: true, ..Withheld::NONE },
-                vec![calendar("primary")],
-            ),
-            (account(3, "no@example.com"), Offers::EVERYTHING, Withheld { calendar: true, ..Withheld::NONE }, vec![]),
-            (imap(4, "imap@example.com"), Offers { calendar: false, ..Offers::EVERYTHING }, Withheld::NONE, vec![]),
-        ], |_| None);
+        let rows = sidebar_accounts(
+            &[
+                (
+                    account(1, "dana@example.com"),
+                    Offers::EVERYTHING,
+                    Withheld::NONE,
+                    vec![calendar("primary")],
+                ),
+                (
+                    account(2, "old@example.com"),
+                    Offers::EVERYTHING,
+                    Withheld {
+                        calendar_list: true,
+                        ..Withheld::NONE
+                    },
+                    vec![calendar("primary")],
+                ),
+                (
+                    account(3, "no@example.com"),
+                    Offers::EVERYTHING,
+                    Withheld {
+                        calendar: true,
+                        ..Withheld::NONE
+                    },
+                    vec![],
+                ),
+                (
+                    imap(4, "imap@example.com"),
+                    Offers {
+                        calendar: false,
+                        ..Offers::EVERYTHING
+                    },
+                    Withheld::NONE,
+                    vec![],
+                ),
+            ],
+            |_| None,
+        );
         assert_eq!(
             adding_accounts(&rows),
-            [(1, "dana@example.com".to_string()), (2, "old@example.com".to_string())]
+            [
+                (1, "dana@example.com".to_string()),
+                (2, "old@example.com".to_string())
+            ]
         );
     }
 
     #[test]
     fn a_choice_that_only_opens_a_dialog_redraws_nothing() {
         let (account, calendar) = (1, "team".to_string());
-        assert!(!redraws_next_event(&ListChange::Rename { account, calendar: calendar.clone() }));
-        assert!(!redraws_next_event(&ListChange::Delete { account, calendar }));
-        assert!(!redraws_next_event(&ListChange::Add { account, kind: AddKind::Holidays }));
+        assert!(!redraws_next_event(&ListChange::Rename {
+            account,
+            calendar: calendar.clone()
+        }));
+        assert!(!redraws_next_event(&ListChange::Delete {
+            account,
+            calendar
+        }));
+        assert!(!redraws_next_event(&ListChange::Add {
+            account,
+            kind: AddKind::Holidays
+        }));
     }
 
     fn d(y: i32, m: u32, day: u32) -> NaiveDate {
@@ -1680,7 +2156,10 @@ mod tests {
     #[test]
     fn the_week_in_view_runs_from_the_week_start_for_seven_days() {
         crate::locale_time::set_first_weekday_for_test(chrono::Weekday::Mon);
-        assert_eq!(in_view(ViewKind::Week, d(2026, 9, 30)), Some((d(2026, 9, 28), d(2026, 10, 4))));
+        assert_eq!(
+            in_view(ViewKind::Week, d(2026, 9, 30)),
+            Some((d(2026, 9, 28), d(2026, 10, 4)))
+        );
     }
 
     #[test]
@@ -1695,58 +2174,145 @@ mod tests {
 
     #[test]
     fn today_and_the_selected_day_read_apart() {
-        let look = day_look(d(2026, 9, 29), 1, d(2026, 9, 23), d(2026, 9, 29), d(2026, 9, 1), None);
+        let look = day_look(
+            d(2026, 9, 29),
+            1,
+            d(2026, 9, 23),
+            d(2026, 9, 29),
+            d(2026, 9, 1),
+            None,
+        );
         assert!(look.selected && !look.today);
-        let look = day_look(d(2026, 9, 23), 2, d(2026, 9, 23), d(2026, 9, 29), d(2026, 9, 1), None);
+        let look = day_look(
+            d(2026, 9, 23),
+            2,
+            d(2026, 9, 23),
+            d(2026, 9, 29),
+            d(2026, 9, 1),
+            None,
+        );
         assert!(look.today && !look.selected);
     }
 
     #[test]
     fn a_day_outside_the_month_shown_is_outside() {
-        let look = day_look(d(2026, 8, 31), 0, d(2026, 9, 23), d(2026, 9, 23), d(2026, 9, 1), None);
+        let look = day_look(
+            d(2026, 8, 31),
+            0,
+            d(2026, 9, 23),
+            d(2026, 9, 23),
+            d(2026, 9, 1),
+            None,
+        );
         assert!(look.outside);
     }
 
     #[test]
     fn the_band_rounds_off_at_the_ends_of_the_week_in_view() {
         let week = Some((d(2026, 9, 28), d(2026, 10, 4)));
-        let first = day_look(d(2026, 9, 28), 0, d(2026, 9, 23), d(2026, 9, 30), d(2026, 9, 1), week);
+        let first = day_look(
+            d(2026, 9, 28),
+            0,
+            d(2026, 9, 23),
+            d(2026, 9, 30),
+            d(2026, 9, 1),
+            week,
+        );
         assert!(first.in_view && first.band_start && !first.band_end);
-        let middle = day_look(d(2026, 9, 30), 2, d(2026, 9, 23), d(2026, 9, 30), d(2026, 9, 1), week);
+        let middle = day_look(
+            d(2026, 9, 30),
+            2,
+            d(2026, 9, 23),
+            d(2026, 9, 30),
+            d(2026, 9, 1),
+            week,
+        );
         assert!(middle.in_view && !middle.band_start && !middle.band_end);
-        let last = day_look(d(2026, 10, 4), 6, d(2026, 9, 23), d(2026, 9, 30), d(2026, 9, 1), week);
+        let last = day_look(
+            d(2026, 10, 4),
+            6,
+            d(2026, 9, 23),
+            d(2026, 9, 30),
+            d(2026, 9, 1),
+            week,
+        );
         assert!(last.in_view && last.band_end);
-        let after = day_look(d(2026, 10, 5), 0, d(2026, 9, 23), d(2026, 9, 30), d(2026, 9, 1), week);
+        let after = day_look(
+            d(2026, 10, 5),
+            0,
+            d(2026, 9, 23),
+            d(2026, 9, 30),
+            d(2026, 9, 1),
+            week,
+        );
         assert!(!after.in_view);
     }
 
     #[test]
     fn a_month_band_rounds_off_at_each_rows_edges() {
         let month = Some((d(2026, 9, 1), d(2026, 9, 30)));
-        let sunday = day_look(d(2026, 9, 13), 6, d(2026, 9, 23), d(2026, 9, 23), d(2026, 9, 1), month);
+        let sunday = day_look(
+            d(2026, 9, 13),
+            6,
+            d(2026, 9, 23),
+            d(2026, 9, 23),
+            d(2026, 9, 1),
+            month,
+        );
         assert!(sunday.band_end && !sunday.band_start);
-        let monday = day_look(d(2026, 9, 14), 0, d(2026, 9, 23), d(2026, 9, 23), d(2026, 9, 1), month);
+        let monday = day_look(
+            d(2026, 9, 14),
+            0,
+            d(2026, 9, 23),
+            d(2026, 9, 23),
+            d(2026, 9, 1),
+            month,
+        );
         assert!(monday.band_start && !monday.band_end);
     }
 
     #[test]
     fn the_classes_carry_each_state() {
-        let look = DayLook { today: true, selected: true, in_view: true, band_start: true, ..DayLook::default() };
+        let look = DayLook {
+            today: true,
+            selected: true,
+            in_view: true,
+            band_start: true,
+            ..DayLook::default()
+        };
+        assert_eq!(day_classes(look), vec!["flat", "today", "selected"]);
         assert_eq!(
-            day_classes(look),
-            vec!["flat", "today", "selected"]
+            band_classes(look),
+            vec!["mini-day", "in-view", "band-start"]
         );
-        assert_eq!(band_classes(look), vec!["mini-day", "in-view", "band-start"]);
     }
 
     #[test]
     fn only_accounts_that_can_answer_on_their_calendar_list_waiting_invitations() {
-        let no_calendar = Offers { calendar: false, ..Offers::EVERYTHING };
-        let withheld = Withheld { calendar: true, ..Withheld::NONE };
+        let no_calendar = Offers {
+            calendar: false,
+            ..Offers::EVERYTHING
+        };
+        let withheld = Withheld {
+            calendar: true,
+            ..Withheld::NONE
+        };
         let accounts = [
-            (account(1, "dana@example.com"), Offers::EVERYTHING, Withheld::NONE),
-            (imap(2, "dana@fastmail.example"), no_calendar, Withheld::NONE),
-            (account(3, "d.reyes@uni.example"), Offers::EVERYTHING, withheld),
+            (
+                account(1, "dana@example.com"),
+                Offers::EVERYTHING,
+                Withheld::NONE,
+            ),
+            (
+                imap(2, "dana@fastmail.example"),
+                no_calendar,
+                Withheld::NONE,
+            ),
+            (
+                account(3, "d.reyes@uni.example"),
+                Offers::EVERYTHING,
+                withheld,
+            ),
         ];
         assert_eq!(waiting_accounts(&accounts), vec![1]);
     }

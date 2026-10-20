@@ -28,7 +28,9 @@ impl JmapAuth {
     }
 
     pub fn parse(stored: &str) -> Option<JmapAuth> {
-        [JmapAuth::Basic, JmapAuth::Bearer, JmapAuth::OAuth].into_iter().find(|a| a.as_str() == stored)
+        [JmapAuth::Basic, JmapAuth::Bearer, JmapAuth::OAuth]
+            .into_iter()
+            .find(|a| a.as_str() == stored)
     }
 }
 
@@ -63,7 +65,10 @@ pub struct SessionOwner {
 
 impl std::fmt::Debug for SessionOwner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionOwner").field("username", &"<hidden>").field("mail_account", &self.mail_account).finish()
+        f.debug_struct("SessionOwner")
+            .field("username", &"<hidden>")
+            .field("mail_account", &self.mail_account)
+            .finish()
     }
 }
 
@@ -74,7 +79,11 @@ impl std::fmt::Debug for SessionOwner {
 enum StoredCapabilities {
     List(Vec<String>),
     #[serde(rename_all = "camelCase")]
-    WithOwner { offered: Vec<String>, username: String, mail_account: String },
+    WithOwner {
+        offered: Vec<String>,
+        username: String,
+        mail_account: String,
+    },
 }
 
 /// What an OAuth sign-in needs besides its tokens.
@@ -135,7 +144,15 @@ pub fn save(conn: &Connection, account_id: AccountId, saved: &JmapSaved) -> Resu
 }
 
 pub fn load(conn: &Connection, account_id: AccountId) -> Result<Option<JmapSaved>> {
-    type Row = (String, String, Option<String>, bool, String, Option<String>, Option<String>);
+    type Row = (
+        String,
+        String,
+        Option<String>,
+        bool,
+        String,
+        Option<String>,
+        Option<String>,
+    );
     let row: Option<Row> = conn
         .query_row(
             "SELECT session_url, auth, user_name, labels, capabilities, oauth_client_id, oauth_token_url \
@@ -144,17 +161,47 @@ pub fn load(conn: &Connection, account_id: AccountId) -> Result<Option<JmapSaved
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
         )
         .optional()?;
-    row.map(|(session_url, auth, user_name, labels, capabilities, client_id, token_endpoint)| {
-        let auth = JmapAuth::parse(&auth).ok_or(StoreError::Corrupt { column: "jmap_accounts.auth", value: auth })?;
-        let stored = serde_json::from_str(&capabilities)
-            .map_err(|_| StoreError::Corrupt { column: "jmap_accounts.capabilities", value: capabilities })?;
-        let (capabilities, owner) = match stored {
-            StoredCapabilities::List(offered) => (offered, None),
-            StoredCapabilities::WithOwner { offered, username, mail_account } => (offered, Some(SessionOwner { username, mail_account })),
-        };
-        let oauth = client_id.zip(token_endpoint).map(|(client_id, token_endpoint)| SavedOAuth { client_id, token_endpoint });
-        Ok(JmapSaved { session_url, auth, user_name, labels, capabilities, oauth, owner })
-    })
+    row.map(
+        |(session_url, auth, user_name, labels, capabilities, client_id, token_endpoint)| {
+            let auth = JmapAuth::parse(&auth).ok_or(StoreError::Corrupt {
+                column: "jmap_accounts.auth",
+                value: auth,
+            })?;
+            let stored = serde_json::from_str(&capabilities).map_err(|_| StoreError::Corrupt {
+                column: "jmap_accounts.capabilities",
+                value: capabilities,
+            })?;
+            let (capabilities, owner) = match stored {
+                StoredCapabilities::List(offered) => (offered, None),
+                StoredCapabilities::WithOwner {
+                    offered,
+                    username,
+                    mail_account,
+                } => (
+                    offered,
+                    Some(SessionOwner {
+                        username,
+                        mail_account,
+                    }),
+                ),
+            };
+            let oauth = client_id
+                .zip(token_endpoint)
+                .map(|(client_id, token_endpoint)| SavedOAuth {
+                    client_id,
+                    token_endpoint,
+                });
+            Ok(JmapSaved {
+                session_url,
+                auth,
+                user_name,
+                labels,
+                capabilities,
+                oauth,
+                owner,
+            })
+        },
+    )
     .transpose()
 }
 
@@ -166,20 +213,29 @@ mod tests {
     #[test]
     fn a_saved_session_comes_back() {
         let conn = open_in_memory().unwrap();
-        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap().unwrap();
+        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0)
+            .unwrap()
+            .unwrap();
         assert_eq!(load(&conn, id).unwrap(), None);
         let saved = JmapSaved {
             session_url: "https://api.fastmail.com/jmap/session".into(),
             auth: JmapAuth::Bearer,
             user_name: None,
             labels: true,
-            capabilities: vec!["urn:ietf:params:jmap:mail".into(), "urn:ietf:params:jmap:submission".into()],
+            capabilities: vec![
+                "urn:ietf:params:jmap:mail".into(),
+                "urn:ietf:params:jmap:submission".into(),
+            ],
             oauth: None,
             owner: None,
         };
         save(&conn, id, &saved).unwrap();
         assert_eq!(load(&conn, id).unwrap(), Some(saved.clone()));
-        let basic = JmapSaved { auth: JmapAuth::Basic, user_name: Some("me".into()), ..saved };
+        let basic = JmapSaved {
+            auth: JmapAuth::Basic,
+            user_name: Some("me".into()),
+            ..saved
+        };
         save(&conn, id, &basic).unwrap();
         assert_eq!(load(&conn, id).unwrap(), Some(basic));
     }
@@ -187,14 +243,19 @@ mod tests {
     #[test]
     fn an_oauth_sign_in_keeps_its_client() {
         let conn = open_in_memory().unwrap();
-        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap().unwrap();
+        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0)
+            .unwrap()
+            .unwrap();
         let saved = JmapSaved {
             session_url: "https://api.fastmail.com/jmap/session".into(),
             auth: JmapAuth::OAuth,
             user_name: None,
             labels: true,
             capabilities: Vec::new(),
-            oauth: Some(SavedOAuth { client_id: "c1".into(), token_endpoint: "https://api.fastmail.com/oauth/refresh".into() }),
+            oauth: Some(SavedOAuth {
+                client_id: "c1".into(),
+                token_endpoint: "https://api.fastmail.com/oauth/refresh".into(),
+            }),
             owner: None,
         };
         save(&conn, id, &saved).unwrap();
@@ -204,7 +265,9 @@ mod tests {
     #[test]
     fn the_session_s_owner_comes_back_beside_the_capabilities() {
         let conn = open_in_memory().unwrap();
-        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap().unwrap();
+        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0)
+            .unwrap()
+            .unwrap();
         let saved = JmapSaved {
             session_url: "https://api.fastmail.com/jmap/session".into(),
             auth: JmapAuth::OAuth,
@@ -212,7 +275,10 @@ mod tests {
             labels: true,
             capabilities: vec!["urn:ietf:params:jmap:mail".into()],
             oauth: None,
-            owner: Some(SessionOwner { username: "me@fastmail.com".into(), mail_account: "u1".into() }),
+            owner: Some(SessionOwner {
+                username: "me@fastmail.com".into(),
+                mail_account: "u1".into(),
+            }),
         };
         save(&conn, id, &saved).unwrap();
         assert_eq!(load(&conn, id).unwrap(), Some(saved));
@@ -221,19 +287,27 @@ mod tests {
     #[test]
     fn a_row_kept_before_the_owner_was_recorded_has_none() {
         let conn = open_in_memory().unwrap();
-        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap().unwrap();
+        let id = accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0)
+            .unwrap()
+            .unwrap();
         conn.execute(
             "INSERT INTO jmap_accounts (account_id, session_url, auth, labels, capabilities) VALUES (?1, 'https://a.test/jmap', 'bearer', 1, '[\"urn:ietf:params:jmap:mail\"]')",
             params![id],
         )
         .unwrap();
         let saved = load(&conn, id).unwrap().unwrap();
-        assert_eq!((saved.capabilities, saved.owner), (vec!["urn:ietf:params:jmap:mail".to_string()], None));
+        assert_eq!(
+            (saved.capabilities, saved.owner),
+            (vec!["urn:ietf:params:jmap:mail".to_string()], None)
+        );
     }
 
     #[test]
     fn debug_output_leaves_the_owner_s_user_name_out() {
-        let owner = SessionOwner { username: "dana@example.org".into(), mail_account: "u1".into() };
+        let owner = SessionOwner {
+            username: "dana@example.org".into(),
+            mail_account: "u1".into(),
+        };
         assert!(!format!("{owner:?}").contains("dana"));
     }
 
@@ -250,13 +324,19 @@ mod tests {
         };
         let shown = format!("{saved:?}");
         assert!(!shown.contains("dana"), "{shown}");
-        assert!(shown.contains("https://mail.example.org/jmap/session"), "{shown}");
+        assert!(
+            shown.contains("https://mail.example.org/jmap/session"),
+            "{shown}"
+        );
     }
 
     #[test]
     fn an_address_another_provider_holds_is_not_taken() {
         let conn = open_in_memory().unwrap();
         accounts::insert_imap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap();
-        assert_eq!(accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap(), None);
+        assert_eq!(
+            accounts::insert_jmap_account(&conn, "me@fastmail.com", "Fastmail", 0).unwrap(),
+            None
+        );
     }
 }

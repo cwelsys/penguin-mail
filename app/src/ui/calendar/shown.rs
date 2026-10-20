@@ -323,8 +323,18 @@ mod tests {
         // The list starts on the 25th; Lisbon offsite runs 24 to 25 and
         // came back with the first read already.
         let listed_from = lisbon(2026, 9, 25, 0, 0);
-        let offsite = occurrence(true, utc_midnight(d(2026, 9, 24)), utc_midnight(d(2026, 9, 26)), None);
-        let workshop = occurrence(false, lisbon(2026, 9, 24, 11, 0), lisbon(2026, 9, 24, 13, 0), None);
+        let offsite = occurrence(
+            true,
+            utc_midnight(d(2026, 9, 24)),
+            utc_midnight(d(2026, 9, 26)),
+            None,
+        );
+        let workshop = occurrence(
+            false,
+            lisbon(2026, 9, 24, 11, 0),
+            lisbon(2026, 9, 24, 13, 0),
+            None,
+        );
         let kept = not_yet_listed(vec![offsite, workshop.clone()], listed_from);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].start, workshop.start);
@@ -375,8 +385,14 @@ mod tests {
     #[test]
     fn a_step_onto_a_page_still_reading_owes_the_focus() {
         assert!(owed_after_step(true, false));
-        assert!(!owed_after_step(true, true), "an event already there decides at once");
-        assert!(!owed_after_step(false, false), "focus that was elsewhere is not owed anything");
+        assert!(
+            !owed_after_step(true, true),
+            "an event already there decides at once"
+        );
+        assert!(
+            !owed_after_step(false, false),
+            "focus that was elsewhere is not owed anything"
+        );
     }
 
     #[test]
@@ -391,7 +407,10 @@ mod tests {
 
     #[test]
     fn a_press_on_empty_time_that_closes_the_popover_does_nothing_more() {
-        assert!(!press_goes_on(Pressed::InCalendar), "the grid would open quick add on the release");
+        assert!(
+            !press_goes_on(Pressed::InCalendar),
+            "the grid would open quick add on the release"
+        );
     }
 
     #[test]
@@ -558,7 +577,10 @@ mod tests {
         use mailrs_domain::calendar::{Kind, Workplace};
         let mut home = occurrence(true, 0, 1, None);
         Arc::make_mut(&mut home.event).kind = Kind::WorkingLocation(Workplace::Home);
-        assert!(!keep(&home, true, None), "it shows under the day's heading instead");
+        assert!(
+            !keep(&home, true, None),
+            "it shows under the day's heading instead"
+        );
     }
 
     #[test]
@@ -591,7 +613,10 @@ mod tests {
             "a later occurrence of the same series is not the one being opened"
         );
 
-        let other_account = Occurrence { account_id: declined.account_id + 1, ..declined };
+        let other_account = Occurrence {
+            account_id: declined.account_id + 1,
+            ..declined
+        };
         assert!(
             !keep(&other_account, false, Some(&pending)),
             "the same event on another account is not the one being opened"

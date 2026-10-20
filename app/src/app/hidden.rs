@@ -95,9 +95,14 @@ impl App {
     }
 
     /// Every masked address of `account_id`, from its server.
-    pub async fn masked_addresses(self: &Rc<Self>, account_id: AccountId) -> anyhow::Result<Vec<MaskedAddress>> {
+    pub async fn masked_addresses(
+        self: &Rc<Self>,
+        account_id: AccountId,
+    ) -> anyhow::Result<Vec<MaskedAddress>> {
         let settings = self.core.gmail_settings();
-        self.core.call(async move { settings.masked_addresses(account_id).await }).await
+        self.core
+            .call(async move { settings.masked_addresses(account_id).await })
+            .await
     }
 
     /// A new masked address of `account_id` for `site`, with `note` saying
@@ -108,8 +113,18 @@ impl App {
         site: &str,
         note: &str,
     ) -> anyhow::Result<MaskedAddress> {
-        let (settings, site, note) = (self.core.gmail_settings(), site.to_string(), note.to_string());
-        self.core.call(async move { settings.create_masked_address(account_id, &site, &note).await }).await
+        let (settings, site, note) = (
+            self.core.gmail_settings(),
+            site.to_string(),
+            note.to_string(),
+        );
+        self.core
+            .call(async move {
+                settings
+                    .create_masked_address(account_id, &site, &note)
+                    .await
+            })
+            .await
     }
 
     /// Turns a masked address on or off, or deletes it.
@@ -120,7 +135,9 @@ impl App {
         state: MaskedState,
     ) -> anyhow::Result<()> {
         let (settings, id) = (self.core.gmail_settings(), id.to_string());
-        self.core.call(async move { settings.set_masked_state(account_id, &id, state).await }).await
+        self.core
+            .call(async move { settings.set_masked_state(account_id, &id, state).await })
+            .await
     }
 
     /// The kept alias `address`, and the connected account it belongs to.

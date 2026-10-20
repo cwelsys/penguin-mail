@@ -92,28 +92,49 @@ pub(crate) async fn tell_organizer<M: MailBackend>(
     note: Option<&str>,
     now: EpochMillis,
 ) -> Result<(), BackendError> {
-    let Some(organizer) = event.organizer.as_deref().map(str::trim).filter(|o| !o.is_empty() && !o.eq_ignore_ascii_case(me)) else {
+    let Some(organizer) = event
+        .organizer
+        .as_deref()
+        .map(str::trim)
+        .filter(|o| !o.is_empty() && !o.eq_ignore_ascii_case(me))
+    else {
         return Ok(());
     };
     let when = match event.all_day {
         true => {
-            let day = |at: EpochMillis| DateTime::<Utc>::from_timestamp_millis(at).map(|d| d.date_naive());
+            let day = |at: EpochMillis| {
+                DateTime::<Utc>::from_timestamp_millis(at).map(|d| d.date_naive())
+            };
             match (day(event.start), day(event.end - 1)) {
-                (Some(first), Some(last)) => Some(When::Days { first, last: last.max(first) }),
+                (Some(first), Some(last)) => Some(When::Days {
+                    first,
+                    last: last.max(first),
+                }),
                 _ => None,
             }
         }
-        false => Some(When::At { starts_at: event.start, ends_at: Some(event.end) }),
+        false => Some(When::At {
+            starts_at: event.start,
+            ends_at: Some(event.end),
+        }),
     };
     let occurrence = occurrence.map(|at| Occurrence {
-        written: format!(":{}", DateTime::<Utc>::from_timestamp_millis(at).unwrap_or_default().format("%Y%m%dT%H%M%SZ")),
+        written: format!(
+            ":{}",
+            DateTime::<Utc>::from_timestamp_millis(at)
+                .unwrap_or_default()
+                .format("%Y%m%dT%H%M%SZ")
+        ),
         at: Some(at),
     });
     let scope = match occurrence {
         Some(_) => Scope::Occurrence,
         None => Scope::Series,
     };
-    let organizer = Address { name: None, email: organizer.to_string() };
+    let organizer = Address {
+        name: None,
+        email: organizer.to_string(),
+    };
     let invitation = Invitation {
         uid: event.uid.clone(),
         sequence: event.sequence,
@@ -129,7 +150,10 @@ pub(crate) async fn tell_organizer<M: MailBackend>(
         zone: None,
         rules: Vec::new(),
     };
-    let me = Address { name: None, email: me.to_string() };
+    let me = Address {
+        name: None,
+        email: me.to_string(),
+    };
     let raw = itip(
         &me,
         &organizer,

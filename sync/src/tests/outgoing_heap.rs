@@ -40,10 +40,15 @@ fn sending_a_large_message_reads_only_its_headers() {
     let envelope = head.envelope();
     let copy = mailrs_mime::head::without_header(&raw, "Bcc").into_owned();
     let after = mark.peak();
-    eprintln!("a {size}-byte message: full parse peak {before} bytes; header reader and Bcc-less copy peak {after} bytes");
+    eprintln!(
+        "a {size}-byte message: full parse peak {before} bytes; header reader and Bcc-less copy peak {after} bytes"
+    );
     assert_eq!(envelope.recipients, ["ana@example.org", "cy@example.org"]);
     assert_eq!(copy.len(), size - "Bcc: cy@example.org\r\n".len());
     // The copy is the one allocation of the message's size.
-    assert!(after < size + (1 << 20), "the header reader held {after} bytes");
+    assert!(
+        after < size + (1 << 20),
+        "the header reader held {after} bytes"
+    );
     assert!(before > size, "the full parse held {before} bytes");
 }

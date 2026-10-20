@@ -19,7 +19,10 @@ pub const FOLDER: &str = "Garden club";
 const HOUR: i64 = 60 * 60 * 1000;
 
 pub fn settings() -> Pop3Settings {
-    Pop3Settings { address: POP3.into(), provider_name: "reyes-home.example".into() }
+    Pop3Settings {
+        address: POP3.into(),
+        provider_name: "reyes-home.example".into(),
+    }
 }
 
 /// What a POP3 demo account talks to.
@@ -137,7 +140,10 @@ pub async fn seed_pop3(
     let account_id = db
         .write(move |c| {
             accounts::insert_pop3_account(c, POP3, "reyes-home.example", RemoveSetting::Never, now)?
-                .ok_or(StoreError::Corrupt { column: "accounts.provider", value: POP3.to_string() })
+                .ok_or(StoreError::Corrupt {
+                    column: "accounts.provider",
+                    value: POP3.to_string(),
+                })
         })
         .await?;
     let fake = FakePop3::default();
@@ -145,10 +151,20 @@ pub async fn seed_pop3(
     for letter in REFUSED.iter().chain(&INBOX).chain(&CLUB) {
         fake.add(letter.uidl, &raw(letter, now));
     }
-    let fake = REFUSED.iter().fold(fake, |fake, letter| fake.failing_retr(letter.uidl));
-    let server = Pop3Server { pop3: Arc::new(fake), smtp: Arc::new(FakeSmtp::default()) };
+    let fake = REFUSED
+        .iter()
+        .fold(fake, |fake, letter| fake.failing_retr(letter.uidl));
+    let server = Pop3Server {
+        pop3: Arc::new(fake),
+        smtp: Arc::new(FakeSmtp::default()),
+    };
     let (events, _) = async_channel::unbounded();
-    let sync = Arc::new(AccountSync::new(account_id, server.services(db, account_id), db.clone(), events));
+    let sync = Arc::new(AccountSync::new(
+        account_id,
+        server.services(db, account_id),
+        db.clone(),
+        events,
+    ));
     sync.refresh_labels().await?;
     for _ in 0..3 {
         sync.look_for_mail().await?;
@@ -159,11 +175,18 @@ pub async fn seed_pop3(
         .flat_map(|letter| {
             let id = format!("pop3/{}", letter.uidl);
             [
-                Change::AddToMailbox { message_id: id.clone(), mailbox: folder.id.clone() },
-                Change::RemoveFromMailbox { message_id: id, mailbox: "inbox".into() },
+                Change::AddToMailbox {
+                    message_id: id.clone(),
+                    mailbox: folder.id.clone(),
+                },
+                Change::RemoveFromMailbox {
+                    message_id: id,
+                    mailbox: "inbox".into(),
+                },
             ]
         })
         .collect();
-    db.write(move |c| messages::apply(c, account_id, &moved).map(drop)).await?;
+    db.write(move |c| messages::apply(c, account_id, &moved).map(drop))
+        .await?;
     Ok((account_id, server, sync))
 }

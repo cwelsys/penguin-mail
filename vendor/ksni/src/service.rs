@@ -54,7 +54,7 @@ pub(crate) async fn run<T: Tray>(
         });
     }
 
-    let name = if own_name {
+    if own_name {
         let name = format!(
             "org.kde.StatusNotifierItem-{}-{}",
             std::process::id(),
@@ -64,12 +64,7 @@ pub(crate) async fn run<T: Tray>(
             assert_ne!(e, zbus::Error::NameTaken, "generated name should be unique");
             Error::Dbus(e)
         })?;
-        name
-    } else {
-        conn.unique_name()
-            .expect("unique name should be set after connected")
-            .to_string()
-    };
+    }
 
     let snw_object = StatusNotifierWatcherProxy::builder(&conn)
         // property caching internally calls DBus GetAll, which is not allowed under Snap strict confinement
@@ -78,7 +73,9 @@ pub(crate) async fn run<T: Tray>(
         .await
         .expect("macro generated dbus Proxy should be valid");
 
-    let register_result = snw_object.register_status_notifier_item(&name).await;
+    // A bus name makes the watcher assume /StatusNotifierItem. The path
+    // tells it where this tray exports its Ayatana properties and signals.
+    let register_result = snw_object.register_status_notifier_item(SNI_PATH.as_str()).await;
     if let Err(e) = register_result {
         let fdo_err: zbus::fdo::Error = e.into();
 
@@ -142,7 +139,7 @@ pub(crate) async fn run<T: Tray>(
                                 service.tray.watcher_online();
                             }
 
-                            if let Err(e) = snw_object.register_status_notifier_item(&name).await {
+                            if let Err(e) = snw_object.register_status_notifier_item(SNI_PATH.as_str()).await {
                                 let fdo_err: zbus::fdo::Error = e.into();
                                 let reason = if let zbus::fdo::Error::ZBus(e) = fdo_err {
                                     OfflineReason::Error(Error::Dbus(e))

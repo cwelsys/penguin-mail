@@ -143,6 +143,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_nix_install_never_offers_to_replace_its_store_path() {
+        assert_eq!(
+            method_for(
+                Packaging::Nix,
+                Path::new("/nix/store/abc-penguin-mail-1.0.9/bin/.penguin-mail-wrapped")
+            ),
+            None,
+        );
+    }
+
+    #[test]
     fn the_binary_path_says_how_this_copy_was_installed() {
         let native = |exe: &str| method_for(Packaging::Native, Path::new(exe));
         assert_eq!(native("/usr/bin/penguin-mail"), Some(Method::Deb));

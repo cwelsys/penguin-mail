@@ -175,13 +175,20 @@ impl ThreadRun {
         let rebuilt = prose.rebuild(&said);
         // Model output is cleaned like any other mail HTML before it
         // reaches the page, and through the same port.
-        let (body, clean) = match arrived.html.as_deref().is_some_and(|h| !h.trim().is_empty()) {
+        let (body, clean) = match arrived
+            .html
+            .as_deref()
+            .is_some_and(|h| !h.trim().is_empty())
+        {
             true => {
                 let html = ToClean::words(message_id.clone(), rebuilt, pictures);
                 let Some(mut cleaned) = wanted.wait(|effects| effects.clean(html)).await else {
                     return;
                 };
-                let Some(clean) = cleaned.remove(&message_id).filter(|clean| !clean.is_failed()) else {
+                let Some(clean) = cleaned
+                    .remove(&message_id)
+                    .filter(|clean| !clean.is_failed())
+                else {
                     let card = self.translation_offer();
                     wanted.on_screen(|effects| effects.translation_card(card));
                     return;

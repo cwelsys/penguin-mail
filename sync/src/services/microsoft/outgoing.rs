@@ -29,11 +29,19 @@ const CHUNK: usize = 10 * 320 * 1024;
 
 /// Top-level types whose bytes a signature or a cipher covers. Rebuilding
 /// such a message as a JSON draft would break it.
-const PROTECTED: [&str; 4] = ["multipart/signed", "multipart/encrypted", "application/pkcs7-mime", "application/x-pkcs7-mime"];
+const PROTECTED: [&str; 4] = [
+    "multipart/signed",
+    "multipart/encrypted",
+    "application/pkcs7-mime",
+    "application/x-pkcs7-mime",
+];
 
 /// A header's addresses as Graph's recipient objects.
 fn recipients(parts: &Parts, header: &str) -> Vec<Value> {
-    let list = parts.header(header).map(mailrs_mime::address::parse_address_list).unwrap_or_default();
+    let list = parts
+        .header(header)
+        .map(mailrs_mime::address::parse_address_list)
+        .unwrap_or_default();
     list.into_iter()
         .map(|Address { name, email }| json!({ "emailAddress": { "address": email, "name": name.unwrap_or_default() } }))
         .collect()
@@ -45,7 +53,9 @@ fn take_data(part: &mut Part, path: &str) -> Option<Vec<u8>> {
     if part.path == path {
         return part.data.take();
     }
-    part.children.iter_mut().find_map(|child| take_data(child, path))
+    part.children
+        .iter_mut()
+        .find_map(|child| take_data(child, path))
 }
 
 /// Whether the part at `path` says `Content-Disposition: attachment`.
@@ -58,7 +68,8 @@ fn is_attachment(part: &Part, path: &str) -> bool {
 
 impl<G: GraphApi> Microsoft<G> {
     pub(super) async fn send_raw(&self, raw: &[u8]) -> Result<String, BackendError> {
-        let id = message_id_of(raw).ok_or_else(|| BackendError::Refused(gettext("The message has no Message-ID.")))?;
+        let id = message_id_of(raw)
+            .ok_or_else(|| BackendError::Refused(gettext("The message has no Message-ID.")))?;
         match raw.len() > MIME_LIMIT {
             false => self.graph().send_mime(raw).await.map_err(backend)?,
             true => self.send_large(raw, &id).await?,
@@ -71,7 +82,8 @@ impl<G: GraphApi> Microsoft<G> {
     /// `References` on a draft made this way, so a reply sent here does
     /// not thread by header.
     async fn send_large(&self, raw: &[u8], id: &str) -> Result<(), BackendError> {
-        let mut parts = mailrs_mime::parts(raw).ok_or_else(|| BackendError::Refused(gettext("The message cannot be read.")))?;
+        let mut parts = mailrs_mime::parts(raw)
+            .ok_or_else(|| BackendError::Refused(gettext("The message cannot be read.")))?;
         if PROTECTED.contains(&parts.root.mime_type.as_str()) {
             return Err(BackendError::Refused(gettext(
                 "Microsoft cannot send a signed or encrypted message larger than 3 MB. Make the files smaller or send them apart.",
@@ -91,7 +103,10 @@ impl<G: GraphApi> Microsoft<G> {
             "internetMessageId": format!("<{id}>"),
         });
         let made = self.graph().create_draft(&draft).await.map_err(backend)?;
-        match self.upload_and_send(&made.id, &body.attachments, &mut parts).await {
+        match self
+            .upload_and_send(&made.id, &body.attachments, &mut parts)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(err) => {
                 // A retry would otherwise leave this draft behind.
@@ -103,19 +118,38 @@ impl<G: GraphApi> Microsoft<G> {
         }
     }
 
-    async fn upload_and_send(&self, draft: &str, files: &[Attachment], parts: &mut Parts) -> Result<(), BackendError> {
+    async fn upload_and_send(
+        &self,
+        draft: &str,
+        files: &[Attachment],
+        parts: &mut Parts,
+    ) -> Result<(), BackendError> {
         for file in files {
-            let Some(bytes) = take_data(&mut parts.root, &file.part_id) else { continue };
-            let name = if file.filename.is_empty() { "file" } else { file.filename.as_str() };
+            let Some(bytes) = take_data(&mut parts.root, &file.part_id) else {
+                continue;
+            };
+            let name = if file.filename.is_empty() {
+                "file"
+            } else {
+                file.filename.as_str()
+            };
             let total = bytes.len() as u64;
             // A picture the HTML refers to by `cid:` stays inline. A part
             // with a Content-ID and no `attachment` disposition is one.
             let inline = file.content_id.is_some() && !is_attachment(&parts.root, &file.part_id);
             let content_id = file.content_id.as_deref().filter(|_| inline);
-            let url = self.graph().upload_session(draft, name, total, inline, content_id).await.map_err(backend)?;
+            let url = self
+                .graph()
+                .upload_session(draft, name, total, inline, content_id)
+                .await
+                .map_err(backend)?;
             let mut offset = 0;
             for piece in bytes.chunks(CHUNK) {
-                let done = self.graph().upload_chunk(&url, offset, total, piece).await.map_err(backend)?;
+                let done = self
+                    .graph()
+                    .upload_chunk(&url, offset, total, piece)
+                    .await
+                    .map_err(backend)?;
                 offset += piece.len() as u64;
                 if done {
                     break;
@@ -125,7 +159,11 @@ impl<G: GraphApi> Microsoft<G> {
         self.graph().send_draft(draft).await.map_err(backend)
     }
 
-    pub(super) async fn save(&self, old: Option<&str>, raw: &[u8]) -> Result<SavedDraft, BackendError> {
+    pub(super) async fn save(
+        &self,
+        old: Option<&str>,
+        raw: &[u8],
+    ) -> Result<SavedDraft, BackendError> {
         let made = self.graph().create_draft_mime(raw).await.map_err(backend)?;
         if let Some(old) = old {
             match self.graph().delete_message(old).await {
@@ -180,8 +218,24 @@ impl<G: GraphApi> Microsoft<G> {
         let Some(drafts) = self.known().roles.get(&Role::Drafts).cloned() else {
             return Ok(Vec::new());
         };
-        let listing = Listing { folder: Some(drafts), top: 100, fields: Fields::Ids, ..Listing::default() };
-        let page = self.graph().list_messages(&listing, None).await.map_err(backend)?;
-        Ok(page.value.into_iter().map(|m| DraftRef { draft_id: m.id.clone(), message_id: m.id }).collect())
+        let listing = Listing {
+            folder: Some(drafts),
+            top: 100,
+            fields: Fields::Ids,
+            ..Listing::default()
+        };
+        let page = self
+            .graph()
+            .list_messages(&listing, None)
+            .await
+            .map_err(backend)?;
+        Ok(page
+            .value
+            .into_iter()
+            .map(|m| DraftRef {
+                draft_id: m.id.clone(),
+                message_id: m.id,
+            })
+            .collect())
     }
 }

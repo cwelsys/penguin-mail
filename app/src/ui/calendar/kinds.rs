@@ -85,7 +85,11 @@ pub fn on_grid(kind: &Kind) -> bool {
 /// when the person split the day, or `None` for a day with none. An
 /// all-day entry counts on its own UTC dates, as the all-day row places
 /// it; a timed one on the local days it touches in `zone`.
-pub fn workplaces<Z: TimeZone>(occurrences: &[Occurrence], days: &[NaiveDate], zone: &Z) -> Vec<Option<String>> {
+pub fn workplaces<Z: TimeZone>(
+    occurrences: &[Occurrence],
+    days: &[NaiveDate],
+    zone: &Z,
+) -> Vec<Option<String>> {
     let mut places: Vec<&Occurrence> = occurrences
         .iter()
         .filter(|o| matches!(o.event.kind, Kind::WorkingLocation(_)))
@@ -110,7 +114,9 @@ pub fn workplaces<Z: TimeZone>(occurrences: &[Occurrence], days: &[NaiveDate], z
 /// Whether `o` covers part of `day`: an all-day occurrence by its UTC
 /// dates, a timed one by `zone`'s wall clock.
 fn touches<Z: TimeZone>(o: &Occurrence, day: NaiveDate, zone: &Z) -> bool {
-    let local = |at: EpochMillis| DateTime::<Utc>::from_timestamp_millis(at).map(|t| t.with_timezone(zone).date_naive());
+    let local = |at: EpochMillis| {
+        DateTime::<Utc>::from_timestamp_millis(at).map(|t| t.with_timezone(zone).date_naive())
+    };
     let utc = |at: EpochMillis| DateTime::<Utc>::from_timestamp_millis(at).map(|t| t.date_naive());
     let read = |at: EpochMillis| if o.event.all_day { utc(at) } else { local(at) };
     // The end is exclusive, so an entry ending at midnight stays off the
@@ -125,7 +131,10 @@ fn touches<Z: TimeZone>(o: &Occurrence, day: NaiveDate, zone: &Z) -> bool {
 /// under it: "Monday 21 September, working from Home".
 pub fn heading_words(date: &str, place: Option<&str>) -> String {
     match place {
-        Some(place) => fill(&gettext("{date}, working from {place}"), &[("date", date), ("place", place)]),
+        Some(place) => fill(
+            &gettext("{date}, working from {place}"),
+            &[("date", date), ("place", place)],
+        ),
         None => date.to_string(),
     }
 }
@@ -138,13 +147,23 @@ pub fn popover_words(kind: &Kind) -> Option<String> {
     let name = kind_words(kind)?;
     let declines = |meetings: Declines| match meetings {
         Declines::Nothing => name.clone(),
-        Declines::New => fill(&gettext("{kind}. Declines new meetings."), &[("kind", &name)]),
-        Declines::All => fill(&gettext("{kind}. Declines new and existing meetings."), &[("kind", &name)]),
+        Declines::New => fill(
+            &gettext("{kind}. Declines new meetings."),
+            &[("kind", &name)],
+        ),
+        Declines::All => fill(
+            &gettext("{kind}. Declines new and existing meetings."),
+            &[("kind", &name)],
+        ),
     };
     Some(match kind {
         Kind::OutOfOffice(decline) | Kind::Focus(decline) => declines(decline.meetings),
-        Kind::Birthday => gettext("Birthday. Google Calendar makes it from your contacts, so you can only change it there."),
-        Kind::WorkingLocation(_) => gettext("Working location. Google Calendar sets it, so you can only change it there."),
+        Kind::Birthday => gettext(
+            "Birthday. Google Calendar makes it from your contacts, so you can only change it there.",
+        ),
+        Kind::WorkingLocation(_) => {
+            gettext("Working location. Google Calendar sets it, so you can only change it there.")
+        }
         Kind::Event => return None,
     })
 }
@@ -164,16 +183,35 @@ mod tests {
     }
 
     fn midnight(d: u32) -> EpochMillis {
-        day(d).and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis()
+        day(d)
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_millis()
     }
 
     fn entry(kind: Kind, start: EpochMillis, end: EpochMillis, all_day: bool) -> Occurrence {
-        let event = Event { kind, start, end, all_day, zone: "UTC".into(), ..Event::default() };
-        Occurrence { account_id: 1, event: Arc::new(event), start, end }
+        let event = Event {
+            kind,
+            start,
+            end,
+            all_day,
+            zone: "UTC".into(),
+            ..Event::default()
+        };
+        Occurrence {
+            account_id: 1,
+            event: Arc::new(event),
+            start,
+            end,
+        }
     }
 
     fn away(meetings: Declines) -> Kind {
-        Kind::OutOfOffice(Decline { meetings, message: String::new() })
+        Kind::OutOfOffice(Decline {
+            meetings,
+            message: String::new(),
+        })
     }
 
     #[test]
@@ -195,9 +233,18 @@ mod tests {
 
     #[test]
     fn each_kind_names_itself_and_an_ordinary_event_says_nothing() {
-        assert_eq!(kind_words(&away(Declines::Nothing)).as_deref(), Some("Out of office"));
-        assert_eq!(kind_words(&Kind::Focus(Decline::default())).as_deref(), Some("Focus time"));
-        assert_eq!(kind_words(&Kind::WorkingLocation(Workplace::Home)).as_deref(), Some("Working location"));
+        assert_eq!(
+            kind_words(&away(Declines::Nothing)).as_deref(),
+            Some("Out of office")
+        );
+        assert_eq!(
+            kind_words(&Kind::Focus(Decline::default())).as_deref(),
+            Some("Focus time")
+        );
+        assert_eq!(
+            kind_words(&Kind::WorkingLocation(Workplace::Home)).as_deref(),
+            Some("Working location")
+        );
         assert_eq!(kind_words(&Kind::Birthday).as_deref(), Some("Birthday"));
         assert_eq!(kind_words(&Kind::Event), None);
     }
@@ -205,9 +252,15 @@ mod tests {
     #[test]
     fn a_place_reads_home_the_building_or_the_named_place() {
         assert_eq!(place_words(&Workplace::Home), "Home");
-        assert_eq!(place_words(&Workplace::Office("Lisbon HQ".into())), "Lisbon HQ");
+        assert_eq!(
+            place_words(&Workplace::Office("Lisbon HQ".into())),
+            "Lisbon HQ"
+        );
         assert_eq!(place_words(&Workplace::Office(String::new())), "Office");
-        assert_eq!(place_words(&Workplace::Elsewhere("Café Tati".into())), "Café Tati");
+        assert_eq!(
+            place_words(&Workplace::Elsewhere("Café Tati".into())),
+            "Café Tati"
+        );
     }
 
     #[test]
@@ -220,36 +273,81 @@ mod tests {
 
     #[test]
     fn an_all_day_working_location_labels_its_own_day() {
-        let home = entry(Kind::WorkingLocation(Workplace::Home), midnight(28), midnight(29), true);
+        let home = entry(
+            Kind::WorkingLocation(Workplace::Home),
+            midnight(28),
+            midnight(29),
+            true,
+        );
         let days = [day(27), day(28), day(29)];
-        assert_eq!(workplaces(&[home], &days, &Utc), vec![None, Some("Home".into()), None]);
+        assert_eq!(
+            workplaces(&[home], &days, &Utc),
+            vec![None, Some("Home".into()), None]
+        );
     }
 
     #[test]
     fn a_split_day_names_both_places_in_order() {
         let office = Kind::WorkingLocation(Workplace::Office("Lisbon HQ".into()));
-        let morning = entry(Kind::WorkingLocation(Workplace::Home), midnight(28) + 8 * HOUR, midnight(28) + 12 * HOUR, false);
-        let afternoon = entry(office, midnight(28) + 13 * HOUR, midnight(28) + 18 * HOUR, false);
-        assert_eq!(workplaces(&[afternoon, morning], &[day(28)], &Utc), vec![Some("Home, Lisbon HQ".into())]);
+        let morning = entry(
+            Kind::WorkingLocation(Workplace::Home),
+            midnight(28) + 8 * HOUR,
+            midnight(28) + 12 * HOUR,
+            false,
+        );
+        let afternoon = entry(
+            office,
+            midnight(28) + 13 * HOUR,
+            midnight(28) + 18 * HOUR,
+            false,
+        );
+        assert_eq!(
+            workplaces(&[afternoon, morning], &[day(28)], &Utc),
+            vec![Some("Home, Lisbon HQ".into())]
+        );
     }
 
     #[test]
     fn the_same_place_twice_in_a_day_is_named_once() {
-        let a = entry(Kind::WorkingLocation(Workplace::Home), midnight(28) + 8 * HOUR, midnight(28) + 12 * HOUR, false);
-        let b = entry(Kind::WorkingLocation(Workplace::Home), midnight(28) + 13 * HOUR, midnight(28) + 18 * HOUR, false);
-        assert_eq!(workplaces(&[a, b], &[day(28)], &Utc), vec![Some("Home".into())]);
+        let a = entry(
+            Kind::WorkingLocation(Workplace::Home),
+            midnight(28) + 8 * HOUR,
+            midnight(28) + 12 * HOUR,
+            false,
+        );
+        let b = entry(
+            Kind::WorkingLocation(Workplace::Home),
+            midnight(28) + 13 * HOUR,
+            midnight(28) + 18 * HOUR,
+            false,
+        );
+        assert_eq!(
+            workplaces(&[a, b], &[day(28)], &Utc),
+            vec![Some("Home".into())]
+        );
     }
 
     #[test]
     fn other_entries_name_no_workplace() {
-        let meeting = entry(Kind::Event, midnight(28) + 9 * HOUR, midnight(28) + 10 * HOUR, false);
+        let meeting = entry(
+            Kind::Event,
+            midnight(28) + 9 * HOUR,
+            midnight(28) + 10 * HOUR,
+            false,
+        );
         assert_eq!(workplaces(&[meeting], &[day(28)], &Utc), vec![None]);
     }
 
     #[test]
     fn a_heading_with_a_place_says_where_the_person_works() {
-        assert_eq!(heading_words("Monday 28 September", Some("Home")), "Monday 28 September, working from Home");
-        assert_eq!(heading_words("Monday 28 September", None), "Monday 28 September");
+        assert_eq!(
+            heading_words("Monday 28 September", Some("Home")),
+            "Monday 28 September, working from Home"
+        );
+        assert_eq!(
+            heading_words("Monday 28 September", None),
+            "Monday 28 September"
+        );
     }
 
     #[test]
@@ -258,15 +356,23 @@ mod tests {
             popover_words(&away(Declines::All)).as_deref(),
             Some("Out of office. Declines new and existing meetings.")
         );
-        assert_eq!(popover_words(&away(Declines::New)).as_deref(), Some("Out of office. Declines new meetings."));
-        assert_eq!(popover_words(&away(Declines::Nothing)).as_deref(), Some("Out of office"));
+        assert_eq!(
+            popover_words(&away(Declines::New)).as_deref(),
+            Some("Out of office. Declines new meetings.")
+        );
+        assert_eq!(
+            popover_words(&away(Declines::Nothing)).as_deref(),
+            Some("Out of office")
+        );
     }
 
     #[test]
     fn the_popover_says_a_birthday_and_a_working_location_are_read_only() {
         assert_eq!(
             popover_words(&Kind::Birthday).as_deref(),
-            Some("Birthday. Google Calendar makes it from your contacts, so you can only change it there.")
+            Some(
+                "Birthday. Google Calendar makes it from your contacts, so you can only change it there."
+            )
         );
         assert_eq!(
             popover_words(&Kind::WorkingLocation(Workplace::Home)).as_deref(),

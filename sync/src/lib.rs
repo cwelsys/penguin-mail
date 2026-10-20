@@ -12,6 +12,7 @@ mod connect;
 pub mod contacts;
 mod engine;
 mod error;
+pub mod events;
 pub mod export;
 pub mod hidden;
 pub mod invitations;
@@ -23,13 +24,12 @@ mod one_click;
 mod ops;
 pub mod outbox;
 pub mod passwords;
-pub mod events;
 pub mod raw_cache;
 pub mod rules;
-pub mod sign_in;
-pub mod switch;
 pub mod services;
 mod settings;
+pub mod sign_in;
+pub mod switch;
 mod triage;
 pub mod unsubscribe;
 
@@ -58,15 +58,17 @@ pub use account::{
     Searched, window_longer, window_reach,
 };
 pub use actions::{
-    Accounts, Categorized, Failure, History, MailAction, MailActions, NewLabels, Outcome, Returned,
-    Undone,
+    Accounts, Categorized, Failure, History, MailAction, MailActions, NewLabels, Outcome, Recorded,
+    Returned, Undone,
 };
 pub use api::{AccountClient, DraftRef, GmailApi, SavedDraft};
 pub use backoff::{MOST_TRIES, backoff_delay, poll_offset, retry_delay, with_jitter};
 pub use calendar::{Added, Calendar};
 pub use connect::{
-    Clients, Connected, Connector, JmapGrant, JmapGrantRow, JmapSessions, KEYRING, jmap_grant, Lacks, connect_account, connect_imap, auth_of, connect_jmap, connect_microsoft, connect_microsoft_at, connect_pop3, pop3_servers_for,
-    server_of, servers_for, smtp_login,
+    Clients, Connected, Connector, JmapGrant, JmapGrantRow, JmapSessions, KEYRING, Lacks, auth_of,
+    connect_account, connect_caldav, connect_imap, connect_jmap, connect_microsoft,
+    connect_microsoft_at, connect_pop3, jmap_grant, pop3_servers_for, server_of, servers_for,
+    smtp_login,
 };
 pub use contacts::{Card, ContactBook, Refreshed};
 pub use engine::{EngineConfig, SyncEngine};
@@ -74,21 +76,24 @@ pub use error::{BackendError, SyncError};
 pub use hidden::HiddenAddress;
 pub use invitations::{Change, Invitations, Opened, Sent, Spot, Told, Waiting};
 pub use mailbox::{
-    Changed, Counts, Empty, Listing, Loaded, Mailbox, Mailboxes, PAGE, Scope, Stop, View, outbox_id,
-    outbox_row, summarize_search, waiting_line,
+    Changed, Counts, Empty, Listing, Loaded, Mailbox, Mailboxes, PAGE, Scope, Stop, View,
+    outbox_id, outbox_row, summarize_search, waiting_line,
 };
 pub use newsletters::Newsletters;
 pub use one_click::OneClick;
 pub use ops::{MailOp, MovedFrom};
 pub use outbox::{Cancelled, Drained, Outbox, OutboxHold, Posted, Reheld, Reopened, server_holds};
 pub use services::{
-    AccountServices, AnyAutoReply, AnyDav, AnyGmail, AnyGraph, AnyImap, AnyJmap, AnyPop3, AnySieve, AnySmtp, Backfill, Found, ID_PAGE_SIZE, LIST_PAGE_SIZE, RawMessage,
-    RemoteRef, SearchQuery, Want, AnyCalendar, AnyContacts, AnyIdentities, AnyMail, AnyRules,
-    AutoReplyService, CalendarService, ContactsService, Google, GraphApi, Imap, ImapApi, ImapSettings, Jmap, JmapApi, JmapSettings, JmapSieve,
-    IdentityService, KeywordsOf, KeywordsPage, Look, Looked, MailBackend, MailCapabilities, Microsoft, MicrosoftSettings, Missing, Offers, Pop3, Pop3Settings, Refused,
-    Priority, Relocated, RemoteChange, Claimed, Held, ReceiptOut, Settled, Storage, Unheld,
-    RulesService, SendAsAddress, SyncState, Unapplied, Changes, RAW_LIMIT, Submit, Withheld,
-    background, withheld_by_grant, CalDav, CardDav, LocalRules, RulesBeside, RulesPlace, SieveRules, SERVER_REPLY_SCRIPT,
+    AccountServices, AnyAutoReply, AnyCalendar, AnyContacts, AnyDav, AnyGmail, AnyGraph,
+    AnyIdentities, AnyImap, AnyJmap, AnyMail, AnyPop3, AnyRules, AnySieve, AnySmtp,
+    AutoReplyService, Backfill, CalDav, CalendarService, CardDav, Changes, Claimed,
+    ContactsService, Found, Google, GraphApi, Held, ID_PAGE_SIZE, IdentityService, Imap, ImapApi,
+    ImapSettings, Jmap, JmapApi, JmapSettings, JmapSieve, KeywordsOf, KeywordsPage, LIST_PAGE_SIZE,
+    LocalRules, Look, Looked, MailBackend, MailCapabilities, Microsoft, MicrosoftSettings, Missing,
+    NoMail, Offers, Pop3, Pop3Settings, Priority, RAW_LIMIT, RawMessage, ReceiptOut, Refused,
+    Relocated, RemoteChange, RemoteRef, RulesBeside, RulesPlace, RulesService, SERVER_REPLY_SCRIPT,
+    SearchQuery, SendAsAddress, Settled, SieveRules, Storage, Submit, SyncState, Unapplied, Unheld,
+    Want, Withheld, background, withheld_by_grant,
 };
 pub use settings::{
     AccountSettings, AutomaticReply, HIDE_MY_EMAIL_LABEL, Permitted, Replaced, RuleList, SentRules,

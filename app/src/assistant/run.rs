@@ -25,9 +25,10 @@ use mailrs_domain::{
 use mailrs_store::{Db, messages};
 use mailrs_sync::mailbox::Standard;
 use mailrs_sync::{
-    AccountSettings, AccountSync, Accounts, AutomaticReply, BackendError, Calendar, Categorized, Failure,
-    History, Invitations, Loaded, MailAction, MailActions, MailBackend, Mailbox, Mailboxes, Missing,
-    MovedFrom, NewLabels, Outcome, Permitted, Scope, SyncError, TriageAction, View,
+    AccountSettings, AccountSync, Accounts, AutomaticReply, BackendError, Calendar, Categorized,
+    Failure, History, Invitations, Loaded, MailAction, MailActions, MailBackend, Mailbox,
+    Mailboxes, Missing, MovedFrom, NewLabels, Outcome, Permitted, Scope, SyncError, TriageAction,
+    View,
 };
 use serde_json::{Value, json};
 
@@ -238,6 +239,7 @@ pub struct Tools<A: Accounts> {
     background: Rc<dyn Background>,
     desk: Rc<dyn Desk>,
     effects: Rc<dyn Effects>,
+    picked_files: Arc<[std::path::PathBuf]>,
 }
 
 fn text(input: &Value, key: &str) -> Option<String> {
@@ -505,7 +507,14 @@ impl<A: Accounts> Tools<A> {
             background,
             desk,
             effects,
+            picked_files: Arc::default(),
         }
+    }
+
+    /// Files selected by the user for this request, independent of model input.
+    pub fn with_picked_files(mut self, files: Arc<[std::path::PathBuf]>) -> Self {
+        self.picked_files = files;
+        self
     }
 
     /// Runs one tool call from the assistant.
@@ -553,6 +562,24 @@ impl<A: Accounts> Tools<A> {
         }
     }
 
+    /// Runs a mail call for one account, naming its provider on throttling.
+    async fn call_for<T: Send + 'static>(
+        &self,
+        account_id: AccountId,
+        task: impl Future<Output = Result<T, SyncError>> + Send + 'static,
+    ) -> Result<T, String> {
+        self.away(task).await?.map_err(|err| {
+            let provider = self
+                .desk
+                .accounts()
+                .into_iter()
+                .find(|account| account.id == account_id)
+                .map(|account| mailrs_discover::resolved_provider_name(account.provider_name()))
+                .unwrap_or_default();
+            err.for_person(&provider)
+        })
+    }
+
     /// Runs a read query on the store's reader pool.
     async fn read<T, F>(&self, query: F) -> Result<T, String>
     where
@@ -565,7 +592,20 @@ impl<A: Accounts> Tools<A> {
 
     // ---- Lookups ---------------------------------------------------------
 
+    /// The account with mail a tool names. A calendar account has none, so
+    /// a mail tool naming one is told so before it reaches the account,
+    /// and a tool added later gets the same answer without asking.
     fn account_named(&self, email: &str) -> Result<Account, String> {
+        let account = self.any_account_named(email)?;
+        if !account.provider.serves_mail() {
+            return Err(format!("{} holds calendars and no mail.", account.email));
+        }
+        Ok(account)
+    }
+
+    /// The account a calendar or contacts tool names, a calendar account
+    /// among them.
+    fn any_account_named(&self, email: &str) -> Result<Account, String> {
         self.desk
             .accounts()
             .into_iter()
@@ -705,18 +745,28 @@ impl<A: Accounts> Tools<A> {
                     "The {service} is switched off in the Google Cloud project Penguin Mail signs in with, so Google refuses the call. The user was shown where to turn it on ({enable_url}); try again once they have."
                 ))
             }
-            Err(err) => Err(err.to_string()),
+            Err(err) => Err(err.for_person(&mailrs_discover::resolved_provider_name(
+                account.provider_name(),
+            ))),
         }
     }
 
-    /// The account a tool names, or the default one when it names none.
+    /// The account a calendar or contacts tool names, or the default one
+    /// when it names none.
     fn account_or_default(&self, input: &Value) -> Result<Account, String> {
         match text(input, "account") {
-            Some(email) => self.account_named(&email),
+            Some(email) => self.any_account_named(&email),
             None => {
-                let id = self.desk.default_account().ok_or("Add an account first.")?;
-                self.desk
-                    .accounts()
+                // The window's default is an account with mail. With
+                // calendar accounts alone there is none, and the first of
+                // them is the one there is to ask.
+                let accounts = self.desk.accounts();
+                let id = self
+                    .desk
+                    .default_account()
+                    .or_else(|| accounts.first().map(|a| a.id))
+                    .ok_or("Add an account first.")?;
+                accounts
                     .into_iter()
                     .find(|a| a.id == id)
                     .ok_or_else(|| "Add an account first.".to_string())
@@ -743,11 +793,17 @@ impl<A: Accounts> Tools<A> {
                             .collect()
                     })
                     .unwrap_or_default();
-                json!({
+                let mut account = json!({
                     "email": a.email,
                     "name": settings.account_names.get(&a.email),
                     "labels": names,
-                })
+                });
+                // Said only of an account without mail, so the model does
+                // not hand it to a mail tool.
+                if !a.provider.serves_mail() {
+                    account["calendar_only"] = json!(true);
+                }
+                account
             })
             .collect();
         let screen = self.desk.on_screen();
@@ -764,6 +820,7 @@ impl<A: Accounts> Tools<A> {
             "now": Local::now().format("%A %Y-%m-%d %H:%M").to_string(),
             "accounts": accounts,
             "default_account": settings.default_account,
+            "account_defaults": settings.account_defaults,
             "vips": settings.vips.keys().collect::<Vec<_>>(),
             "mailbox_on_screen": screen.mailbox,
             "open_conversation": open,
@@ -773,7 +830,7 @@ impl<A: Accounts> Tools<A> {
 
     /// The accounts a listing may read, in sidebar order.
     fn scope(&self) -> Scope {
-        Scope::over(self.desk.accounts())
+        Scope::of_mail_accounts(&self.desk.accounts())
     }
 
     /// One page of each mailbox, through `Mailboxes::list`.
@@ -888,7 +945,10 @@ impl<A: Accounts> Tools<A> {
                 let wanted = text(input, "label").ok_or("`label` is missing")?;
                 let labels = self.desk.labels();
                 let mut found = Vec::new();
-                for (id, all) in labels.iter().filter(|(id, _)| scope.is_none_or(|a| a.id == **id)) {
+                for (id, all) in labels
+                    .iter()
+                    .filter(|(id, _)| scope.is_none_or(|a| a.id == **id))
+                {
                     for label in all.iter().filter(|l| l.name.eq_ignore_ascii_case(&wanted)) {
                         if let Some(answer) = self.label_unavailable(*id, label) {
                             return Ok(Named::Unavailable(answer));
@@ -912,9 +972,9 @@ impl<A: Accounts> Tools<A> {
     fn label_unavailable(&self, account_id: AccountId, label: &Label) -> Option<Value> {
         let stands_for_a_set =
             label.kind == LabelKind::System && Standard::from_key(&label.id).is_none();
-        (stands_for_a_set && self.modules.accounts.services(account_id).is_none()).then(|| {
-            json!({"unavailable": format!("{} is not syncing yet.", self.email_of(account_id))})
-        })
+        (stands_for_a_set && self.modules.accounts.services(account_id).is_none()).then(
+            || json!({"unavailable": format!("{} is not syncing yet.", self.email_of(account_id))}),
+        )
     }
 
     async fn search(&self, input: &Value) -> ToolResult {
@@ -1049,9 +1109,11 @@ impl<A: Accounts> Tools<A> {
         };
         let name = required(from, "mailbox")?;
         match self.named_mailboxes(&name, from, None)? {
-            Named::Found(mailboxes) => Ok(mailboxes
-                .iter()
-                .fold(MovedFrom::nowhere(), |all, mailbox| all.and(mailbox.moved_from()))),
+            Named::Found(mailboxes) => {
+                Ok(mailboxes.iter().fold(MovedFrom::nowhere(), |all, mailbox| {
+                    all.and(mailbox.moved_from())
+                }))
+            }
             Named::Unavailable(answer) => Err(answer["unavailable"]
                 .as_str()
                 .unwrap_or("That mailbox cannot be read now.")
@@ -1082,6 +1144,7 @@ impl<A: Accounts> Tools<A> {
                         error: err.clone(),
                     })
                     .collect(),
+                recorded: None,
             });
         self.effects.mail_changed(&action, &outcome);
         outcome
@@ -1110,7 +1173,9 @@ impl<A: Accounts> Tools<A> {
             .map(|t| t.account_id)
             .find(|id| !self.offers(*id).labels);
         if let Some(account_id) = in_folders {
-            return self.move_by_label(targets, account_id, &add, &remove, from).await;
+            return self
+                .move_by_label(targets, account_id, &add, &remove, from)
+                .await;
         }
         let plan = NewLabels::plan(&targets, &add, &remove, |account_id| {
             self.labels_of(account_id)
@@ -1728,7 +1793,11 @@ impl<A: Accounts> Tools<A> {
             let site = text(input, "site").unwrap_or_default();
             let account_id = account.id;
             let made = self
-                .call(async move { settings.create_masked_address(account_id, &site, &note).await })
+                .call(async move {
+                    settings
+                        .create_masked_address(account_id, &site, &note)
+                        .await
+                })
                 .await?;
             self.effects.copy(&made.email);
             return Ok(json!({"address": made.email, "masked": true, "copied": true}));

@@ -23,14 +23,22 @@ impl Answered {
     }
 
     pub fn parse(stored: &str) -> Option<Answered> {
-        [Answered::Sent, Answered::Declined].into_iter().find(|a| a.as_str() == stored)
+        [Answered::Sent, Answered::Declined]
+            .into_iter()
+            .find(|a| a.as_str() == stored)
     }
 }
 
 /// Keeps the person's answer for `message_id` unless one is kept already,
 /// in one step, so two answers at once never both go. True when this call
 /// kept it.
-pub fn record(conn: &Connection, account_id: AccountId, message_id: &str, answered: Answered, at: EpochMillis) -> Result<bool> {
+pub fn record(
+    conn: &Connection,
+    account_id: AccountId,
+    message_id: &str,
+    answered: Answered,
+    at: EpochMillis,
+) -> Result<bool> {
     let kept = conn.execute(
         "INSERT INTO receipts (account_id, message_id, answered, at) VALUES (?1, ?2, ?3, ?4) \
          ON CONFLICT (account_id, message_id) DO NOTHING",
@@ -42,11 +50,18 @@ pub fn record(conn: &Connection, account_id: AccountId, message_id: &str, answer
 /// Forgets the answer for `message_id`, for a receipt that proved not to
 /// go, so the question is open again.
 pub fn withdraw(conn: &Connection, account_id: AccountId, message_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM receipts WHERE account_id = ?1 AND message_id = ?2", params![account_id, message_id])?;
+    conn.execute(
+        "DELETE FROM receipts WHERE account_id = ?1 AND message_id = ?2",
+        params![account_id, message_id],
+    )?;
     Ok(())
 }
 
-pub fn answered(conn: &Connection, account_id: AccountId, message_id: &str) -> Result<Option<Answered>> {
+pub fn answered(
+    conn: &Connection,
+    account_id: AccountId,
+    message_id: &str,
+) -> Result<Option<Answered>> {
     let stored: Option<String> = conn
         .query_row(
             "SELECT answered FROM receipts WHERE account_id = ?1 AND message_id = ?2",

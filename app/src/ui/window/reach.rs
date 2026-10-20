@@ -113,15 +113,18 @@ impl MainWindow {
         let reached: Vec<AccountId> = accounts.into_iter().collect();
         let shown = self.accounts_of(&self.mailbox_of(view));
         view.set_filing(Filing::picker(&reached, &shown, |id| self.offers(id)));
-        let tags = crate::offered::tags_on(
-            if reached.is_empty() { &shown } else { &reached },
-            |id| self.offers(id),
-        );
+        let tags =
+            crate::offered::tags_on(if reached.is_empty() { &shown } else { &reached }, |id| {
+                self.offers(id)
+            });
         view.set_tags_on(tags);
         // The action belongs to the main window; a conversation in a
         // window of its own has none, and its Tags… item stays hidden.
         if !view.detached()
-            && let Some(action) = self.actions.lookup_action("tag").and_downcast::<gio::SimpleAction>()
+            && let Some(action) = self
+                .actions
+                .lookup_action("tag")
+                .and_downcast::<gio::SimpleAction>()
         {
             action.set_enabled(tags);
         }
@@ -154,13 +157,20 @@ impl MainWindow {
         // the same way `views` prunes it, so the list holds one entry per
         // window opened rather than growing with every one closed.
         let mut windows = Vec::new();
-        self.detached.borrow_mut().retain(|held| match held.view.upgrade() {
-            Some(view) => {
-                windows.push((view, held.mailbox.clone(), held.account_id, held.actions.clone()));
-                true
-            }
-            None => false,
-        });
+        self.detached
+            .borrow_mut()
+            .retain(|held| match held.view.upgrade() {
+                Some(view) => {
+                    windows.push((
+                        view,
+                        held.mailbox.clone(),
+                        held.account_id,
+                        held.actions.clone(),
+                    ));
+                    true
+                }
+                None => false,
+            });
         for (view, mailbox, account_id, actions) in windows {
             self.word_buttons(&view, &mailbox, [account_id]);
             self.word_filing(&view, [account_id]);

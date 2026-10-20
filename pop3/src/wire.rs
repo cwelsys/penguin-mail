@@ -25,7 +25,9 @@ pub(crate) fn status(line: &[u8]) -> Result<String, Pop3Error> {
     };
     let rest = rest.trim_start();
     if rest.starts_with("[AUTH]") {
-        return Err(Pop3Error::Auth { text: rest.to_string() });
+        return Err(Pop3Error::Auth {
+            text: rest.to_string(),
+        });
     }
     if rest.starts_with("[IN-USE]") {
         return Err(Pop3Error::InUse(rest.to_string()));
@@ -40,19 +42,28 @@ pub(crate) fn uidl_line(line: &str) -> Option<Uidl> {
     if uidl.is_empty() {
         return None;
     }
-    Some(Uidl { id: id.parse().ok()?, uidl: uidl.to_string() })
+    Some(Uidl {
+        id: id.parse().ok()?,
+        uidl: uidl.to_string(),
+    })
 }
 
 /// `n octets`, one line of a `LIST` answer.
 pub(crate) fn list_line(line: &str) -> Option<ListItem> {
     let mut words = line.split_whitespace();
-    Some(ListItem { id: words.next()?.parse().ok()?, octets: words.next()?.parse().ok()? })
+    Some(ListItem {
+        id: words.next()?.parse().ok()?,
+        octets: words.next()?.parse().ok()?,
+    })
 }
 
 /// `count octets`, the text of a `STAT` answer.
 pub(crate) fn stat_text(text: &str) -> Option<Stat> {
     let mut words = text.split_whitespace();
-    Some(Stat { count: words.next()?.parse().ok()?, octets: words.next()?.parse().ok()? })
+    Some(Stat {
+        count: words.next()?.parse().ok()?,
+        octets: words.next()?.parse().ok()?,
+    })
 }
 
 /// What a `CAPA` answer's lines offer.
@@ -79,33 +90,71 @@ mod tests {
     fn a_doubled_leading_dot_loses_one_dot() {
         assert_eq!(undot(b"..dot at the start"), b".dot at the start");
         assert_eq!(undot(b"plain"), b"plain");
-        assert_eq!(undot(b"."), b".", "a lone dot ends the answer before undot sees it");
+        assert_eq!(
+            undot(b"."),
+            b".",
+            "a lone dot ends the answer before undot sees it"
+        );
     }
 
     #[test]
     fn status_lines_read_as_the_server_meant_them() {
         assert_eq!(status(b"+OK 2 320"), Ok("2 320".to_string()));
         assert_eq!(status(b"+OK"), Ok(String::new()));
-        assert_eq!(status(b"-ERR no such message"), Err(Pop3Error::Refused("no such message".into())));
-        assert!(matches!(status(b"-ERR [AUTH] wrong password"), Err(Pop3Error::Auth { text }) if text.contains("wrong password")));
-        assert!(matches!(status(b"-ERR [IN-USE] locked"), Err(Pop3Error::InUse(_))));
+        assert_eq!(
+            status(b"-ERR no such message"),
+            Err(Pop3Error::Refused("no such message".into()))
+        );
+        assert!(
+            matches!(status(b"-ERR [AUTH] wrong password"), Err(Pop3Error::Auth { text }) if text.contains("wrong password"))
+        );
+        assert!(matches!(
+            status(b"-ERR [IN-USE] locked"),
+            Err(Pop3Error::InUse(_))
+        ));
         assert!(matches!(status(b"* OK imap"), Err(Pop3Error::Protocol(_))));
     }
 
     #[test]
     fn listings_and_stat_parse_and_bad_lines_do_not() {
-        assert_eq!(uidl_line("1 whqtswO00WBw418f9t5JxYwZ"), Some(Uidl { id: 1, uidl: "whqtswO00WBw418f9t5JxYwZ".into() }));
+        assert_eq!(
+            uidl_line("1 whqtswO00WBw418f9t5JxYwZ"),
+            Some(Uidl {
+                id: 1,
+                uidl: "whqtswO00WBw418f9t5JxYwZ".into()
+            })
+        );
         assert_eq!(uidl_line("x abc"), None);
         assert_eq!(uidl_line("2"), None);
-        assert_eq!(list_line("2 4096"), Some(ListItem { id: 2, octets: 4096 }));
-        assert_eq!(stat_text("2 320"), Some(Stat { count: 2, octets: 320 }));
+        assert_eq!(
+            list_line("2 4096"),
+            Some(ListItem {
+                id: 2,
+                octets: 4096
+            })
+        );
+        assert_eq!(
+            stat_text("2 320"),
+            Some(Stat {
+                count: 2,
+                octets: 320
+            })
+        );
         assert_eq!(stat_text("two"), None);
     }
 
     #[test]
     fn capa_lines_name_what_the_server_offers() {
         let caps = capabilities(&["TOP", "UIDL", "SASL PLAIN LOGIN", "STLS", "USER"]);
-        assert_eq!(caps, Capabilities { uidl: true, stls: true, sasl_plain: true, top: true });
+        assert_eq!(
+            caps,
+            Capabilities {
+                uidl: true,
+                stls: true,
+                sasl_plain: true,
+                top: true
+            }
+        );
         assert_eq!(capabilities(&["USER"]), Capabilities::default());
     }
 }

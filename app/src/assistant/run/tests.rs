@@ -28,11 +28,7 @@ fn mail() -> Vec<MessageMeta> {
     vec![
         labelled(
             meta("m1", "t1", "theo@example.com", "Kite plans", NOW - DAY),
-            &[
-                gmail::INBOX,
-                gmail::UNREAD,
-                gmail::CATEGORY_PERSONAL,
-            ],
+            &[gmail::INBOX, gmail::UNREAD, gmail::CATEGORY_PERSONAL],
         ),
         labelled(
             meta(
@@ -92,6 +88,128 @@ async fn an_unknown_tool_says_so() {
         h.run("fly_a_kite", json!({})).await,
         Err("There is no tool called fly_a_kite.".into())
     );
+}
+
+const CALENDARS: &str = "robin@cloud.example.org";
+
+/// The harness with a calendar account beside its mail account, listed
+/// and not connected to any mail.
+async fn with_calendar_account() -> Harness {
+    let h = harness().await;
+    h.desk.0.borrow_mut().accounts.push(mailrs_domain::Account {
+        id: 9,
+        email: CALENDARS.into(),
+        state: mailrs_domain::AccountState::Ok,
+        provider: mailrs_domain::Provider::CalDav,
+        provider_name: None,
+    });
+    h
+}
+
+#[tokio::test]
+async fn get_context_says_which_account_holds_calendars_alone() {
+    let h = with_calendar_account().await;
+    let context = h.ok("get_context", json!({})).await;
+    assert_eq!(
+        context["accounts"][1],
+        json!({"email": CALENDARS, "name": null, "labels": [], "calendar_only": true})
+    );
+    assert_eq!(
+        context["accounts"][0].get("calendar_only"),
+        None,
+        "a mail account reads as it did"
+    );
+}
+
+#[tokio::test]
+async fn a_listing_reaches_for_the_accounts_with_mail_alone() {
+    let h = with_calendar_account().await;
+    let scope = h.tools.scope();
+    assert!(scope.id_of(ME).is_some());
+    assert_eq!(
+        scope.id_of(CALENDARS),
+        None,
+        "a search has nothing to ask an account with no mail"
+    );
+}
+
+#[tokio::test]
+async fn a_mail_tool_turns_a_calendar_account_away_in_words() {
+    let h = with_calendar_account().await;
+    let refused = h
+        .run(
+            "read_attachment",
+            json!({"account": CALENDARS, "message_id": "m1", "attachment": "a.pdf"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(refused.contains("holds calendars and no mail"), "{refused}");
+}
+
+#[tokio::test]
+async fn nothing_is_written_or_listed_from_a_calendar_account() {
+    let h = with_calendar_account().await;
+    let message = json!({"account": CALENDARS, "to": ["ann@example.com"], "body": "Friday works."});
+    for (tool, input) in [
+        ("draft_email", message.clone()),
+        ("send_email", message),
+        ("list_drafts", json!({"account": CALENDARS})),
+        ("list_newsletters", json!({"account": CALENDARS})),
+    ] {
+        let refused = h.run(tool, input).await.unwrap_err();
+        assert!(
+            refused.contains("holds calendars and no mail"),
+            "{tool}: {refused}"
+        );
+    }
+    assert!(h.asked().composed.is_empty(), "no draft was made");
+}
+
+#[tokio::test]
+async fn a_default_set_to_a_calendar_account_writes_from_one_with_mail() {
+    let h = with_calendar_account().await;
+    h.desk.0.borrow_mut().settings.account_defaults.assistant =
+        crate::settings::AccountChoice::Account(CALENDARS.into());
+    h.ok(
+        "draft_email",
+        json!({"to": ["ann@example.com"], "body": "Friday works."}),
+    )
+    .await;
+    assert_eq!(h.asked().composed[0].account_id, h.account_id);
+}
+
+#[tokio::test]
+async fn with_calendar_accounts_alone_a_calendar_tool_needs_no_account_named() {
+    let h = harness().await;
+    {
+        let mut desk = h.desk.0.borrow_mut();
+        desk.accounts = vec![mailrs_domain::Account {
+            id: h.account_id,
+            email: CALENDARS.into(),
+            state: mailrs_domain::AccountState::Ok,
+            provider: mailrs_domain::Provider::CalDav,
+            provider_name: None,
+        }];
+        // The window's default is an account with mail, and there is none.
+        desk.default_account = None;
+    }
+    let listed = h
+        .run(
+            "list_events",
+            json!({"from": "2026-01-05", "to": "2026-01-05"}),
+        )
+        .await;
+    assert!(listed.is_ok(), "{listed:?}");
+}
+
+#[tokio::test]
+async fn a_calendar_tool_still_reaches_a_calendar_account() {
+    let h = with_calendar_account().await;
+    // The harness runs no calendar for the account, so the tool may fail
+    // further on. It must not turn the account away for having no mail.
+    if let Err(err) = h.run("list_calendars", json!({"account": CALENDARS})).await {
+        assert!(!err.contains("no mail"), "{err}");
+    }
 }
 
 #[tokio::test]
@@ -204,7 +322,13 @@ async fn list_mail_finds_gmails_own_labels_by_name() {
         &[gmail::STARRED, gmail::IMPORTANT],
     ));
     mail.push(labelled(
-        meta("m6", "t6", "noisy@example.com", "Muted thread", NOW - 5 * DAY),
+        meta(
+            "m6",
+            "t6",
+            "noisy@example.com",
+            "Muted thread",
+            NOW - 5 * DAY,
+        ),
         &[gmail::MUTE],
     ));
     let h = Harness::with(mail).await;
@@ -238,7 +362,13 @@ async fn list_mail_finds_gmails_own_labels_by_name() {
         }
     };
     let mut found = Vec::new();
-    for label in ["STARRED", "MUTE", "UNREAD", "IMPORTANT", "CATEGORY_PROMOTIONS"] {
+    for label in [
+        "STARRED",
+        "MUTE",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PROMOTIONS",
+    ] {
         found.push((label, listed(label).await));
     }
     assert_eq!(
@@ -813,7 +943,10 @@ async fn change_setting_names_the_change_it_made() {
         .await;
     assert_eq!(changed, json!({"changed": "text_size", "value": "larger"}));
     assert_eq!(h.asked().changes, [Change::TextSize(TextSize::Larger)]);
-    assert_eq!(h.asked().questions, ["Change the setting text_size to larger?"]);
+    assert_eq!(
+        h.asked().questions,
+        ["Change the setting text_size to larger?"]
+    );
 
     assert_eq!(
         h.run("change_setting", json!({"name": "wallpaper", "value": 1}))
@@ -845,9 +978,14 @@ async fn change_setting_asks_before_loading_every_senders_images() {
     );
     assert_eq!(
         h.asked().questions,
-        ["Load remote images from every sender? Loading a remote image tells the sender when you opened their mail."]
+        [
+            "Load remote images from every sender? Loading a remote image tells the sender when you opened their mail."
+        ]
     );
-    assert!(h.asked().changes.is_empty(), "nothing changes without a yes");
+    assert!(
+        h.asked().changes.is_empty(),
+        "nothing changes without a yes"
+    );
 }
 
 #[tokio::test]
@@ -864,9 +1002,14 @@ async fn set_signature_asks_with_the_new_text() {
     );
     assert_eq!(
         h.asked().questions,
-        [format!("Change your signature for {ME} to:\n\nPay invoices at evil.example")]
+        [format!(
+            "Change your signature for {ME} to:\n\nPay invoices at evil.example"
+        )]
     );
-    assert!(h.asked().changes.is_empty(), "nothing changes without a yes");
+    assert!(
+        h.asked().changes.is_empty(),
+        "nothing changes without a yes"
+    );
     h.run("set_signature", json!({"account": ME, "text": ""}))
         .await
         .unwrap_err();
@@ -934,11 +1077,7 @@ async fn categorize_sender_asks_then_moves_their_mail_and_sorts_the_rest() {
     // the rule is there by the time the model reads it.
     let labels = h.labels_of("m2").await;
     assert!(labels.iter().any(|l| l == gmail::CATEGORY_SOCIAL));
-    assert!(
-        !labels
-            .iter()
-            .any(|l| l == gmail::CATEGORY_PROMOTIONS)
-    );
+    assert!(!labels.iter().any(|l| l == gmail::CATEGORY_PROMOTIONS));
     let rules = h.gmail.with(|s| s.filters.clone());
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].criteria.from.as_deref(), Some("shop@example.com"));
@@ -1049,13 +1188,29 @@ async fn dismiss_follow_up_takes_the_thread_off_the_list() {
         )
         .await;
     assert_eq!(done, json!({"dismissed": "t1"}));
+    let changed: Vec<(MailAction, Outcome)> = h
+        .asked()
+        .mail_changed
+        .clone()
+        .into_iter()
+        .map(|(action, outcome)| {
+            (
+                action,
+                Outcome {
+                    recorded: None,
+                    ..outcome
+                },
+            )
+        })
+        .collect();
     assert_eq!(
-        h.asked().mail_changed,
+        changed,
         [(
             MailAction::DismissFollowUp,
             Outcome {
                 done: vec![mailrs_domain::Target::thread(h.account_id, "t1")],
                 failed: vec![],
+                recorded: None,
             }
         )],
         "the window redraws what the action changed"
@@ -1130,7 +1285,9 @@ async fn hide_my_email_makes_an_address_and_copies_it() {
     assert_eq!(turned_off, json!({"address": address, "active": false}));
     assert_eq!(
         h.asked().questions,
-        [format!("Turn off {address}? Mail sent to it will go to the Trash.")]
+        [format!(
+            "Turn off {address}? Mail sent to it will go to the Trash."
+        )]
     );
     assert_eq!(
         h.gmail.with(|s| s.filters.len()),
@@ -1397,15 +1554,29 @@ async fn hidden_addresses_are_refused_on_a_folder_account_with_the_reason() {
     use std::sync::Arc;
 
     let h = Harness::with_services(|_, services| {
-        let imap = AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::default()));
+        let imap =
+            AccountServices::fake_imap(Arc::new(FakeImap::new()), Arc::new(FakeSmtp::default()));
         let adapter = imap.mail.clone();
-        let sieve = SieveRules::new(Arc::new(mailrs_sync::AnySieve::from(Arc::new(FakeSieve::new("fileinto vacation")))), adapter, ME.into(), "Example".into());
+        let sieve = SieveRules::new(
+            Arc::new(mailrs_sync::AnySieve::from(Arc::new(FakeSieve::new(
+                "fileinto vacation",
+            )))),
+            adapter,
+            ME.into(),
+            "Example".into(),
+        );
         *services = imap.with_rules(AnyRules::Sieve(sieve));
     })
     .await;
     assert_eq!(
-        h.run("create_hidden_address", json!({"account": ME, "note": "shop"})).await,
-        Ok(json!({"unavailable": "Hide My Email needs masked addresses or labels, and Gmail offers neither on this account."}))
+        h.run(
+            "create_hidden_address",
+            json!({"account": ME, "note": "shop"})
+        )
+        .await,
+        Ok(
+            json!({"unavailable": "Hide My Email needs masked addresses or labels, and Gmail offers neither on this account."})
+        )
     );
 }
 
@@ -1424,7 +1595,10 @@ async fn a_masked_email_account_gets_a_masked_address() {
     })
     .await;
     let made = h
-        .ok("create_hidden_address", json!({"account": ME, "note": "kite shop", "site": "kites.example"}))
+        .ok(
+            "create_hidden_address",
+            json!({"account": ME, "note": "kite shop", "site": "kites.example"}),
+        )
         .await;
     let address = made["address"].as_str().expect("an address");
     assert!(!address.contains('+'), "{made}");
@@ -1434,5 +1608,8 @@ async fn a_masked_email_account_gets_a_masked_address() {
     assert_eq!(held[0].for_domain, "kites.example");
     assert_eq!(held[0].description, "kite shop");
     assert_eq!(h.asked().copied, [address]);
-    assert!(h.asked().changes.is_empty(), "no plus address is kept in the settings");
+    assert!(
+        h.asked().changes.is_empty(),
+        "no plus address is kept in the settings"
+    );
 }

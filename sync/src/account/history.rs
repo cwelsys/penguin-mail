@@ -133,7 +133,8 @@ impl AccountSync {
         let named_mailboxes: BTreeSet<String> = changes
             .iter()
             .filter_map(|change| match change {
-                RemoteChange::Gained { memberships, .. } => Some(memberships),
+                RemoteChange::Gained { memberships, .. }
+                | RemoteChange::Refresh { memberships, .. } => Some(memberships),
                 _ => None,
             })
             .flatten()
@@ -156,9 +157,9 @@ impl AccountSync {
                 let named: Vec<String> = changes
                     .iter()
                     .filter_map(|change| match change {
-                        RemoteChange::Added { id, .. } | RemoteChange::Gained { id, .. } => {
-                            Some(id.clone())
-                        }
+                        RemoteChange::Added { id, .. }
+                        | RemoteChange::Gained { id, .. }
+                        | RemoteChange::Refresh { id, .. } => Some(id.clone()),
                         _ => None,
                     })
                     .collect();
@@ -189,6 +190,13 @@ impl AccountSync {
                             batch.extend(
                                 memberships.iter().map(|m| Change::of(id, m.clone(), true)),
                             );
+                        }
+                        RemoteChange::Refresh { id, memberships } => {
+                            if stored.contains(id) {
+                                batch.extend(
+                                    memberships.iter().map(|m| Change::of(id, m.clone(), true)),
+                                );
+                            }
                         }
                         RemoteChange::Gained { id, .. } => {
                             if let Some(meta) = fetched.get(id) {
@@ -339,9 +347,16 @@ impl AccountSync {
     /// messages at a time, so what it holds stays one batch's metadata
     /// whatever the mailbox's size; a batch matched and stored is not
     /// matched again if a later one fails and the look runs again.
-    pub(super) async fn relist_mailbox(&self, mailbox: &str, uidvalidity: u32) -> Result<(), SyncError> {
+    pub(super) async fn relist_mailbox(
+        &self,
+        mailbox: &str,
+        uidvalidity: u32,
+    ) -> Result<(), SyncError> {
         let account_id = self.account_id;
-        let listed = self.mail.window_ids(self.window_days, Some(mailbox)).await?;
+        let listed = self
+            .mail
+            .window_ids(self.window_days, Some(mailbox))
+            .await?;
         let generation = self
             .db
             .read(move |c| Ok(accounts::sync_cursor(c, account_id)?.sync_gen))
@@ -360,7 +375,13 @@ impl AccountSync {
             let held = self
                 .db
                 .read(move |c| {
-                    remote_refs::renumbered_by_message_id(c, account_id, &name, uidvalidity, &msgids)
+                    remote_refs::renumbered_by_message_id(
+                        c,
+                        account_id,
+                        &name,
+                        uidvalidity,
+                        &msgids,
+                    )
                 })
                 .await?;
             // Two stored messages can share a Message-ID and a date; each
@@ -400,9 +421,8 @@ impl AccountSync {
         let gone = self
             .db
             .write(move |c| {
-                let gone = remote_refs::in_mailbox_where(c, account_id, &name, |v, _| {
-                    v != uidvalidity
-                })?;
+                let gone =
+                    remote_refs::in_mailbox_where(c, account_id, &name, |v, _| v != uidvalidity)?;
                 let deletes: Vec<Change> = gone
                     .iter()
                     .map(|id| Change::Gone {
@@ -433,10 +453,7 @@ impl AccountSync {
         changes: &[RemoteChange],
     ) -> Result<(HashMap<String, MessageMeta>, Placing), SyncError> {
         let account_id = self.account_id;
-        let inbox = self
-            .mail
-            .mailbox_for(Role::Inbox)
-            .map(Membership::Mailbox);
+        let inbox = self.mail.mailbox_for(Role::Inbox).map(Membership::Mailbox);
         // Each change names the message's thread, so several new messages
         // of one conversation share a thread fetch.
         let want = |id: &String, thread_id: &String| Want {

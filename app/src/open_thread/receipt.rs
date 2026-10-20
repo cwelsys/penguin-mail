@@ -17,7 +17,13 @@ impl OpenThread {
     fn asked_at<'a>(&'a self, meta: &MessageMeta) -> Option<&'a str> {
         let mine = |address: &str| self.me.iter().any(|m| m.eq_ignore_ascii_case(address));
         let from = &meta.from.as_ref()?.email;
-        let to = self.bodies.get(&meta.id)?.as_ref().ok()?.receipt_to.as_deref()?;
+        let to = self
+            .bodies
+            .get(&meta.id)?
+            .as_ref()
+            .ok()?
+            .receipt_to
+            .as_deref()?;
         (to.eq_ignore_ascii_case(from) && !mine(to)).then_some(to)
     }
 
@@ -70,14 +76,19 @@ impl OpenThread {
     pub(super) fn receipt_view<'a>(&'a self, meta: &MessageMeta) -> Option<Receipt<'a>> {
         let to = self.asked_at(meta)?;
         Some(match &self.receipt_card {
-            Some((id, working)) if *id == meta.id => Receipt::Asked { to, working: *working },
+            Some((id, working)) if *id == meta.id => Receipt::Asked {
+                to,
+                working: *working,
+            },
             _ => Receipt::Noted,
         })
     }
 
     /// Whether the card's answer is on its way.
     pub fn receipt_working(&self) -> bool {
-        self.receipt_card.as_ref().is_some_and(|(_, working)| *working)
+        self.receipt_card
+            .as_ref()
+            .is_some_and(|(_, working)| *working)
     }
 
     /// The receipts in the thread not yet checked against Sent: each
@@ -88,7 +99,13 @@ impl OpenThread {
             .iter()
             .filter(|meta| !self.reports.contains_key(&meta.id))
             .filter_map(|meta| {
-                let report = self.bodies.get(&meta.id)?.as_ref().ok()?.read_report.as_ref()?;
+                let report = self
+                    .bodies
+                    .get(&meta.id)?
+                    .as_ref()
+                    .ok()?
+                    .read_report
+                    .as_ref()?;
                 Some((meta.id.clone(), report.original.clone()?, report.by.clone()))
             })
             .collect()
@@ -106,6 +123,11 @@ impl OpenThread {
         if self.reports.get(message_id) != Some(&true) {
             return None;
         }
-        self.bodies.get(message_id)?.as_ref().ok()?.read_report.as_ref()
+        self.bodies
+            .get(message_id)?
+            .as_ref()
+            .ok()?
+            .read_report
+            .as_ref()
     }
 }

@@ -13,8 +13,15 @@ async fn a_change_on_the_server_ends_the_watch_and_the_account_then_looks_slowly
     let watching = tokio::spawn(async move { mail.watch().await });
     tokio::task::yield_now().await;
     h.fake.poke();
-    tokio::time::timeout(Duration::from_secs(2), watching).await.expect("the watch ended").unwrap();
-    assert_eq!(h.mail().poll_interval(), Some(Duration::from_secs(15 * 60)), "only the tray runs in a test");
+    tokio::time::timeout(Duration::from_secs(2), watching)
+        .await
+        .expect("the watch ended")
+        .unwrap();
+    assert_eq!(
+        h.mail().poll_interval(),
+        Some(Duration::from_secs(15 * 60)),
+        "only the tray runs in a test"
+    );
     h.mail().set_window_open(true);
     assert_eq!(h.mail().poll_interval(), Some(Duration::from_secs(5 * 60)));
 }
@@ -48,7 +55,11 @@ async fn a_stream_that_ends_at_once_is_not_reopened_before_the_backoff() {
     tokio::time::sleep(Duration::from_secs(2)).await;
     again.await.unwrap();
     assert_eq!(h.fake.push_opens(), 2);
-    assert_eq!(h.mail().poll_interval(), Some(Duration::from_secs(60)), "a failing stream leaves the minute poll");
+    assert_eq!(
+        h.mail().poll_interval(),
+        Some(Duration::from_secs(60)),
+        "a failing stream leaves the minute poll"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -61,7 +72,11 @@ async fn repeated_failures_wait_longer_before_each_reopening() {
         async move { mail.watch().await }
     });
     tokio::time::sleep(Duration::from_secs(119)).await;
-    assert_eq!(h.fake.push_opens(), 2, "the second failure doubles the wait");
+    assert_eq!(
+        h.fake.push_opens(),
+        2,
+        "the second failure doubles the wait"
+    );
     tokio::time::sleep(Duration::from_secs(2)).await;
     third.await.unwrap();
     assert_eq!(h.fake.push_opens(), 3);
@@ -80,7 +95,11 @@ async fn a_stream_held_for_a_long_time_before_it_drops_starts_the_backoff_over()
         async move { mail.watch().await }
     });
     tokio::time::sleep(Duration::from_secs(59)).await;
-    assert_eq!(h.fake.push_opens(), 3, "the pause is the base one, not 240 s");
+    assert_eq!(
+        h.fake.push_opens(),
+        3,
+        "the pause is the base one, not 240 s"
+    );
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(h.fake.push_opens(), 4);
     next.await.unwrap();
@@ -92,7 +111,11 @@ async fn a_quiet_stream_that_holds_makes_the_account_look_slowly() {
     let mail = h.mail();
     let watching = tokio::spawn(async move { mail.watch().await });
     tokio::time::sleep(Duration::from_secs(10)).await;
-    assert_eq!(h.mail().poll_interval(), Some(Duration::from_secs(60)), "not yet shown to hold");
+    assert_eq!(
+        h.mail().poll_interval(),
+        Some(Duration::from_secs(60)),
+        "not yet shown to hold"
+    );
     tokio::time::sleep(Duration::from_secs(300)).await;
     assert_eq!(h.mail().poll_interval(), Some(Duration::from_secs(15 * 60)));
     watching.abort();
@@ -140,7 +163,11 @@ async fn the_account_looks_each_minute_while_a_stall_pauses_push() {
     let mail = h.mail();
     let watching = tokio::spawn(async move { mail.watch().await });
     tokio::time::sleep(Duration::from_secs(10 * 60)).await;
-    assert_eq!(h.mail().poll_interval(), Some(Duration::from_secs(60)), "no stream is open");
+    assert_eq!(
+        h.mail().poll_interval(),
+        Some(Duration::from_secs(60)),
+        "no stream is open"
+    );
     assert_eq!(h.fake.push_opens(), 0);
     watching.abort();
 }

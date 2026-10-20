@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
+use mailrs_domain::translate::gettext;
 use mailrs_domain::{ChangeEvent, Role};
 use mailrs_store::messages::Change;
-use mailrs_domain::translate::gettext;
 use mailrs_store::{drafts, messages, outbox};
 
 use super::AccountSync;
@@ -73,7 +73,10 @@ impl AccountSync {
             return None;
         }
         let Some(sent) = mail.mailbox_for(Role::Sent) else {
-            tracing::warn!(account = self.account_id, "sent, but the server has no Sent mailbox for a copy");
+            tracing::warn!(
+                account = self.account_id,
+                "sent, but the server has no Sent mailbox for a copy"
+            );
             return None;
         };
         let first = match mail.append(raw, &sent).await {
@@ -90,7 +93,9 @@ impl AccountSync {
                 tracing::warn!(account = self.account_id, error = %err, "sent, but could not file a copy in Sent");
                 self.emit(ChangeEvent::WriteFailed {
                     account_id: self.account_id,
-                    message: gettext("The message was sent, but Penguin Mail could not keep a copy in Sent."),
+                    message: gettext(
+                        "The message was sent, but Penguin Mail could not keep a copy in Sent.",
+                    ),
                 });
                 None
             }
@@ -136,7 +141,11 @@ impl AccountSync {
         draft_id: Option<String>,
     ) -> Result<SavedDraft, SyncError> {
         let thread_id = thread_id.as_deref();
-        let saved = match self.mail.save_draft(draft_id.as_deref(), &raw, thread_id).await {
+        let saved = match self
+            .mail
+            .save_draft(draft_id.as_deref(), &raw, thread_id)
+            .await
+        {
             Err(SyncError::Backend(BackendError::NotFound)) if draft_id.is_some() => {
                 self.mail.save_draft(None, &raw, thread_id).await?
             }
@@ -157,7 +166,10 @@ impl AccountSync {
     /// to the draft, so an edit saved over it would go out beside it.
     async fn not_held(&self, draft_id: &str) -> Result<(), SyncError> {
         let (account_id, draft) = (self.account_id, draft_id.to_string());
-        let row = self.db.read(move |c| outbox::find_draft(c, account_id, &draft)).await?;
+        let row = self
+            .db
+            .read(move |c| outbox::find_draft(c, account_id, &draft))
+            .await?;
         if row.is_some_and(|row| row.held.is_some()) {
             return Err(BackendError::Refused(gettext(
                 "The server holds this message to send at its hour. Cancel Send before you change it.",
@@ -295,7 +307,11 @@ impl AccountSync {
     /// alone. A cached raw message without that path, which a path read
     /// from the server's structure can name, falls back to the part alone
     /// too.
-    pub async fn attachment(&self, message_id: &str, part_path: &str) -> Result<Vec<u8>, SyncError> {
+    pub async fn attachment(
+        &self,
+        message_id: &str,
+        part_path: &str,
+    ) -> Result<Vec<u8>, SyncError> {
         let raw = match self.cached_raw(message_id) {
             Some(raw) => Some(raw),
             None if self.small(message_id).await? => Some(self.raw(message_id).await?),
@@ -325,7 +341,8 @@ impl AccountSync {
         message_id: Option<&str>,
     ) -> Result<Vec<u8>, SyncError> {
         let mut mbox = Vec::new();
-        self.export_mbox_to(thread_id, message_id, &mut mbox).await?;
+        self.export_mbox_to(thread_id, message_id, &mut mbox)
+            .await?;
         Ok(mbox)
     }
 
@@ -400,7 +417,6 @@ impl AccountSync {
             .map(|meta| meta.id)
             .collect())
     }
-
 }
 
 /// The most messages an export asks the server for at once.
@@ -417,7 +433,9 @@ fn export_batches(sizes: &[Option<i64>]) -> Vec<std::ops::Range<usize>> {
     let mut batches = Vec::new();
     let (mut start, mut bytes) = (0, 0);
     for (at, size) in sizes.iter().enumerate() {
-        let size = size.filter(|s| *s > 0 && *s <= EXPORT_BATCH_BYTES).unwrap_or(EXPORT_BATCH_BYTES);
+        let size = size
+            .filter(|s| *s > 0 && *s <= EXPORT_BATCH_BYTES)
+            .unwrap_or(EXPORT_BATCH_BYTES);
         if at > start && (at - start == EXPORT_BATCH || bytes + size > EXPORT_BATCH_BYTES) {
             batches.push(start..at);
             (start, bytes) = (at, 0);
@@ -446,7 +464,10 @@ mod tests {
         let small = Some(1_000);
         assert_eq!(export_batches(&[small; 45]), [0..20, 20..40, 40..45]);
         let big = Some(EXPORT_BATCH_BYTES + 1);
-        assert_eq!(export_batches(&[small, big, small, None, small]), [0..1, 1..2, 2..3, 3..4, 4..5]);
+        assert_eq!(
+            export_batches(&[small, big, small, None, small]),
+            [0..1, 1..2, 2..3, 3..4, 4..5]
+        );
         let half = Some(EXPORT_BATCH_BYTES / 2);
         assert_eq!(export_batches(&[half, half, half]), [0..2, 2..3]);
         assert!(export_batches(&[]).is_empty());

@@ -23,13 +23,24 @@ pub const CYRUS_JSCALENDAR_BIS: &str = "https://cyrusimap.org/ns/jmap/jscalendar
 /// Whether an account's calendars capability has the members draft 32
 /// defines, with UTC times.
 pub fn fits(capability: &Value) -> bool {
-    let utc = |key: &str| capability.get(key).and_then(Value::as_str).is_some_and(|t| t.ends_with('Z'));
+    let utc = |key: &str| {
+        capability
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|t| t.ends_with('Z'))
+    };
     capability.get("maxCalendarsPerEvent").is_some()
         && capability.get("maxParticipantsPerEvent").is_some()
         && utc("minDateTime")
         && utc("maxDateTime")
-        && capability.get("maxExpandedQueryDuration").and_then(Value::as_str).is_some()
-        && capability.get("mayCreateCalendar").and_then(Value::as_bool).is_some()
+        && capability
+            .get("maxExpandedQueryDuration")
+            .and_then(Value::as_str)
+            .is_some()
+        && capability
+            .get("mayCreateCalendar")
+            .and_then(Value::as_bool)
+            .is_some()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -92,7 +103,10 @@ pub enum EventWrite {
     Create(Map<String, Value>),
     /// A patch: each key a path into the event, each value what goes
     /// there, `null` taking it out.
-    Update { id: String, patch: Map<String, Value> },
+    Update {
+        id: String,
+        patch: Map<String, Value>,
+    },
     Destroy(String),
 }
 
@@ -105,8 +119,13 @@ struct Queried {
 /// The calendars account, and the most one `/get` may take (the session's
 /// `maxObjectsInGet`, at most 500, at least 1).
 fn calendar_account(session: &Session) -> Result<(String, usize), JmapError> {
-    let account = session.account_for(CALENDARS).ok_or_else(|| JmapError::UnknownCapability(CALENDARS.into()))?;
-    Ok((account.to_string(), session.limits().max_objects_in_get.clamp(1, 500)))
+    let account = session
+        .account_for(CALENDARS)
+        .ok_or_else(|| JmapError::UnknownCapability(CALENDARS.into()))?;
+    Ok((
+        account.to_string(),
+        session.limits().max_objects_in_get.clamp(1, 500),
+    ))
 }
 
 fn calendar_request(session: &Session) -> Request {
@@ -122,19 +141,37 @@ impl JmapClient {
         let session = self.session().await?;
         let (account, _) = calendar_account(&session)?;
         let mut request = calendar_request(&session);
-        let got = request.call(CALENDARS, "Calendar/get", json!({ "accountId": account, "ids": null }));
-        Ok(self.send(&request).await?.take::<Got<JmapCalendar>>(&got, "Calendar/get")?.list)
+        let got = request.call(
+            CALENDARS,
+            "Calendar/get",
+            json!({ "accountId": account, "ids": null }),
+        );
+        Ok(self
+            .send(&request)
+            .await?
+            .take::<Got<JmapCalendar>>(&got, "Calendar/get")?
+            .list)
     }
 
     /// The account's event changes since `since`, every calendar at once.
-    pub async fn calendar_event_changes(&self, since: &str, max: usize) -> Result<ChangesResponse, JmapError> {
+    pub async fn calendar_event_changes(
+        &self,
+        since: &str,
+        max: usize,
+    ) -> Result<ChangesResponse, JmapError> {
         let session = self.session().await?;
         let (account, step) = calendar_account(&session)?;
         let mut request = calendar_request(&session);
-        let changes = request.call(CALENDARS, "CalendarEvent/changes", json!({
-            "accountId": account, "sinceState": since, "maxChanges": max.clamp(1, step)
-        }));
-        self.send(&request).await?.take(&changes, "CalendarEvent/changes")
+        let changes = request.call(
+            CALENDARS,
+            "CalendarEvent/changes",
+            json!({
+                "accountId": account, "sinceState": since, "maxChanges": max.clamp(1, step)
+            }),
+        );
+        self.send(&request)
+            .await?
+            .take(&changes, "CalendarEvent/changes")
     }
 
     /// `ids`, a request per `maxObjectsInGet`.
@@ -144,7 +181,11 @@ impl JmapClient {
         let mut all = CalendarEvents::default();
         for chunk in ids.chunks(step) {
             let mut request = calendar_request(&session);
-            let got = request.call(CALENDARS, "CalendarEvent/get", json!({ "accountId": account, "ids": chunk }));
+            let got = request.call(
+                CALENDARS,
+                "CalendarEvent/get",
+                json!({ "accountId": account, "ids": chunk }),
+            );
             let got: Got<Value> = self.send(&request).await?.take(&got, "CalendarEvent/get")?;
             all.state = got.state;
             all.list.extend(got.list);
@@ -155,31 +196,53 @@ impl JmapClient {
 
     /// The events `filter` matches from `position`, at most `limit`,
     /// soonest first, fetched in the same request.
-    pub async fn calendar_events_page(&self, filter: &Value, position: u64, limit: usize) -> Result<EventsPage, JmapError> {
+    pub async fn calendar_events_page(
+        &self,
+        filter: &Value,
+        position: u64,
+        limit: usize,
+    ) -> Result<EventsPage, JmapError> {
         let session = self.session().await?;
         let (account, step) = calendar_account(&session)?;
         let mut request = calendar_request(&session);
-        let query = request.call(CALENDARS, "CalendarEvent/query", json!({
-            "accountId": account,
-            "filter": filter,
-            "sort": [{ "property": "start", "isAscending": true }],
-            "position": position,
-            "limit": limit.clamp(1, step),
-            "calculateTotal": true
-        }));
-        let got = request.call(CALENDARS, "CalendarEvent/get", json!({
-            "accountId": account, "#ids": query.result_of("CalendarEvent/query", "/ids")
-        }));
+        let query = request.call(
+            CALENDARS,
+            "CalendarEvent/query",
+            json!({
+                "accountId": account,
+                "filter": filter,
+                "sort": [{ "property": "start", "isAscending": true }],
+                "position": position,
+                "limit": limit.clamp(1, step),
+                "calculateTotal": true
+            }),
+        );
+        let got = request.call(
+            CALENDARS,
+            "CalendarEvent/get",
+            json!({
+                "accountId": account, "#ids": query.result_of("CalendarEvent/query", "/ids")
+            }),
+        );
         let mut answer = self.send(&request).await?;
         let queried: Queried = answer.take(&query, "CalendarEvent/query")?;
         let events: Got<Value> = answer.take(&got, "CalendarEvent/get")?;
-        Ok(EventsPage { state: events.state, events: events.list, total: queried.total })
+        Ok(EventsPage {
+            state: events.state,
+            events: events.list,
+            total: queried.total,
+        })
     }
 
     /// Writes one event. `send` asks the server to mail the guests the
     /// iTIP the change calls for. With `state`, the server refuses the
     /// write with `stateMismatch` once any event changed since that state.
-    pub async fn set_calendar_event(&self, write: &EventWrite, send: bool, state: Option<&str>) -> Result<Option<Value>, JmapError> {
+    pub async fn set_calendar_event(
+        &self,
+        write: &EventWrite,
+        send: bool,
+        state: Option<&str>,
+    ) -> Result<Option<Value>, JmapError> {
         let session = self.session().await?;
         let (account, _) = calendar_account(&session)?;
         let mut request = calendar_request(&session);
@@ -203,7 +266,12 @@ impl JmapClient {
         };
         let set = request.call(CALENDARS, "CalendarEvent/set", args);
         let mut said: SetResponse = self.send(&request).await?.take(&set, "CalendarEvent/set")?;
-        if let Some(refused) = said.not_created.as_ref().and_then(|n| n.get(key)).or_else(|| said.refusal(key)) {
+        if let Some(refused) = said
+            .not_created
+            .as_ref()
+            .and_then(|n| n.get(key))
+            .or_else(|| said.refusal(key))
+        {
             return Err(refused.error());
         }
         match write {
@@ -212,7 +280,9 @@ impl JmapClient {
                 .and_then(|mut created| created.remove(key))
                 .map(Some)
                 .ok_or_else(|| JmapError::Decode("the server created no event".into())),
-            EventWrite::Update { .. } => Ok(said.updated.as_mut().and_then(|u| u.remove(key)).flatten()),
+            EventWrite::Update { .. } => {
+                Ok(said.updated.as_mut().and_then(|u| u.remove(key)).flatten())
+            }
             EventWrite::Destroy(_) => Ok(None),
         }
     }

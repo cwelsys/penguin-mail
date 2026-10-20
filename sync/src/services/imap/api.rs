@@ -5,9 +5,9 @@
 
 use std::time::Duration;
 
-use mailrs_imap::{QuotaUse, 
+use mailrs_imap::{
     AppendUid, BodyStructure, Capabilities, CopyUid, Fetched, FlagsOf, ImapClient, ImapError,
-    Listed, Selected, Since, SmtpClient, UidSet, Woke,
+    Listed, QuotaUse, Selected, Since, SmtpClient, UidSet, Woke,
 };
 
 /// An account's IMAP server.
@@ -23,7 +23,10 @@ pub trait ImapApi: Send + Sync + 'static {
 
     /// The quota roots `mailbox` falls under, each resource with its use
     /// and limit. Only asked of a server that lists QUOTA.
-    fn quota_root(&self, mailbox: &str) -> impl Future<Output = Result<Vec<QuotaUse>, ImapError>> + Send;
+    fn quota_root(
+        &self,
+        mailbox: &str,
+    ) -> impl Future<Output = Result<Vec<QuotaUse>, ImapError>> + Send;
 
     /// Selects `mailbox` (with QRESYNC parameters when given) and reports its state and, under QRESYNC, what changed.
     /// Without QRESYNC, or when `since` names another UIDVALIDITY, `since`

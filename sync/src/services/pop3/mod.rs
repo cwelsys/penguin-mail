@@ -245,7 +245,10 @@ impl<S, P> Pop3<S, P> {
         f: impl FnOnce(&Connection, AccountId) -> mailrs_store::Result<T> + Send + 'static,
     ) -> Result<T, BackendError> {
         let account_id = self.account_id;
-        self.db.read(move |c| f(c, account_id)).await.map_err(stored)
+        self.db
+            .read(move |c| f(c, account_id))
+            .await
+            .map_err(stored)
     }
 
     async fn write<T: Send + 'static>(
@@ -253,7 +256,10 @@ impl<S, P> Pop3<S, P> {
         f: impl FnOnce(&Connection, AccountId) -> mailrs_store::Result<T> + Send + 'static,
     ) -> Result<T, BackendError> {
         let account_id = self.account_id;
-        self.db.write(move |c| f(c, account_id)).await.map_err(stored)
+        self.db
+            .write(move |c| f(c, account_id))
+            .await
+            .map_err(stored)
     }
 
     async fn raw(&self, id: &str) -> Result<Vec<u8>, BackendError> {
@@ -292,7 +298,11 @@ impl<S, P> Pop3<S, P> {
     /// from the blob when the outline puts it there. `None` when the copy
     /// is gone, cannot be read or cannot be outlined, for the caller to
     /// read it whole.
-    async fn outlined(&self, id: &str, path: Option<&str>) -> Result<Option<Streamed>, BackendError> {
+    async fn outlined(
+        &self,
+        id: &str,
+        path: Option<&str>,
+    ) -> Result<Option<Streamed>, BackendError> {
         let (id, path) = (id.to_string(), path.map(str::to_string));
         let read = self
             .read(move |c, a| {
@@ -387,6 +397,7 @@ impl<S: Submit, P: Pop3Api> MailBackend for Pop3<S, P> {
             // Every keyword stays on this computer, marked local.
             keywords: &[],
             native_search: false,
+            paged_mailboxes: false,
             renames: false,
             restates: false,
             tags: false,
@@ -553,7 +564,10 @@ impl<S: Submit, P: Pop3Api> MailBackend for Pop3<S, P> {
         Ok(None)
     }
 
-    async fn keywords_stored(&self, _mailbox: &str) -> Result<&'static [&'static str], BackendError> {
+    async fn keywords_stored(
+        &self,
+        _mailbox: &str,
+    ) -> Result<&'static [&'static str], BackendError> {
         Ok(&[])
     }
 
@@ -578,7 +592,11 @@ impl<S: Submit, P: Pop3Api> MailBackend for Pop3<S, P> {
     }
 
     /// The caller searches the store itself, which holds every message.
-    async fn search(&self, _query: &SearchQuery, _limit: usize) -> Result<Vec<RemoteRef>, BackendError> {
+    async fn search(
+        &self,
+        _query: &SearchQuery,
+        _limit: usize,
+    ) -> Result<Vec<RemoteRef>, BackendError> {
         Ok(Vec::new())
     }
 
@@ -596,7 +614,9 @@ impl<S: Submit, P: Pop3Api> MailBackend for Pop3<S, P> {
     async fn fetch(&self, wants: Vec<Want>) -> Result<Found, BackendError> {
         let ids: Vec<String> = wants.into_iter().map(|w| w.id).collect();
         let asked = ids.clone();
-        let metas = self.read(move |c, a| messages::by_ids(c, a, &asked)).await?;
+        let metas = self
+            .read(move |c, a| messages::by_ids(c, a, &asked))
+            .await?;
         let gone = ids
             .into_iter()
             .filter(|id| metas.iter().all(|m| &m.id != id))
@@ -714,7 +734,11 @@ impl<S: Submit, P: Pop3Api> MailBackend for Pop3<S, P> {
     /// remove a downloaded message from the server when the account
     /// removes mail there (spec section 5); the caller then deletes the
     /// rows, and the raw copy goes with them.
-    async fn apply(&self, messages: &[String], ops: &[MailOp]) -> Result<Vec<Relocated>, Unapplied> {
+    async fn apply(
+        &self,
+        messages: &[String],
+        ops: &[MailOp],
+    ) -> Result<Vec<Relocated>, Unapplied> {
         if !matches!(ops, [MailOp::Destroy]) {
             return Ok(Vec::new());
         }

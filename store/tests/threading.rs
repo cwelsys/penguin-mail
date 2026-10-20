@@ -22,7 +22,10 @@ fn message(account: AccountId, id: &str, subject: &str, at: i64) -> MessageMeta 
 fn links(in_reply_to: Option<&str>, references: &[&str]) -> Links {
     Links {
         in_reply_to: in_reply_to.map(|id| format!("<{id}@example.com>")),
-        references: references.iter().map(|id| format!("<{id}@example.com>")).collect(),
+        references: references
+            .iter()
+            .map(|id| format!("<{id}@example.com>"))
+            .collect(),
     }
 }
 
@@ -45,8 +48,16 @@ fn thread_local(conn: &Connection, account: AccountId, m: MessageMeta, links: Li
 fn a_reply_joins_its_thread_by_references() {
     let (conn, a) = db();
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
-    let reply = thread_local(&conn, a, message(a, "b", "Something else", DAY), links(None, &["x", "a"]));
-    assert_eq!(first, "a", "a message that links nowhere starts a thread named after itself");
+    let reply = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Something else", DAY),
+        links(None, &["x", "a"]),
+    );
+    assert_eq!(
+        first, "a",
+        "a message that links nowhere starts a thread named after itself"
+    );
     assert_eq!(reply, first);
 }
 
@@ -54,7 +65,12 @@ fn a_reply_joins_its_thread_by_references() {
 fn a_reply_joins_by_in_reply_to_alone() {
     let (conn, a) = db();
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
-    let reply = thread_local(&conn, a, message(a, "b", "Other", DAY), links(Some("a"), &[]));
+    let reply = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Other", DAY),
+        links(Some("a"), &[]),
+    );
     assert_eq!(reply, first);
 }
 
@@ -62,7 +78,12 @@ fn a_reply_joins_by_in_reply_to_alone() {
 fn a_reply_joins_by_subject_inside_thirty_days() {
     let (conn, a) = db();
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
-    let reply = thread_local(&conn, a, message(a, "b", "Re: Lunch", 29 * DAY), Links::default());
+    let reply = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", 29 * DAY),
+        Links::default(),
+    );
     assert_eq!(reply, first);
 }
 
@@ -70,15 +91,28 @@ fn a_reply_joins_by_subject_inside_thirty_days() {
 fn a_reply_joins_by_subject_at_exactly_thirty_days() {
     let (conn, a) = db();
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
-    let reply = thread_local(&conn, a, message(a, "b", "Re: Lunch", 30 * DAY), Links::default());
-    assert_eq!(reply, first, "thirty days is still inside the window, not past it");
+    let reply = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", 30 * DAY),
+        Links::default(),
+    );
+    assert_eq!(
+        reply, first,
+        "thirty days is still inside the window, not past it"
+    );
 }
 
 #[test]
 fn two_unrelated_messages_with_one_subject_forty_days_apart_stay_apart() {
     let (conn, a) = db();
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
-    let later = thread_local(&conn, a, message(a, "b", "Re: Lunch", 40 * DAY), Links::default());
+    let later = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", 40 * DAY),
+        Links::default(),
+    );
     assert_ne!(later, first);
     assert_eq!(later, "b");
 }
@@ -94,7 +128,12 @@ fn a_subject_without_a_reply_prefix_does_not_join() {
 #[test]
 fn a_parent_that_arrives_after_its_reply_joins_the_reply() {
     let (conn, a) = db();
-    let reply = thread_local(&conn, a, message(a, "b", "Re: Lunch", DAY), links(Some("a"), &["a"]));
+    let reply = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", DAY),
+        links(Some("a"), &["a"]),
+    );
     let parent = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
     assert_eq!(parent, reply);
 }
@@ -112,8 +151,18 @@ fn a_second_copy_of_a_message_joins_its_thread() {
 fn a_message_stored_again_keeps_its_thread() {
     let (conn, a) = db();
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
-    thread_local(&conn, a, message(a, "b", "Re: Lunch", DAY), Links::default());
-    let again = thread_local(&conn, a, message(a, "b", "Re: Lunch", DAY), links(Some("zzz"), &[]));
+    thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", DAY),
+        Links::default(),
+    );
+    let again = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", DAY),
+        links(Some("zzz"), &[]),
+    );
     assert_eq!(again, first);
 }
 
@@ -124,7 +173,15 @@ fn a_message_with_a_server_thread_keeps_it() {
     let first = thread_local(&conn, a, message(a, "a", "Lunch", 0), Links::default());
     let mut gmail = message(a, "g", "Re: Lunch", DAY);
     gmail.thread_id = "gmail-thread".into();
-    messages::apply(&conn, a, &[Change::Upsert { meta: Box::new(gmail), generation: 1 }]).unwrap();
+    messages::apply(
+        &conn,
+        a,
+        &[Change::Upsert {
+            meta: Box::new(gmail),
+            generation: 1,
+        }],
+    )
+    .unwrap();
     assert_eq!(
         messages::thread_id_of(&conn, a, "g").unwrap().as_deref(),
         Some("gmail-thread")
@@ -132,7 +189,12 @@ fn a_message_with_a_server_thread_keeps_it() {
     // A local message with the same subject joins the local thread, never
     // Gmail's: Gmail's own message carries no base subject, since nothing
     // threaded it here.
-    let local = thread_local(&conn, a, message(a, "b", "Re: Lunch", 2 * DAY), Links::default());
+    let local = thread_local(
+        &conn,
+        a,
+        message(a, "b", "Re: Lunch", 2 * DAY),
+        Links::default(),
+    );
     assert_eq!(local, first);
 }
 
@@ -160,6 +222,9 @@ fn empty_references_and_in_reply_to_link_nothing() {
         references: vec!["".into(), "   ".into()],
     };
     let reply = thread_local(&conn, a, message(a, "b", "Two", DAY), blank_links);
-    assert_ne!(reply, unrelated, "a blank header must never stand in for a real Message-ID");
+    assert_ne!(
+        reply, unrelated,
+        "a blank header must never stand in for a real Message-ID"
+    );
     assert_eq!(reply, "b");
 }

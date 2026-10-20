@@ -56,7 +56,9 @@ struct LiveMasked {
     list: Vec<MaskedEmail>,
 }
 
-fn live_only<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<MaskedEmail>, D::Error> {
+fn live_only<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<MaskedEmail>, D::Error> {
     struct Live;
     impl<'de> serde::de::Visitor<'de> for Live {
         type Value = Vec<MaskedEmail>;
@@ -65,7 +67,10 @@ fn live_only<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Ma
             f.write_str("a list of masked addresses")
         }
 
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
             let mut kept = Vec::new();
             while let Some(masked) = seq.next_element::<MaskedEmail>()? {
                 if masked.state != "deleted" && kept.len() < MOST_MASKED {
@@ -81,7 +86,10 @@ fn live_only<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Ma
 impl JmapClient {
     async fn masked_account(&self) -> Result<String, JmapError> {
         let session = self.session().await?;
-        session.account_for(MASKED_EMAIL).map(str::to_string).ok_or_else(|| JmapError::UnknownCapability(MASKED_EMAIL.into()))
+        session
+            .account_for(MASKED_EMAIL)
+            .map(str::to_string)
+            .ok_or_else(|| JmapError::UnknownCapability(MASKED_EMAIL.into()))
     }
 
     /// The account's addresses but the deleted ones, at most
@@ -91,12 +99,24 @@ impl JmapClient {
     pub async fn masked_emails(&self) -> Result<Vec<MaskedEmail>, JmapError> {
         let account = self.masked_account().await?;
         let mut request = Request::new();
-        let id = request.call(MASKED_EMAIL, "MaskedEmail/get", json!({ "accountId": account, "ids": null }));
-        Ok(self.send(&request).await?.take::<LiveMasked>(&id, "MaskedEmail/get")?.list)
+        let id = request.call(
+            MASKED_EMAIL,
+            "MaskedEmail/get",
+            json!({ "accountId": account, "ids": null }),
+        );
+        Ok(self
+            .send(&request)
+            .await?
+            .take::<LiveMasked>(&id, "MaskedEmail/get")?
+            .list)
     }
 
     /// Makes an enabled address for `for_domain`, the site it is for.
-    pub async fn create_masked(&self, for_domain: &str, description: &str) -> Result<MaskedEmail, JmapError> {
+    pub async fn create_masked(
+        &self,
+        for_domain: &str,
+        description: &str,
+    ) -> Result<MaskedEmail, JmapError> {
         let account = self.masked_account().await?;
         let mut request = Request::new();
         let id = request.call(MASKED_EMAIL, "MaskedEmail/set", json!({
@@ -107,8 +127,12 @@ impl JmapClient {
         if let Some(refused) = set.not_created.as_ref().and_then(|n| n.get("m")) {
             return Err(refused.error());
         }
-        let made = set.created.and_then(|mut c| c.remove("m")).ok_or_else(|| JmapError::Decode("no masked address came back".into()))?;
-        let mut masked: MaskedEmail = serde_json::from_value(made).map_err(|e| crate::error::decode("MaskedEmail/set", &e))?;
+        let made = set
+            .created
+            .and_then(|mut c| c.remove("m"))
+            .ok_or_else(|| JmapError::Decode("no masked address came back".into()))?;
+        let mut masked: MaskedEmail = serde_json::from_value(made)
+            .map_err(|e| crate::error::decode("MaskedEmail/set", &e))?;
         if masked.for_domain.is_empty() {
             masked.for_domain = for_domain.to_string();
         }
@@ -123,7 +147,11 @@ impl JmapClient {
     pub async fn set_masked_state(&self, id: &str, state: MaskedState) -> Result<(), JmapError> {
         let account = self.masked_account().await?;
         let mut request = Request::new();
-        let call = request.call(MASKED_EMAIL, "MaskedEmail/set", json!({ "accountId": account, "update": { id: { "state": state.as_str() } } }));
+        let call = request.call(
+            MASKED_EMAIL,
+            "MaskedEmail/set",
+            json!({ "accountId": account, "update": { id: { "state": state.as_str() } } }),
+        );
         let set: SetResponse = self.send(&request).await?.take(&call, "MaskedEmail/set")?;
         match set.refusal(id) {
             Some(refused) => Err(refused.error()),

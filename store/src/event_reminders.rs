@@ -50,7 +50,10 @@ pub fn log(conn: &Connection) -> Result<HashMap<Key, Logged>> {
                 start: row.get(3)?,
                 minutes: row.get(4)?,
             },
-            Logged { shown_at: row.get(5)?, snoozed_until: row.get(6)? },
+            Logged {
+                shown_at: row.get(5)?,
+                snoozed_until: row.get(6)?,
+            },
         ))
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -67,7 +70,15 @@ pub fn mark_shown(conn: &Connection, shown: &[(Key, EpochMillis)], now: EpochMil
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL) \
              ON CONFLICT (account_id, calendar, event, starts_at, minutes) DO UPDATE SET \
              ends_at = excluded.ends_at, shown_at = excluded.shown_at, snoozed_until = NULL",
-            params![key.account_id, key.calendar, key.event, key.start, key.minutes, ends_at, now],
+            params![
+                key.account_id,
+                key.calendar,
+                key.event,
+                key.start,
+                key.minutes,
+                ends_at,
+                now
+            ],
         )?;
     }
     conn.execute(
@@ -87,7 +98,15 @@ pub fn snooze(conn: &Connection, key: &Key, now: EpochMillis, until: EpochMillis
          VALUES (?1, ?2, ?3, ?4, ?5, ?4, ?6, ?7) \
          ON CONFLICT (account_id, calendar, event, starts_at, minutes) DO UPDATE SET \
          snoozed_until = excluded.snoozed_until",
-        params![key.account_id, key.calendar, key.event, key.start, key.minutes, now, until],
+        params![
+            key.account_id,
+            key.calendar,
+            key.event,
+            key.start,
+            key.minutes,
+            now,
+            until
+        ],
     )?;
     Ok(())
 }
@@ -125,22 +144,36 @@ mod tests {
         mark_shown(&conn, &[(ten.clone(), TWO_PM + HOUR)], TWO_PM - 10 * MIN).unwrap();
         assert_eq!(
             log(&conn).unwrap().get(&ten),
-            Some(&Logged { shown_at: TWO_PM - 10 * MIN, snoozed_until: None })
+            Some(&Logged {
+                shown_at: TWO_PM - 10 * MIN,
+                snoozed_until: None
+            })
         );
         snooze(&conn, &ten, TWO_PM - 9 * MIN, TWO_PM - 4 * MIN).unwrap();
-        assert_eq!(log(&conn).unwrap()[&ten].snoozed_until, Some(TWO_PM - 4 * MIN));
+        assert_eq!(
+            log(&conn).unwrap()[&ten].snoozed_until,
+            Some(TWO_PM - 4 * MIN)
+        );
         // Coming back from the snooze clears it.
         mark_shown(&conn, &[(ten.clone(), TWO_PM + HOUR)], TWO_PM - 4 * MIN).unwrap();
         assert_eq!(
             log(&conn).unwrap()[&ten],
-            Logged { shown_at: TWO_PM - 4 * MIN, snoozed_until: None }
+            Logged {
+                shown_at: TWO_PM - 4 * MIN,
+                snoozed_until: None
+            }
         );
     }
 
     #[test]
     fn each_reminder_of_an_occurrence_is_its_own_row() {
         let (conn, id) = store();
-        mark_shown(&conn, &[(key(id, 30), TWO_PM + HOUR), (key(id, 10), TWO_PM + HOUR)], TWO_PM).unwrap();
+        mark_shown(
+            &conn,
+            &[(key(id, 30), TWO_PM + HOUR), (key(id, 10), TWO_PM + HOUR)],
+            TWO_PM,
+        )
+        .unwrap();
         assert_eq!(log(&conn).unwrap().len(), 2);
     }
 
@@ -149,7 +182,11 @@ mod tests {
         let (conn, id) = store();
         mark_shown(&conn, &[(key(id, 10), TWO_PM + HOUR)], TWO_PM).unwrap();
         mark_shown(&conn, &[], TWO_PM + HOUR + KEEP_AFTER_END).unwrap();
-        assert_eq!(log(&conn).unwrap().len(), 1, "a day to the millisecond still keeps it");
+        assert_eq!(
+            log(&conn).unwrap().len(),
+            1,
+            "a day to the millisecond still keeps it"
+        );
         mark_shown(&conn, &[], TWO_PM + HOUR + KEEP_AFTER_END + 1).unwrap();
         assert!(log(&conn).unwrap().is_empty());
     }
@@ -158,7 +195,10 @@ mod tests {
     fn a_snooze_without_a_row_still_comes_back() {
         let (conn, id) = store();
         snooze(&conn, &key(id, 10), TWO_PM - 9 * MIN, TWO_PM - 4 * MIN).unwrap();
-        assert_eq!(log(&conn).unwrap()[&key(id, 10)].snoozed_until, Some(TWO_PM - 4 * MIN));
+        assert_eq!(
+            log(&conn).unwrap()[&key(id, 10)].snoozed_until,
+            Some(TWO_PM - 4 * MIN)
+        );
     }
 
     #[test]

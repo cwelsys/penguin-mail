@@ -58,7 +58,10 @@ pub enum Action {
     Summarize,
     /// The read receipt card's buttons: send the receipt for the message,
     /// or decline it.
-    Receipt { message_id: String, send: bool },
+    Receipt {
+        message_id: String,
+        send: bool,
+    },
     Reply(ReplyKind),
     EditDraft,
     Archive,
@@ -162,6 +165,7 @@ const READY_SCRIPT: &str = "window.webkit.messageHandlers.mailrsReady.postMessag
 /// an article above the reader that grew would push them down.
 const PATCH_SCRIPT: [&str; 2] = [
     r#"(function (patches) {
+  if (window.mailrsHideLinkPreview) window.mailrsHideLinkPreview();
   var holder = document.createElement('template');
   if (typeof holder.setHTMLUnsafe !== 'function') return 'whole';
   var anchor = null;
@@ -347,6 +351,18 @@ pub struct ConversationView {
 }
 
 impl ConversationView {
+    /// Keeps adjoining toolbar containers at the same height as their bars change.
+    pub(crate) fn group_toolbar_height(&self, group: &gtk::SizeGroup) {
+        if let Some(bar) = super::top_bar(&self.header) {
+            group.add_widget(&bar);
+        }
+    }
+
+    /// The assistant takes the main window controls while it occupies the outer edge.
+    pub(crate) fn set_assistant_docked(&self, docked: bool) {
+        self.header.set_show_end_title_buttons(!docked);
+    }
+
     pub fn new(on_action: impl Fn(Action) + 'static) -> Rc<ConversationView> {
         let on_action: Rc<dyn Fn(Action)> = Rc::new(on_action);
         // The page asks for its pictures before the view around it exists,
@@ -364,6 +380,7 @@ impl ConversationView {
         for script in [MENU_SCRIPT, READY_SCRIPT] {
             webview.add_script(script);
         }
+        super::link_preview::attach(&webview);
 
         let empty = adw::StatusPage::builder()
             .icon_name("penguin-mail-mark-symbolic")
@@ -589,7 +606,10 @@ impl ConversationView {
         block.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
         sender.append_item(&block);
         let categories = gio::Menu::new();
-        fill_categorize(&categories, &crate::offered::categorize_choices(mailrs_sync::Offers::EVERYTHING));
+        fill_categorize(
+            &categories,
+            &crate::offered::categorize_choices(mailrs_sync::Offers::EVERYTHING),
+        );
         sender.append_submenu(Some(&gettext("Categorize Sender")), &categories);
         more.append_section(None, &sender);
         buttons.more.set_menu_model(Some(&more));
@@ -633,7 +653,11 @@ impl ConversationView {
                 // buttons over one pill; the capsule draws its pill and
                 // its separators itself, so it skips "linked".
                 let capsule = gtk::Box::builder()
-                    .css_classes([if draft { "draft-capsule" } else { "toolbar-capsule" }])
+                    .css_classes([if draft {
+                        "draft-capsule"
+                    } else {
+                        "toolbar-capsule"
+                    }])
                     .valign(gtk::Align::Center)
                     .build();
                 for &slot in slots.iter() {
@@ -666,6 +690,7 @@ impl ConversationView {
         menu_popover.set_parent(&webview.widget());
         let find = FindBar::new(&webview);
         let toolbar = adw::ToolbarView::new();
+        toolbar.add_css_class("conversation-toolbar");
         toolbar.add_top_bar(&header);
         toolbar.add_top_bar(&find.widget);
         toolbar.set_content(Some(&stack));
@@ -951,15 +976,13 @@ impl ConversationView {
     /// goes through the page rather than around it, so a screenshot shows
     /// what a reader's own click shows.
     pub fn ask_message_menu(&self, position: usize) {
-        self.webview.run(
-            &format!(
-                "(function(){{var m=document.querySelectorAll('.message')[{}];if(!m)return;\
+        self.webview.run(&format!(
+            "(function(){{var m=document.querySelectorAll('.message')[{}];if(!m)return;\
                  var b=m.getBoundingClientRect();\
                  m.dispatchEvent(new MouseEvent('contextmenu',{{bubbles:true,cancelable:true,\
                  clientX:b.left+140,clientY:b.top+14}}));}})()",
-                position.saturating_sub(1)
-            ),
-        );
+            position.saturating_sub(1)
+        ));
     }
 
     /// Opens the print dialog for the conversation on screen.
@@ -1178,6 +1201,7 @@ impl ConversationView {
     }
 
     pub fn clear(&self) {
+        super::link_preview::clear(&self.webview);
         self.find.close();
         *self.open.borrow_mut() = None;
         self.refuse_held();
@@ -1200,10 +1224,7 @@ impl ConversationView {
             Some(showing) => self.card.show(showing),
             None => self.card.hide(),
         }
-        if self
-            .change(|open| open.take_invitation_place(at))
-            .is_some()
-        {
+        if self.change(|open| open.take_invitation_place(at)).is_some() {
             self.render(false);
         }
     }
@@ -1472,7 +1493,11 @@ impl ConversationView {
     /// Whether a receipt answers mail the person sent. One that does is
     /// drawn again as one line.
     pub fn report_checked(&self, message_id: String, sent: bool) {
-        if self.change(|open| open.report_checked(message_id, sent)).is_some() && sent {
+        if self
+            .change(|open| open.report_checked(message_id, sent))
+            .is_some()
+            && sent
+        {
             self.render(false);
         }
     }
@@ -1501,6 +1526,7 @@ impl ConversationView {
 
     /// Shows a thread. `scroll` jumps to the first expanded message.
     pub fn show(&self, thread: OpenThread, scroll: bool) {
+        super::link_preview::clear(&self.webview);
         // Before the thread changes, so the old search stops colouring
         // the new message and the old messages close again.
         self.find.close();
@@ -1633,6 +1659,9 @@ impl ConversationView {
     /// the page that is parsed now. A page that cannot take it, or that
     /// lacks one of them, is loaded whole instead.
     fn patch(&self, patch: Vec<Article>) {
+        // The script hides too, in case this run is still queued when the
+        // articles are already gone.
+        super::link_preview::clear(&self.webview);
         let pairs: Vec<(&str, &str)> = patch
             .iter()
             .map(|article| (article.message_id.as_str(), &*article.html))
@@ -1947,12 +1976,10 @@ impl ConversationView {
             true => ("expanded", "'collapsed','shut'"),
             false => ("collapsed", "'expanded'"),
         };
-        self.webview.run(
-            &format!(
-                "(function(){{var m=document.getElementById({id});\
+        self.webview.run(&format!(
+            "(function(){{var m=document.getElementById({id});\
                    if(m){{m.classList.add('{add}');m.classList.remove({remove});}}}})()"
-            ),
-        );
+        ));
         if expanded {
             return;
         }
@@ -1960,12 +1987,10 @@ impl ConversationView {
         let settled = std::time::Duration::from_millis(u64::from(FOLD_MS) + 40);
         glib::timeout_add_local_once(settled, move || {
             if let Some(webview) = webview.upgrade() {
-                webview.run(
-                    &format!(
-                        "(function(){{var m=document.getElementById({id});\
+                webview.run(&format!(
+                    "(function(){{var m=document.getElementById({id});\
                          if(m&&m.classList.contains('collapsed'))m.classList.add('shut');}})()"
-                    ),
-                );
+                ));
             }
         });
     }
@@ -2121,8 +2146,15 @@ mod tests {
     #[test]
     fn message_scripts_keep_imap_paths_and_quote_special_characters() {
         assert_eq!(script_id("INBOX/1001/42"), r#""m-INBOX/1001/42""#);
-        assert_eq!(script_id("Work/Clients/1007/1"), r#""m-Work/Clients/1007/1""#);
-        for id in ["Šablony/1008/1", "O'Brien/1009/2", "x\");throw 'bad';//\\\n/1/2"] {
+        assert_eq!(
+            script_id("Work/Clients/1007/1"),
+            r#""m-Work/Clients/1007/1""#
+        );
+        for id in [
+            "Šablony/1008/1",
+            "O'Brien/1009/2",
+            "x\");throw 'bad';//\\\n/1/2",
+        ] {
             let quoted = script_id(id);
             assert_eq!(
                 serde_json::from_str::<String>(&quoted).unwrap(),

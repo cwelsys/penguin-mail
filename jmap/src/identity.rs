@@ -49,7 +49,11 @@ pub async fn identities(client: &JmapClient) -> Result<Vec<Identity>, JmapError>
         .account_for(SUBMISSION)
         .ok_or_else(|| JmapError::UnknownCapability(SUBMISSION.into()))?;
     let mut request = Request::new();
-    let id = request.call(SUBMISSION, "Identity/get", json!({ "accountId": account, "ids": null }));
+    let id = request.call(
+        SUBMISSION,
+        "Identity/get",
+        json!({ "accountId": account, "ids": null }),
+    );
     let mut answer = client.send(&request).await?;
     Ok(answer.take::<IdentityList>(&id, "Identity/get")?.list)
 }

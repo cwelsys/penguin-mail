@@ -57,7 +57,10 @@ async fn the_automatic_reply_goes_inside_mailbox_settings() {
         })))
         .mount(&server)
         .await;
-    common::graph(&server).set_automatic_replies(&away()).await.unwrap();
+    common::graph(&server)
+        .set_automatic_replies(&away())
+        .await
+        .unwrap();
     let asked = server.received_requests().await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&asked.last().unwrap().body).unwrap();
     assert_eq!(
@@ -89,7 +92,10 @@ async fn a_save_answers_what_graph_kept() {
         })))
         .mount(&server)
         .await;
-    let kept = common::graph(&server).set_automatic_replies(&away()).await.unwrap();
+    let kept = common::graph(&server)
+        .set_automatic_replies(&away())
+        .await
+        .unwrap();
     assert_eq!(kept.status, "disabled");
 }
 
@@ -112,7 +118,10 @@ async fn a_save_whose_answer_leaves_out_the_reply_reads_it_back() {
         })))
         .mount(&server)
         .await;
-    let kept = common::graph(&server).set_automatic_replies(&away()).await.unwrap();
+    let kept = common::graph(&server)
+        .set_automatic_replies(&away())
+        .await
+        .unwrap();
     assert_eq!(kept.status, "alwaysEnabled");
     assert!(kept.internal_reply_message.contains("Away"));
 }

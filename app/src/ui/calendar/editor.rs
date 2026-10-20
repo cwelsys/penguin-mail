@@ -22,7 +22,9 @@ use chrono::{Datelike, NaiveDate, NaiveTime, Timelike, Weekday};
 use chrono_tz::{TZ_VARIANTS, Tz};
 use gtk::glib;
 use mailrs_domain::calendar::repeat::{Custom, Ends, Frequency, Repeat};
-use mailrs_domain::calendar::{self, Attachment, Calendar, Declines, EVENT_COLORS, Reminder, ReminderMethod};
+use mailrs_domain::calendar::{
+    self, Attachment, Calendar, Declines, EVENT_COLORS, Reminder, ReminderMethod,
+};
 use mailrs_domain::translate::{fill, gettext, ngettext};
 use mailrs_domain::{AccountId, EpochMillis};
 use mailrs_sync::Offers;
@@ -68,7 +70,8 @@ pub struct Attaching {
     pub ask: Box<dyn Fn(AccountId)>,
     /// Starts uploading a waiting file to the account's Drive, counting
     /// the bytes sent into the counter. Aborting the handle stops it.
-    pub upload: Box<dyn Fn(AccountId, Attachment, Arc<AtomicU64>) -> tokio::task::JoinHandle<Uploaded>>,
+    pub upload:
+        Box<dyn Fn(AccountId, Attachment, Arc<AtomicU64>) -> tokio::task::JoinHandle<Uploaded>>,
 }
 
 /// A file on its way to Drive while the editor is open.
@@ -373,7 +376,9 @@ impl Editor {
         page.add(&place_group);
         let guests_group = self.guests_group_widget(contacts);
         page.add(&guests_group);
-        self.kind_hidden.borrow_mut().extend([place_group.clone().upcast(), guests_group.upcast()]);
+        self.kind_hidden
+            .borrow_mut()
+            .extend([place_group.clone().upcast(), guests_group.upcast()]);
         page.add(&self.reminders_group_widget(choices));
         let notes_group = self.notes_group();
         page.add(&notes_group);
@@ -462,7 +467,12 @@ impl Editor {
             if this.quiet.get() {
                 return;
             }
-            let choice = this.type_list.borrow().get(row.selected() as usize).copied().unwrap_or(TypeChoice::Event);
+            let choice = this
+                .type_list
+                .borrow()
+                .get(row.selected() as usize)
+                .copied()
+                .unwrap_or(TypeChoice::Event);
             let declines = this.account_offers().declines;
             {
                 let mut draft = this.draft.borrow_mut();
@@ -482,7 +492,10 @@ impl Editor {
     /// types, so an account the editor was not told of makes events.
     fn account_offers(&self) -> Offers {
         let account = self.draft.borrow().account_id;
-        self.offers.get(&account).copied().unwrap_or(Offers::EVERYTHING)
+        self.offers
+            .get(&account)
+            .copied()
+            .unwrap_or(Offers::EVERYTHING)
     }
 
     /// Shows the rows the draft's type takes and hides the ones Google
@@ -497,14 +510,21 @@ impl Editor {
         let creatable = draft::account_types(&offers);
         let primary = {
             let draft = self.draft.borrow();
-            self.calendars.get(&(draft.account_id, draft.calendar.clone())).is_some_and(|c| c.primary)
+            self.calendars
+                .get(&(draft.account_id, draft.calendar.clone()))
+                .is_some_and(|c| c.primary)
         };
         let (offers_type, typed, all_day, title) = {
             let mut draft = self.draft.borrow_mut();
             if draft.is_new() && (!primary || !creatable.contains(&draft.type_choice())) {
                 draft.set_type(TypeChoice::Event);
             }
-            (draft.offers_type(primary), draft.kind.decline().is_some(), draft.all_day, draft.title.clone())
+            (
+                draft.offers_type(primary),
+                draft.kind.decline().is_some(),
+                draft.all_day,
+                draft.title.clone(),
+            )
         };
         // A type fills in its own name as the title. Each write below
         // emits a signal whose handler borrows the draft, so the borrow
@@ -551,7 +571,9 @@ impl Editor {
         // Cloned out: `set_active` runs the all-day handler, which borrows
         // the draft, before it returns.
         let hidden = self.kind_hidden.borrow().clone();
-        if let Some(all_day_row) = hidden.first().and_then(|w| w.downcast_ref::<adw::SwitchRow>())
+        if let Some(all_day_row) = hidden
+            .first()
+            .and_then(|w| w.downcast_ref::<adw::SwitchRow>())
             && all_day_row.is_active() != all_day
         {
             all_day_row.set_active(all_day);
@@ -567,7 +589,10 @@ impl Editor {
         if let Some((group, row, text)) = group {
             group.set_visible(typed && offers.declines);
             if let Some(decline) = decline {
-                let index = DECLINES.iter().position(|d| *d == decline.meetings).unwrap_or(0) as u32;
+                let index = DECLINES
+                    .iter()
+                    .position(|d| *d == decline.meetings)
+                    .unwrap_or(0) as u32;
                 if row.selected() != index {
                     row.set_selected(index);
                 }
@@ -582,7 +607,9 @@ impl Editor {
     /// Which meetings out of office or focus time declines while it runs,
     /// and the message the organizers get, as Google's own editor asks.
     fn decline_group(self: &Rc<Self>) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().title(gettext("Meetings")).build();
+        let group = adw::PreferencesGroup::builder()
+            .title(gettext("Meetings"))
+            .build();
         let (meetings, message) = {
             let draft = self.draft.borrow();
             match draft.kind.decline() {
@@ -594,7 +621,11 @@ impl Editor {
         crate::ui::name_combo_row_items(&row);
         // The row's title says Decline, so each choice names only which
         // meetings, short enough not to be cut off.
-        let names = [gettext("None"), gettext("New only"), gettext("New and existing")];
+        let names = [
+            gettext("None"),
+            gettext("New only"),
+            gettext("New and existing"),
+        ];
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         row.set_model(Some(&gtk::StringList::new(&refs)));
         row.set_selected(DECLINES.iter().position(|d| *d == meetings).unwrap_or(0) as u32);
@@ -605,7 +636,10 @@ impl Editor {
         let message_row = text.clone();
         row.connect_selected_notify(move |row| {
             let Some(this) = weak.upgrade() else { return };
-            let meetings = DECLINES.get(row.selected() as usize).copied().unwrap_or(Declines::Nothing);
+            let meetings = DECLINES
+                .get(row.selected() as usize)
+                .copied()
+                .unwrap_or(Declines::Nothing);
             this.draft.borrow_mut().set_declines(meetings);
             message_row.set_sensitive(meetings != Declines::Nothing);
         });
@@ -649,7 +683,11 @@ impl Editor {
                 }
             }
         });
-        if let Some(calendar) = start_date.popover().and_then(|p| p.child()).and_downcast::<gtk::Calendar>() {
+        if let Some(calendar) = start_date
+            .popover()
+            .and_then(|p| p.child())
+            .and_downcast::<gtk::Calendar>()
+        {
             *self.start_date.borrow_mut() = Some((start_date.clone(), calendar));
         }
         let start_time_drop = time_dropdown(start_time);
@@ -738,7 +776,9 @@ impl Editor {
         end_time_drop.set_visible(!all_day.is_active());
 
         // First in the list, where `refresh_type` looks for it.
-        self.kind_hidden.borrow_mut().insert(0, all_day.clone().upcast());
+        self.kind_hidden
+            .borrow_mut()
+            .insert(0, all_day.clone().upcast());
         group.add(&all_day);
         group.add(&starts);
         group.add(&ends);
@@ -811,7 +851,9 @@ impl Editor {
     /// Shows the Time zone row for a timed event only, on the draft's
     /// zone once the row has its list.
     fn show_zone(&self) {
-        let Some(row) = self.zone_row.borrow().clone() else { return };
+        let Some(row) = self.zone_row.borrow().clone() else {
+            return;
+        };
         let (all_day, zone) = {
             let draft = self.draft.borrow();
             (draft.all_day, draft.zone.clone())
@@ -901,14 +943,20 @@ impl Editor {
         let off_menu = !presets.contains(&carried);
         *self.repeat_presets.borrow_mut() = presets;
         self.repeat_confirmed.set(index);
-        let Some(row) = self.repeat_row.borrow().clone() else { return };
+        let Some(row) = self.repeat_row.borrow().clone() else {
+            return;
+        };
         self.repeat_quiet.set(true);
         row.set_model(Some(&gtk::StringList::new(&refs)));
         row.set_selected(index);
         // Whatever is not one of the row's own choices, such as a custom
         // repeat or a rule the menu cannot show, still reads in full
         // under the row.
-        let subtitle = if off_menu { words::repeat_words(&carried) } else { String::new() };
+        let subtitle = if off_menu {
+            words::repeat_words(&carried)
+        } else {
+            String::new()
+        };
         row.set_subtitle(&subtitle);
         self.repeat_quiet.set(false);
     }
@@ -1155,7 +1203,10 @@ impl Editor {
         let group = adw::PreferencesGroup::new();
         let draft = self.draft.borrow();
         let offered: Vec<(AccountId, String, Calendar)> =
-            draft::calendar_choices(&draft, &choices.writable, &choices.hidden).into_iter().cloned().collect();
+            draft::calendar_choices(&draft, &choices.writable, &choices.hidden)
+                .into_iter()
+                .cloned()
+                .collect();
         let current = offered
             .iter()
             .position(|(a, _, c)| *a == draft.account_id && c.id == draft.calendar);
@@ -1337,7 +1388,10 @@ impl Editor {
             entry.set_tooltip_text(None);
         } else {
             entry.add_css_class("error");
-            entry.set_tooltip_text(Some(&fill(&gettext("Not an address: {text}"), &[("text", &left)])));
+            entry.set_tooltip_text(Some(&fill(
+                &gettext("Not an address: {text}"),
+                &[("text", &left)],
+            )));
         }
         if added {
             self.rebuild_guests();
@@ -1409,7 +1463,11 @@ impl Editor {
             .sensitive(self.may(Part::Reminders))
             .build();
         let draft = self.draft.borrow();
-        let calendar = choices.calendars.get(&(draft.account_id, draft.calendar.clone())).cloned().unwrap_or_default();
+        let calendar = choices
+            .calendars
+            .get(&(draft.account_id, draft.calendar.clone()))
+            .cloned()
+            .unwrap_or_default();
         drop(draft);
         *self.reminders_calendar.borrow_mut() = calendar;
         *self.reminders_group.borrow_mut() = Some(group.clone());
@@ -1421,7 +1479,10 @@ impl Editor {
     /// the calendar keeps those apart.
     fn reminders_default(&self) -> Vec<Reminder> {
         let all_day = self.draft.borrow().all_day;
-        self.reminders_calendar.borrow().default_reminders(all_day).to_vec()
+        self.reminders_calendar
+            .borrow()
+            .default_reminders(all_day)
+            .to_vec()
     }
 
     /// Rebuilds the reminders group's rows from `draft.reminders`, or the
@@ -1560,7 +1621,9 @@ impl Editor {
     // ---- Attachments ----
 
     fn files_group_widget(self: &Rc<Self>) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().title(gettext("Attachments")).build();
+        let group = adw::PreferencesGroup::builder()
+            .title(gettext("Attachments"))
+            .build();
         let attach = gtk::Button::builder()
             .child(
                 &adw::ButtonContent::builder()
@@ -1596,7 +1659,12 @@ impl Editor {
         }
         let (files, can_attach, has_guests, account) = {
             let draft = self.draft.borrow();
-            (draft.attachments.clone(), draft.can_attach(), draft.has_other_guests(), draft.account_id)
+            (
+                draft.attachments.clone(),
+                draft.can_attach(),
+                draft.has_other_guests(),
+                draft.account_id,
+            )
         };
         let can_attach = can_attach && (self.attaching.offered)(account);
         let mut rows = Vec::new();
@@ -1614,7 +1682,13 @@ impl Editor {
                     .css_classes(["flat"])
                     .valign(gtk::Align::Center)
                     .build();
-                ui::name(&grant, &fill(&gettext("Grant access to upload {file}"), &[("file", &attachments::title(file))]));
+                ui::name(
+                    &grant,
+                    &fill(
+                        &gettext("Grant access to upload {file}"),
+                        &[("file", &attachments::title(file))],
+                    ),
+                );
                 let weak = Rc::downgrade(self);
                 grant.connect_clicked(move |_| {
                     if let Some(this) = weak.upgrade() {
@@ -1629,7 +1703,13 @@ impl Editor {
                     .valign(gtk::Align::Center)
                     .tooltip_text(gettext("Share with guests"))
                     .build();
-                ui::name(&share, &fill(&gettext("Share {file} with the guests"), &[("file", &attachments::title(file))]));
+                ui::name(
+                    &share,
+                    &fill(
+                        &gettext("Share {file} with the guests"),
+                        &[("file", &attachments::title(file))],
+                    ),
+                );
                 let weak = Rc::downgrade(self);
                 share.connect_toggled(move |share| {
                     let Some(this) = weak.upgrade() else { return };
@@ -1645,7 +1725,13 @@ impl Editor {
                     .valign(gtk::Align::Center)
                     .tooltip_text(gettext("Remove"))
                     .build();
-                ui::name(&remove, &fill(&gettext("Remove {file}"), &[("file", &attachments::title(file))]));
+                ui::name(
+                    &remove,
+                    &fill(
+                        &gettext("Remove {file}"),
+                        &[("file", &attachments::title(file))],
+                    ),
+                );
                 let weak = Rc::downgrade(self);
                 remove.connect_clicked(move |_| {
                     let Some(this) = weak.upgrade() else { return };
@@ -1681,7 +1767,10 @@ impl Editor {
                 .valign(gtk::Align::Center)
                 .tooltip_text(gettext("Cancel Upload"))
                 .build();
-            ui::name(&cancel, &fill(&gettext("Cancel upload of {file}"), &[("file", &title)]));
+            ui::name(
+                &cancel,
+                &fill(&gettext("Cancel upload of {file}"), &[("file", &title)]),
+            );
             let weak = Rc::downgrade(self);
             cancel.connect_clicked(move |_| {
                 if let Some(this) = weak.upgrade() {
@@ -1706,11 +1795,16 @@ impl Editor {
             (self.attaching.ask)(account);
             return;
         }
-        let dialog = gtk::FileDialog::builder().title(gettext("Attach File")).modal(true).build();
+        let dialog = gtk::FileDialog::builder()
+            .title(gettext("Attach File"))
+            .modal(true)
+            .build();
         let weak = Rc::downgrade(self);
         let parent = self.dialog.root().and_downcast::<gtk::Window>();
         glib::spawn_future_local(async move {
-            let Ok(file) = dialog.open_future(parent.as_ref()).await else { return };
+            let Ok(file) = dialog.open_future(parent.as_ref()).await else {
+                return;
+            };
             let info = file
                 .query_info_future(
                     "standard::size,standard::content-type,standard::display-name",
@@ -1720,7 +1814,9 @@ impl Editor {
                 .await;
             let Some(this) = weak.upgrade() else { return };
             let (Some(path), Ok(info)) = (file.path(), info) else {
-                this.say_file_problem(&gettext("Penguin Mail can attach only a file saved on this computer."));
+                this.say_file_problem(&gettext(
+                    "Penguin Mail can attach only a file saved on this computer.",
+                ));
                 return;
             };
             let mime = info
@@ -1747,13 +1843,31 @@ impl Editor {
         self.next_upload.set(id + 1);
         let sent = Arc::new(AtomicU64::new(0));
         let handle = (self.attaching.upload)(account, file.clone(), Arc::clone(&sent));
-        let bar = gtk::ProgressBar::builder().valign(gtk::Align::Center).width_request(96).build();
-        ui::name(&bar, &fill(&gettext("Uploading {file}"), &[("file", &attachments::title(&file))]));
-        self.uploads.borrow_mut().push(Upload { id, file, size, sent, abort: handle.abort_handle(), bar });
+        let bar = gtk::ProgressBar::builder()
+            .valign(gtk::Align::Center)
+            .width_request(96)
+            .build();
+        ui::name(
+            &bar,
+            &fill(
+                &gettext("Uploading {file}"),
+                &[("file", &attachments::title(&file))],
+            ),
+        );
+        self.uploads.borrow_mut().push(Upload {
+            id,
+            file,
+            size,
+            sent,
+            abort: handle.abort_handle(),
+            bar,
+        });
         self.rebuild_files();
         let weak = Rc::downgrade(self);
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            let Some(this) = weak.upgrade() else { return glib::ControlFlow::Break };
+            let Some(this) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
             let uploads = this.uploads.borrow();
             let Some(upload) = uploads.iter().find(|u| u.id == id) else {
                 return glib::ControlFlow::Break;
@@ -1761,7 +1875,9 @@ impl Editor {
             let sent = upload.sent.load(Ordering::SeqCst);
             match upload.size {
                 0 => upload.bar.pulse(),
-                size => upload.bar.set_fraction((sent as f64 / size as f64).min(1.0)),
+                size => upload
+                    .bar
+                    .set_fraction((sent as f64 / size as f64).min(1.0)),
             }
             glib::ControlFlow::Continue
         });
@@ -1771,7 +1887,9 @@ impl Editor {
             // dialog closing each took it off the list already.
             let Ok(answer) = handle.await else { return };
             let Some(this) = weak.upgrade() else { return };
-            let Some(upload) = this.take_upload(id) else { return };
+            let Some(upload) = this.take_upload(id) else {
+                return;
+            };
             match answer {
                 Uploaded::Done(done) => this.draft.borrow_mut().attach(done),
                 // No network: the file waits, and the queue uploads it with
@@ -1780,7 +1898,10 @@ impl Editor {
                 Uploaded::NeedsPermission => (this.attaching.ask)(account),
                 Uploaded::Failed(reason) => this.say_file_problem(&fill(
                     &gettext("Could not attach {file}: {reason}"),
-                    &[("file", &attachments::title(&upload.file)), ("reason", &reason)],
+                    &[
+                        ("file", &attachments::title(&upload.file)),
+                        ("reason", &reason),
+                    ],
                 )),
             }
             this.rebuild_files();
@@ -1822,7 +1943,8 @@ impl Editor {
 
     fn more_group(self: &Rc<Self>) -> adw::PreferencesGroup {
         let group = adw::PreferencesGroup::new();
-        let more = adw::ExpanderRow::builder().title(gettext("More")).build();
+        let more =
+            crate::ui::disclosure::row(adw::ExpanderRow::builder().title(gettext("More")).build());
         let all_day = self.draft.borrow().all_day;
 
         let zone_row = adw::ComboRow::builder()
@@ -2137,7 +2259,10 @@ fn format_date(day: NaiveDate) -> String {
 
 fn time_dropdown(current: NaiveTime) -> gtk::DropDown {
     let times = draft::time_choices(current);
-    let names: Vec<String> = times.iter().map(|&t| crate::clock_format::time_text(t)).collect();
+    let names: Vec<String> = times
+        .iter()
+        .map(|&t| crate::clock_format::time_text(t))
+        .collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     // Centred like the date button beside it: a drop-down left to fill
     // stretches to the row's full height and stands taller than the button.
@@ -2164,7 +2289,10 @@ fn selected_time(drop: &gtk::DropDown) -> Option<NaiveTime> {
 
 fn select_time(drop: &gtk::DropDown, time: NaiveTime) {
     let times = draft::time_choices(time);
-    let names: Vec<String> = times.iter().map(|&t| crate::clock_format::time_text(t)).collect();
+    let names: Vec<String> = times
+        .iter()
+        .map(|&t| crate::clock_format::time_text(t))
+        .collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     drop.set_model(Some(&gtk::StringList::new(&refs)));
     if let Some(i) = times.iter().position(|t| *t == time) {
@@ -2289,12 +2417,20 @@ mod tests {
     use super::*;
 
     fn calendar(id: &str, name: &str) -> Calendar {
-        Calendar { id: id.into(), name: name.into(), ..Calendar::default() }
+        Calendar {
+            id: id.into(),
+            name: name.into(),
+            ..Calendar::default()
+        }
     }
 
     fn entries() -> Vec<(AccountId, String, Calendar)> {
         vec![
-            (1, "me@example.com".into(), calendar("me@example.com", "Personal")),
+            (
+                1,
+                "me@example.com".into(),
+                calendar("me@example.com", "Personal"),
+            ),
             (2, "me@work.pt".into(), calendar("team", "Design team")),
             (1, "me@example.com".into(), calendar("family", "Family")),
         ]
@@ -2304,7 +2440,10 @@ mod tests {
     fn a_reminder_row_leaves_the_time_to_its_drop_down() {
         // The drop-down shows "10 minutes before"; a title saying it too
         // read the time twice.
-        assert_eq!(reminder_row_words(ReminderMethod::Notification), (gettext("Reminder"), None));
+        assert_eq!(
+            reminder_row_words(ReminderMethod::Notification),
+            (gettext("Reminder"), None)
+        );
         assert_eq!(
             reminder_row_words(ReminderMethod::Email),
             (gettext("Reminder"), Some(gettext("By email")))
@@ -2313,16 +2452,28 @@ mod tests {
 
     #[test]
     fn reminders_left_to_the_calendar_say_so_in_a_sentence() {
-        assert_eq!(reminders_description(true).as_deref(), Some("Uses the calendar's default"));
+        assert_eq!(
+            reminders_description(true).as_deref(),
+            Some("Uses the calendar's default")
+        );
         assert_eq!(reminders_description(false), None);
     }
 
     #[test]
     fn an_existing_event_picks_its_calendar_only_where_events_move() {
-        assert!(picks_calendar(true, false, false), "a new event always picks");
+        assert!(
+            picks_calendar(true, false, false),
+            "a new event always picks"
+        );
         assert!(picks_calendar(false, true, true));
-        assert!(!picks_calendar(false, true, false), "an account that cannot move events shows a label");
-        assert!(!picks_calendar(false, false, true), "a guest's event stays put");
+        assert!(
+            !picks_calendar(false, true, false),
+            "an account that cannot move events shows a label"
+        );
+        assert!(
+            !picks_calendar(false, false, true),
+            "a guest's event stays put"
+        );
     }
 
     #[test]

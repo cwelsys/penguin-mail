@@ -36,7 +36,10 @@ pub(crate) fn has_message_id(message_id: &str) -> Value {
 /// same Message-ID, so drafts are left out: taking one for the sent copy
 /// would leave the message unsent and the draft deleted.
 pub(super) fn sent_copies(message_id: &str, within: Option<&str>) -> Value {
-    let mut conditions = vec![has_message_id(message_id), json!({ "notKeyword": "$draft" })];
+    let mut conditions = vec![
+        has_message_id(message_id),
+        json!({ "notKeyword": "$draft" }),
+    ];
     if let Some(mailbox) = within {
         conditions.push(json!({ "inMailbox": mailbox }));
     }
@@ -49,7 +52,9 @@ pub(super) fn sent_copies(message_id: &str, within: Option<&str>) -> Value {
 pub(super) fn identity_for<'a>(identities: &'a [Identity], from: &str) -> Option<&'a Identity> {
     let domain = from.rsplit_once('@').map(|(_, d)| d.to_ascii_lowercase());
     let whole_domain = |i: &&Identity| {
-        i.email.strip_prefix("*@").is_some_and(|d| domain.as_deref() == Some(d.to_ascii_lowercase().as_str()))
+        i.email
+            .strip_prefix("*@")
+            .is_some_and(|d| domain.as_deref() == Some(d.to_ascii_lowercase().as_str()))
     };
     identities
         .iter()
@@ -63,7 +68,10 @@ pub(super) fn identity_for<'a>(identities: &'a [Identity], from: &str) -> Option
 pub(super) fn sends_as(identity: &Identity, from: &str) -> bool {
     let domain = from.rsplit_once('@').map(|(_, d)| d);
     identity.email.eq_ignore_ascii_case(from)
-        || identity.email.strip_prefix("*@").is_some_and(|d| domain.is_some_and(|domain| d.eq_ignore_ascii_case(domain)))
+        || identity
+            .email
+            .strip_prefix("*@")
+            .is_some_and(|d| domain.is_some_and(|domain| d.eq_ignore_ascii_case(domain)))
 }
 
 /// Why the server refused a submission, in words a person reads.
@@ -75,10 +83,17 @@ fn refused_send(err: JmapError, from: &str) -> BackendError {
         _ => return backend(err),
     };
     BackendError::Refused(match kind {
-        "forbiddenFrom" | "forbiddenMailFrom" => fill(&gettext("The server does not let this account send from {address}."), &[("address", from)]),
+        "forbiddenFrom" | "forbiddenMailFrom" => fill(
+            &gettext("The server does not let this account send from {address}."),
+            &[("address", from)],
+        ),
         "forbiddenToSend" => gettext("The server does not let this account send mail now."),
-        "tooManyRecipients" => gettext("The message names more recipients than the server sends to at once."),
-        "noRecipients" | "invalidRecipients" => gettext("The server could not send to one of the recipients."),
+        "tooManyRecipients" => {
+            gettext("The message names more recipients than the server sends to at once.")
+        }
+        "noRecipients" | "invalidRecipients" => {
+            gettext("The server could not send to one of the recipients.")
+        }
         "tooLarge" => gettext("The message is larger than the server sends."),
         "invalidEmail" => gettext("The server could not read the message to send it."),
         _ => return backend(err),
@@ -100,12 +115,18 @@ impl<J: JmapApi> Jmap<J> {
     /// The identity for `from`, read again from the server when the ones
     /// kept have no exact match.
     pub(super) async fn identity(&self, from: &str) -> Result<Identity, BackendError> {
-        let kept = identity_for(&self.known().identities, from).filter(|i| i.email.eq_ignore_ascii_case(from)).cloned();
+        let kept = identity_for(&self.known().identities, from)
+            .filter(|i| i.email.eq_ignore_ascii_case(from))
+            .cloned();
         if let Some(identity) = kept {
             return Ok(identity);
         }
         let fresh = self.server_identities().await?;
-        identity_for(&fresh, from).cloned().ok_or_else(|| BackendError::Refused(gettext("This account has no address the server lets it send from.")))
+        identity_for(&fresh, from).cloned().ok_or_else(|| {
+            BackendError::Refused(gettext(
+                "This account has no address the server lets it send from.",
+            ))
+        })
     }
 
     pub(super) async fn send_raw(&self, raw: &[u8]) -> Result<String, BackendError> {
@@ -115,7 +136,10 @@ impl<J: JmapApi> Jmap<J> {
         let (drafts, filed) = {
             let known = self.known();
             let role = |r| known.roles.get(&r).cloned();
-            (role(Role::Drafts), role(Role::Sent).or_else(|| role(Role::Archive)))
+            (
+                role(Role::Drafts),
+                role(Role::Sent).or_else(|| role(Role::Archive)),
+            )
         };
         // The copy waits in Drafts and moves where sent mail is filed. With
         // nowhere to file it, it stays in Drafts without `$draft`, so it
@@ -130,13 +154,32 @@ impl<J: JmapApi> Jmap<J> {
             }
         };
         let identity = self.identity(&from).await?;
-        let blob = self.api().upload(without_bcc(raw).into_owned()).await.map_err(backend)?;
-        let submission = Submission { blob_id: blob, identity_id: identity.id, mail_from: from.clone(), rcpt_to: to, drafts, sent };
-        let made = self.api().submit(&submission).await.map_err(|e| refused_send(e, &from))?;
+        let blob = self
+            .api()
+            .upload(without_bcc(raw).into_owned())
+            .await
+            .map_err(backend)?;
+        let submission = Submission {
+            blob_id: blob,
+            identity_id: identity.id,
+            mail_from: from.clone(),
+            rcpt_to: to,
+            drafts,
+            sent,
+        };
+        let made = self
+            .api()
+            .submit(&submission)
+            .await
+            .map_err(|e| refused_send(e, &from))?;
         Ok(made.id)
     }
 
-    pub(super) async fn save(&self, draft_id: Option<&str>, raw: &[u8]) -> Result<SavedDraft, BackendError> {
+    pub(super) async fn save(
+        &self,
+        draft_id: Option<&str>,
+        raw: &[u8],
+    ) -> Result<SavedDraft, BackendError> {
         self.sending().await?;
         self.listed().await?;
         let drafts = self
@@ -146,7 +189,11 @@ impl<J: JmapApi> Jmap<J> {
             .cloned()
             .ok_or_else(|| BackendError::Refused(gettext("The server has no Drafts mailbox.")))?;
         let blob = self.api().upload(raw.to_vec()).await.map_err(backend)?;
-        let saved = match self.api().import(&blob, &[drafts], &["$draft", "$seen"], draft_id).await {
+        let saved = match self
+            .api()
+            .import(&blob, &[drafts], &["$draft", "$seen"], draft_id)
+            .await
+        {
             Ok(saved) => saved,
             // The server keeps one copy of the same bytes, and a message that
             // is no draft already holds these.
@@ -167,14 +214,23 @@ impl<J: JmapApi> Jmap<J> {
             tracing::warn!("an older copy of a saved draft stayed on the server");
         }
         let made = saved.email;
-        Ok(SavedDraft { draft_id: made.id.clone(), message_id: made.id, thread_id: made.thread_id })
+        Ok(SavedDraft {
+            draft_id: made.id.clone(),
+            message_id: made.id,
+            thread_id: made.thread_id,
+        })
     }
 
     /// Sends the draft as the server holds it, through the same path as a
     /// new message so its Bcc stays in the envelope, then drops it.
     pub(super) async fn send_saved(&self, draft_id: &str) -> Result<String, BackendError> {
         self.sending().await?;
-        let raw = self.raws(&[draft_id.to_string()]).await?.into_iter().next().ok_or(BackendError::NotFound)?;
+        let raw = self
+            .raws(&[draft_id.to_string()])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(BackendError::NotFound)?;
         // A try whose answer was lost may have sent it already: the draft
         // stays until a good answer, so a retry would send it twice.
         let sent = match self.already_sent(&raw.bytes, draft_id).await? {
@@ -191,14 +247,27 @@ impl<J: JmapApi> Jmap<J> {
 
     /// The sent copy of the draft `draft_id`, found by its Message-ID among
     /// the messages that are no drafts, wherever the copy was filed.
-    async fn already_sent(&self, raw: &[u8], draft_id: &str) -> Result<Option<String>, BackendError> {
+    async fn already_sent(
+        &self,
+        raw: &[u8],
+        draft_id: &str,
+    ) -> Result<Option<String>, BackendError> {
         let Some(message_id) = message_id_header(raw) else {
             return Ok(None);
         };
         // Two, so a draft that lost its `$draft` elsewhere is passed over.
-        let query = EmailQuery { filter: Some(sent_copies(&message_id, None)), position: 0, limit: 2, total: false };
+        let query = EmailQuery {
+            filter: Some(sent_copies(&message_id, None)),
+            position: 0,
+            limit: 2,
+            total: false,
+        };
         let found = self.api().query(&query).await.map_err(backend)?;
-        Ok(found.hits.into_iter().map(|h| h.id).find(|id| id != draft_id))
+        Ok(found
+            .hits
+            .into_iter()
+            .map(|h| h.id)
+            .find(|id| id != draft_id))
     }
 
     /// Destroys the draft `draft_id`. A message there without `$draft` is
@@ -206,14 +275,22 @@ impl<J: JmapApi> Jmap<J> {
     /// be the sent copy the draft became. It stays, and the draft counts
     /// as gone.
     pub(super) async fn drop_draft(&self, draft_id: &str) -> Result<(), BackendError> {
-        let got = self.api().emails(&[draft_id.to_string()], &["id", "keywords"]).await.map_err(backend)?;
+        let got = self
+            .api()
+            .emails(&[draft_id.to_string()], &["id", "keywords"])
+            .await
+            .map_err(backend)?;
         let Some(email) = got.list.into_iter().next() else {
             return Ok(());
         };
         if !email.keywords.get("$draft").copied().unwrap_or(false) {
             return Ok(());
         }
-        let answer = self.api().set_emails(&Map::new(), &[draft_id.to_string()]).await.map_err(backend)?;
+        let answer = self
+            .api()
+            .set_emails(&Map::new(), &[draft_id.to_string()])
+            .await
+            .map_err(backend)?;
         match answer.refusal(draft_id) {
             Some(refused) if refused.kind != "notFound" => Err(backend(refused.error())),
             _ => Ok(()),
@@ -226,8 +303,20 @@ impl<J: JmapApi> Jmap<J> {
             return Ok(Vec::new());
         };
         let filter = json!({ "operator": "AND", "conditions": [{ "inMailbox": drafts }, { "hasKeyword": "$draft" }] });
-        let query = EmailQuery { filter: Some(filter), position: 0, limit: MOST_DRAFTS, total: false };
+        let query = EmailQuery {
+            filter: Some(filter),
+            position: 0,
+            limit: MOST_DRAFTS,
+            total: false,
+        };
         let found = self.api().query(&query).await.map_err(backend)?;
-        Ok(found.hits.into_iter().map(|h| DraftRef { draft_id: h.id.clone(), message_id: h.id }).collect())
+        Ok(found
+            .hits
+            .into_iter()
+            .map(|h| DraftRef {
+                draft_id: h.id.clone(),
+                message_id: h.id,
+            })
+            .collect())
     }
 }

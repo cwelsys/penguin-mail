@@ -36,12 +36,22 @@ struct Pending {
 
 impl<D> Clone for CardDav<D> {
     fn clone(&self) -> Self {
-        CardDav { api: Arc::clone(&self.api), refused: Arc::clone(&self.refused), pending: Arc::clone(&self.pending), serial: Arc::clone(&self.serial) }
+        CardDav {
+            api: Arc::clone(&self.api),
+            refused: Arc::clone(&self.refused),
+            pending: Arc::clone(&self.pending),
+            serial: Arc::clone(&self.serial),
+        }
     }
 }
 
 fn fields(from: &ContactFields) -> CardFields {
-    CardFields { name: from.name.clone(), emails: from.emails.clone(), phones: from.phones.clone(), organization: from.organization.clone() }
+    CardFields {
+        name: from.name.clone(),
+        emails: from.emails.clone(),
+        phones: from.phones.clone(),
+        organization: from.organization.clone(),
+    }
 }
 
 fn person(href: &str, card: vcard::Card) -> Person {
@@ -60,11 +70,19 @@ fn person(href: &str, card: vcard::Card) -> Person {
 
 impl<D: DavApi> CardDav<D> {
     pub fn new(api: Arc<D>) -> CardDav<D> {
-        CardDav { api, refused: Arc::default(), pending: Arc::default(), serial: Arc::default() }
+        CardDav {
+            api,
+            refused: Arc::default(),
+            pending: Arc::default(),
+            serial: Arc::default(),
+        }
     }
 
     pub fn login_refused(&self) -> Option<String> {
-        self.refused.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.refused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn err(&self, err: mailrs_dav::DavError) -> BackendError {
@@ -74,14 +92,24 @@ impl<D: DavApi> CardDav<D> {
     async fn books(&self) -> Result<Vec<String>, BackendError> {
         let homes = self.api.homes().await.map_err(|e| self.err(e))?;
         let home = homes.addressbook.ok_or(BackendError::Unsupported)?;
-        let mut books: Vec<String> = self.api.collections(&home, Kind::AddressBook).await.map_err(|e| self.err(e))?.into_iter().map(|c| c.href).collect();
+        let mut books: Vec<String> = self
+            .api
+            .collections(&home, Kind::AddressBook)
+            .await
+            .map_err(|e| self.err(e))?
+            .into_iter()
+            .map(|c| c.href)
+            .collect();
         books.sort();
         *self.refused.lock().unwrap_or_else(PoisonError::into_inner) = None;
         Ok(books)
     }
 
     /// Lists every book's changes since `tokens`, or every member without.
-    async fn listing(&self, tokens: Option<BTreeMap<String, String>>) -> Result<Pending, BackendError> {
+    async fn listing(
+        &self,
+        tokens: Option<BTreeMap<String, String>>,
+    ) -> Result<Pending, BackendError> {
         let books = self.books().await?;
         if let Some(held) = &tokens {
             let held_books: Vec<&String> = held.keys().collect();
@@ -89,7 +117,12 @@ impl<D: DavApi> CardDav<D> {
                 return Err(BackendError::StateLost);
             }
         }
-        let mut pending = Pending { serial: 0, queue: VecDeque::new(), deleted: Vec::new(), tokens: BTreeMap::new() };
+        let mut pending = Pending {
+            serial: 0,
+            queue: VecDeque::new(),
+            deleted: Vec::new(),
+            tokens: BTreeMap::new(),
+        };
         for book in books {
             let held = tokens.as_ref().and_then(|t| t.get(&book)).cloned();
             match held {
@@ -100,7 +133,9 @@ impl<D: DavApi> CardDav<D> {
                     let mut from = t[TOKEN_SYNC.len()..].to_string();
                     for _ in 0..super::caldav::SYNC_ROUNDS {
                         let synced = self.api.sync(&book, &from).await.map_err(|e| self.err(e))?;
-                        pending.queue.extend(synced.changed.into_iter().map(|m| (book.clone(), m.href)));
+                        pending
+                            .queue
+                            .extend(synced.changed.into_iter().map(|m| (book.clone(), m.href)));
                         pending.deleted.extend(synced.removed);
                         let more = synced.more;
                         from = synced.token;
@@ -120,8 +155,14 @@ impl<D: DavApi> CardDav<D> {
                 Some(_) => return Err(BackendError::StateLost),
                 None => {
                     let state = self.api.state(&book).await.map_err(|e| self.err(e))?;
-                    let members = self.api.members(&book, Kind::AddressBook, None).await.map_err(|e| self.err(e))?;
-                    pending.queue.extend(members.into_iter().map(|m| (book.clone(), m.href)));
+                    let members = self
+                        .api
+                        .members(&book, Kind::AddressBook, None)
+                        .await
+                        .map_err(|e| self.err(e))?;
+                    pending
+                        .queue
+                        .extend(members.into_iter().map(|m| (book.clone(), m.href)));
                     let token = match state.sync_token {
                         Some(sync) => format!("{TOKEN_SYNC}{sync}"),
                         None => format!("{TOKEN_CTAG}{}", state.ctag.unwrap_or_default()),
@@ -135,10 +176,17 @@ impl<D: DavApi> CardDav<D> {
 }
 
 impl<D: DavApi> ContactsService for CardDav<D> {
-    async fn connections(&self, page_token: Option<&str>, sync_token: Option<&str>) -> Result<ConnectionsPage, BackendError> {
+    async fn connections(
+        &self,
+        page_token: Option<&str>,
+        sync_token: Option<&str>,
+    ) -> Result<ConnectionsPage, BackendError> {
         if page_token.is_none() {
             let tokens = match sync_token {
-                Some(text) => Some(serde_json::from_str::<BTreeMap<String, String>>(text).map_err(|_| BackendError::StateLost)?),
+                Some(text) => Some(
+                    serde_json::from_str::<BTreeMap<String, String>>(text)
+                        .map_err(|_| BackendError::StateLost)?,
+                ),
                 None => None,
             };
             let mut pending = self.listing(tokens).await?;
@@ -147,14 +195,25 @@ impl<D: DavApi> ContactsService for CardDav<D> {
             pending.serial = *serial;
             *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some(pending);
         }
-        let wanted = page_token.map(|p| p.parse::<u64>().map_err(|_| BackendError::StateLost)).transpose()?;
+        let wanted = page_token
+            .map(|p| p.parse::<u64>().map_err(|_| BackendError::StateLost))
+            .transpose()?;
         let (book, batch, deleted, done, serial, tokens) = {
             let mut held = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
-            let pending = held.as_mut().filter(|p| wanted.is_none_or(|w| w == p.serial)).ok_or(BackendError::StateLost)?;
+            let pending = held
+                .as_mut()
+                .filter(|p| wanted.is_none_or(|w| w == p.serial))
+                .ok_or(BackendError::StateLost)?;
             // One book per multiget.
-            let book = pending.queue.front().map(|(b, _)| b.clone()).unwrap_or_default();
+            let book = pending
+                .queue
+                .front()
+                .map(|(b, _)| b.clone())
+                .unwrap_or_default();
             let mut batch = Vec::new();
-            while batch.len() < MULTIGET_BATCH && pending.queue.front().is_some_and(|(b, _)| *b == book) {
+            while batch.len() < MULTIGET_BATCH
+                && pending.queue.front().is_some_and(|(b, _)| *b == book)
+            {
                 if let Some((_, href)) = pending.queue.pop_front() {
                     batch.push(href);
                 }
@@ -169,7 +228,11 @@ impl<D: DavApi> ContactsService for CardDav<D> {
         };
         let fetched = match batch.is_empty() {
             true => Vec::new(),
-            false => self.api.fetch(&book, Kind::AddressBook, &batch).await.map_err(|e| self.err(e))?,
+            false => self
+                .api
+                .fetch(&book, Kind::AddressBook, &batch)
+                .await
+                .map_err(|e| self.err(e))?,
         };
         let people = fetched
             .into_iter()
@@ -190,28 +253,54 @@ impl<D: DavApi> ContactsService for CardDav<D> {
     }
 
     async fn contact_photo(&self, url: &str) -> Result<Vec<u8>, BackendError> {
-        let href = url.strip_prefix(PHOTO_SCHEME).ok_or(BackendError::Unsupported)?;
+        let href = url
+            .strip_prefix(PHOTO_SCHEME)
+            .ok_or(BackendError::Unsupported)?;
         let card = self.api.get(href).await.map_err(|e| self.err(e))?;
-        match vcard::read_card(&card.body).map_err(|e| BackendError::Refused(e.to_string()))?.photo {
+        match vcard::read_card(&card.body)
+            .map_err(|e| BackendError::Refused(e.to_string()))?
+            .photo
+        {
             Some(Photo::Inline(bytes)) => Ok(bytes),
             _ => Err(BackendError::NotFound),
         }
     }
 
     async fn create_contact(&self, fields_in: &ContactFields) -> Result<Person, BackendError> {
-        let book = self.books().await?.into_iter().next().ok_or(BackendError::Unsupported)?;
+        let book = self
+            .books()
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(BackendError::Unsupported)?;
         let uid = format!("pm-{:032x}", rand::random::<u128>());
         let href = join(&book, &format!("{uid}.vcf"));
         let body = vcard::new_card(&uid, &fields(fields_in));
-        self.api.put(&href, &body, Kind::AddressBook, Precondition::NoneMatch).await.map_err(|e| self.err(e))?;
+        self.api
+            .put(&href, &body, Kind::AddressBook, Precondition::NoneMatch)
+            .await
+            .map_err(|e| self.err(e))?;
         let card = vcard::read_card(&body).map_err(|e| BackendError::Refused(e.to_string()))?;
         Ok(person(&href, card))
     }
 
-    async fn update_contact(&self, resource: &str, fields_in: &ContactFields) -> Result<Person, BackendError> {
+    async fn update_contact(
+        &self,
+        resource: &str,
+        fields_in: &ContactFields,
+    ) -> Result<Person, BackendError> {
         let current = self.api.get(resource).await.map_err(|e| self.err(e))?;
-        let body = vcard::patch_card(&current.body, &fields(fields_in)).map_err(|e| BackendError::Refused(e.to_string()))?;
-        self.api.put(resource, &body, Kind::AddressBook, Precondition::Match(current.etag)).await.map_err(|e| self.err(e))?;
+        let body = vcard::patch_card(&current.body, &fields(fields_in))
+            .map_err(|e| BackendError::Refused(e.to_string()))?;
+        self.api
+            .put(
+                resource,
+                &body,
+                Kind::AddressBook,
+                Precondition::Match(current.etag),
+            )
+            .await
+            .map_err(|e| self.err(e))?;
         let card = vcard::read_card(&body).map_err(|e| BackendError::Refused(e.to_string()))?;
         Ok(person(resource, card))
     }

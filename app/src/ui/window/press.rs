@@ -263,7 +263,10 @@ pub(super) fn plan(pressed: Pressed) -> Plan {
                         .is_none_or(|a| a.erases)
                 });
                 let mut erasers: Vec<&str> = Vec::new();
-                for account in accounts.iter().filter(|a| a.erases && !a.provider.is_empty()) {
+                for account in accounts
+                    .iter()
+                    .filter(|a| a.erases && !a.provider.is_empty())
+                {
                     if !erasers.contains(&account.provider.as_str()) {
                         erasers.push(account.provider.as_str());
                     }
@@ -344,8 +347,16 @@ fn dropped(
     // a folder moves there from wherever the list showed it, Flagged and
     // a search included, where a label account only adds the label.
     let triage = match (triage, to) {
-        (TriageAction::Relabel { .. }, Mailbox::Label { account_id, label_id, .. })
-            if accounts.iter().any(|a| a.account_id == *account_id && a.moves) =>
+        (
+            TriageAction::Relabel { .. },
+            Mailbox::Label {
+                account_id,
+                label_id,
+                ..
+            },
+        ) if accounts
+            .iter()
+            .any(|a| a.account_id == *account_id && a.moves) =>
         {
             TriageAction::MoveTo(label_id.clone())
         }
@@ -589,7 +600,10 @@ mod tests {
         else {
             panic!("the move is taken");
         };
-        assert_eq!(action, MailAction::Triage(TriageAction::MoveTo("Label_5".into())));
+        assert_eq!(
+            action,
+            MailAction::Triage(TriageAction::MoveTo("Label_5".into()))
+        );
         assert!(move_on, "the inbox no longer lists the mail");
         assert_eq!(words.as_deref(), Some("Moved to Receipts"));
     }
@@ -649,7 +663,11 @@ mod tests {
                 erases: false,
                 ..gmail(1)
             }],
-            ..pressed(Press::Button(Button::Trash), folder(Folder::Trash), Scope::Shown)
+            ..pressed(
+                Press::Button(Button::Trash),
+                folder(Folder::Trash),
+                Scope::Shown,
+            )
         };
         assert_eq!(plan(pressed).step, Step::Nothing);
     }
@@ -719,7 +737,11 @@ mod tests {
     }
 
     fn trash_of(targets: Vec<Target>, accounts: Vec<Reached>) -> Plan {
-        let mut pressed = pressed(Press::Button(Button::Trash), folder(Folder::Trash), Scope::Shown);
+        let mut pressed = pressed(
+            Press::Button(Button::Trash),
+            folder(Folder::Trash),
+            Scope::Shown,
+        );
         pressed.reach.targets = targets;
         pressed.accounts = accounts;
         plan(pressed)
@@ -809,7 +831,11 @@ mod tests {
 
     #[test]
     fn delete_calls_off_a_reminder_and_says_where_the_mail_went() {
-        let step = step(Press::Button(Button::Trash), Mailbox::Reminders, Scope::Shown);
+        let step = step(
+            Press::Button(Button::Trash),
+            Mailbox::Reminders,
+            Scope::Shown,
+        );
         assert_eq!(
             step,
             Step::Act {
@@ -821,7 +847,11 @@ mod tests {
             }
         );
         assert_eq!(
-            self::step(Press::Button(Button::Trash), Mailbox::Scheduled, Scope::Shown),
+            self::step(
+                Press::Button(Button::Trash),
+                Mailbox::Scheduled,
+                Scope::Shown
+            ),
             Step::Cancel(Cancel::Scheduled)
         );
     }
@@ -942,11 +972,19 @@ mod tests {
             which: Standard::Inbox,
         };
         assert_eq!(
-            step(Press::Drop(other_inbox), inbox(), Scope::Carried { open: false }),
+            step(
+                Press::Drop(other_inbox),
+                inbox(),
+                Scope::Carried { open: false }
+            ),
             Step::Refuse("Drop mail on its own account's mailboxes".into())
         );
         assert!(matches!(
-            step(Press::Drop(inbox()), inbox(), Scope::Carried { open: false }),
+            step(
+                Press::Drop(inbox()),
+                inbox(),
+                Scope::Carried { open: false }
+            ),
             Step::Refuse(_)
         ));
         let plan = plan(pressed(
@@ -981,7 +1019,10 @@ mod tests {
         assert_eq!(word(Mailbox::Scheduled).as_deref(), Some("Cancel Send"));
         assert_eq!(word(Mailbox::Outbox).as_deref(), Some("Delete from Outbox"));
         assert_eq!(word(Mailbox::Reminders).as_deref(), Some("Cancel Reminder"));
-        assert_eq!(word(Mailbox::FollowUp).as_deref(), Some("Dismiss Follow-Up"));
+        assert_eq!(
+            word(Mailbox::FollowUp).as_deref(),
+            Some("Dismiss Follow-Up")
+        );
         let (_, tip) = trash_words(&Mailbox::Reminders).unwrap();
         assert_eq!(tip, "Cancel Reminder (Delete)");
     }
@@ -1072,7 +1113,10 @@ mod tests {
             label("Work"),
             Scope::Carried { open: false },
         );
-        assert_eq!(plan(dropped).from, MovedFrom::one(1, MailSet::Mailbox("Work".into())));
+        assert_eq!(
+            plan(dropped).from,
+            MovedFrom::one(1, MailSet::Mailbox("Work".into()))
+        );
     }
 
     /// A search result sits anywhere, so its action names no place.
@@ -1098,7 +1142,13 @@ mod tests {
 
     #[tokio::test]
     async fn mail_is_erased_only_on_a_yes() {
-        let trash = || pressed(Press::Button(Button::Trash), folder(Folder::Trash), Scope::Shown);
+        let trash = || {
+            pressed(
+                Press::Button(Button::Trash),
+                folder(Folder::Trash),
+                Scope::Shown,
+            )
+        };
         let no = run(trash(), false).await;
         assert_eq!(no, ["ask Delete 2 Conversations Forever?"]);
         let yes = run(trash(), true).await;
@@ -1108,13 +1158,21 @@ mod tests {
     #[tokio::test]
     async fn a_cancelled_reminder_says_so_after_the_action() {
         let did = run(
-            pressed(Press::Button(Button::Trash), Mailbox::Reminders, Scope::Shown),
+            pressed(
+                Press::Button(Button::Trash),
+                Mailbox::Reminders,
+                Scope::Shown,
+            ),
             true,
         )
         .await;
         assert_eq!(
             did,
-            ["move on", "act CancelReminder on 2", "toast Back in the Inbox"]
+            [
+                "move on",
+                "act CancelReminder on 2",
+                "toast Back in the Inbox"
+            ]
         );
     }
 
@@ -1131,7 +1189,11 @@ mod tests {
     #[tokio::test]
     async fn the_send_later_list_hands_its_mail_to_the_outbox_to_call_off() {
         let did = run(
-            pressed(Press::Button(Button::Trash), Mailbox::Scheduled, Scope::Shown),
+            pressed(
+                Press::Button(Button::Trash),
+                Mailbox::Scheduled,
+                Scope::Shown,
+            ),
             true,
         )
         .await;

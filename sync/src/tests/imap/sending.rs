@@ -1,10 +1,10 @@
 use mailrs_imap::{ImapError, UidSet};
 
 use super::{days_ago, message};
+use crate::ImapSettings;
 use crate::fake::FakeImap;
 use crate::services::ImapApi;
 use crate::tests::{ImapHarness, fake_settings, imap_harness, imap_harness_on};
-use crate::ImapSettings;
 
 /// A message from one of the account's aliases, with a copy and a blind
 /// copy.
@@ -51,7 +51,11 @@ async fn a_send_goes_from_the_chosen_identity_and_a_copy_is_filed_in_sent() {
     assert_eq!(id, "Sent/1002/1");
     let copy = h.imap.body("Sent", 1, "").await.unwrap().unwrap();
     assert!(String::from_utf8_lossy(&copy).contains("Bcc: cy@example.com"));
-    let flags = h.imap.flags("Sent", &UidSet::from_uids([1]), None).await.unwrap();
+    let flags = h
+        .imap
+        .flags("Sent", &UidSet::from_uids([1]), None)
+        .await
+        .unwrap();
     assert!(flags[0].flags.iter().any(|f| f == "\\Seen"));
 }
 
@@ -60,11 +64,16 @@ async fn a_send_goes_from_the_chosen_identity_and_a_copy_is_filed_in_sent() {
 async fn a_copy_sent_mail_could_not_take_at_first_is_filed_on_a_second_try() {
     let h = imap_harness().await;
     h.bootstrap().await;
-    h.imap.fail_on("append Sent", ImapError::Protocol("NO try again".into()));
+    h.imap
+        .fail_on("append Sent", ImapError::Protocol("NO try again".into()));
     h.sync.send(outgoing(), None, None).await.unwrap();
     assert_eq!(h.smtp.sent().len(), 1);
     assert_eq!(undeleted(&h, "Sent").await.len(), 1, "the copy is in Sent");
-    assert!(!h.drain().iter().any(|e| matches!(e, mailrs_domain::ChangeEvent::WriteFailed { .. })));
+    assert!(
+        !h.drain()
+            .iter()
+            .any(|e| matches!(e, mailrs_domain::ChangeEvent::WriteFailed { .. }))
+    );
 }
 
 /// When Sent will not take a copy at all, the person hears so once.
@@ -72,11 +81,17 @@ async fn a_copy_sent_mail_could_not_take_at_first_is_filed_on_a_second_try() {
 async fn a_copy_sent_mail_will_not_take_is_told_once() {
     let h = imap_harness().await;
     h.bootstrap().await;
-    h.imap.fail_on("append Sent", ImapError::Protocol("NO full".into()));
-    h.imap.fail_on("append Sent", ImapError::Protocol("NO full".into()));
+    h.imap
+        .fail_on("append Sent", ImapError::Protocol("NO full".into()));
+    h.imap
+        .fail_on("append Sent", ImapError::Protocol("NO full".into()));
     h.sync.send(outgoing(), None, None).await.unwrap();
     assert_eq!(h.smtp.sent().len(), 1, "sent once all the same");
-    let told = h.drain().into_iter().filter(|e| matches!(e, mailrs_domain::ChangeEvent::WriteFailed { .. })).count();
+    let told = h
+        .drain()
+        .into_iter()
+        .filter(|e| matches!(e, mailrs_domain::ChangeEvent::WriteFailed { .. }))
+        .count();
     assert_eq!(told, 1);
 }
 
@@ -99,13 +114,23 @@ async fn a_server_that_files_what_it_sends_gets_no_copy() {
 async fn a_copy_that_fails_to_file_does_not_fail_the_send() {
     let h = imap_harness().await;
     h.bootstrap().await;
-    h.imap.fail_on("append Sent", ImapError::Network("the server went away".into()));
-    h.imap.fail_on("append Sent", ImapError::Network("the server went away".into()));
+    h.imap.fail_on(
+        "append Sent",
+        ImapError::Network("the server went away".into()),
+    );
+    h.imap.fail_on(
+        "append Sent",
+        ImapError::Network("the server went away".into()),
+    );
 
     let id = h.sync.send(outgoing(), None, None).await.unwrap();
 
     assert_eq!(id, "<out@example.com>");
-    assert_eq!(h.smtp.sent().len(), 1, "sent once, and the outbox will not send again");
+    assert_eq!(
+        h.smtp.sent().len(),
+        1,
+        "sent once, and the outbox will not send again"
+    );
 }
 
 #[tokio::test]
@@ -133,9 +158,16 @@ async fn a_draft_is_saved_replaced_and_sent_from_the_drafts_mailbox() {
         .unwrap();
 
     assert_eq!(first.draft_id, "Drafts/1003/1");
-    assert_eq!((second.draft_id.as_str(), second.message_id.as_str()), ("Drafts/1003/2", "Drafts/1003/2"));
+    assert_eq!(
+        (second.draft_id.as_str(), second.message_id.as_str()),
+        ("Drafts/1003/2", "Drafts/1003/2")
+    );
     assert_eq!(undeleted(&h, "Drafts").await, [2]);
-    let flags = h.imap.flags("Drafts", &UidSet::from_uids([2]), None).await.unwrap();
+    let flags = h
+        .imap
+        .flags("Drafts", &UidSet::from_uids([2]), None)
+        .await
+        .unwrap();
     assert!(flags[0].flags.iter().any(|f| f == "\\Draft"));
 
     h.sync.send_draft(&second.draft_id).await.unwrap();
@@ -143,7 +175,11 @@ async fn a_draft_is_saved_replaced_and_sent_from_the_drafts_mailbox() {
     assert!(undeleted(&h, "Drafts").await.is_empty());
     let submitted = h.smtp.sent();
     assert!(String::from_utf8_lossy(&submitted[0].raw).contains("two"));
-    assert_eq!(undeleted(&h, "Sent").await, [1], "the sent draft is filed in Sent");
+    assert_eq!(
+        undeleted(&h, "Sent").await,
+        [1],
+        "the sent draft is filed in Sent"
+    );
 }
 
 /// The server took the draft but the answer never arrived, so the client
@@ -158,22 +194,28 @@ async fn a_draft_whose_send_answer_was_lost_is_not_sent_again() {
     let h = imap_harness_on(FakeImap::new(), settings).await;
     h.bootstrap().await;
     let saved = h.sync.save_draft(draft("one"), None, None).await.unwrap();
-    h.smtp.fail_next(ImapError::Network("the answer was lost".into()));
+    h.smtp
+        .fail_next(ImapError::Network("the answer was lost".into()));
     h.sync.send_draft(&saved.draft_id).await.unwrap_err();
-    h.imap.deliver_flagged("Sent", &draft("one"), &["\\Seen"], days_ago(0));
+    h.imap
+        .deliver_flagged("Sent", &draft("one"), &["\\Seen"], days_ago(0));
 
     let sent = h.sync.send_draft(&saved.draft_id).await.unwrap();
 
     assert_eq!(sent, None, "the caller reads the draft as sent");
     assert!(h.smtp.sent().is_empty(), "the retry sent nothing");
-    assert!(undeleted(&h, "Drafts").await.is_empty(), "the draft is gone");
+    assert!(
+        undeleted(&h, "Drafts").await.is_empty(),
+        "the draft is gone"
+    );
 }
 
 #[tokio::test]
 async fn a_draft_with_no_message_id_still_goes_out() {
     let h = imap_harness().await;
     h.bootstrap().await;
-    let raw = b"From: me@example.com\r\nTo: ann@example.com\r\nSubject: Plans\r\n\r\nno id\r\n".to_vec();
+    let raw =
+        b"From: me@example.com\r\nTo: ann@example.com\r\nSubject: Plans\r\n\r\nno id\r\n".to_vec();
     let saved = h.sync.save_draft(raw, None, None).await.unwrap();
 
     h.sync.send_draft(&saved.draft_id).await.unwrap();
@@ -185,7 +227,12 @@ async fn a_draft_with_no_message_id_still_goes_out() {
 #[tokio::test]
 async fn a_draft_saved_elsewhere_is_found_by_its_id_and_deleted() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("Drafts", &message("d", "Plans", ""), &["\\Draft", "\\Seen"], days_ago(1));
+    h.imap.deliver_flagged(
+        "Drafts",
+        &message("d", "Plans", ""),
+        &["\\Draft", "\\Seen"],
+        days_ago(1),
+    );
     h.bootstrap().await;
 
     let draft_id = h.sync.draft_id_for("Drafts/1003/1").await.unwrap();
@@ -220,7 +267,8 @@ async fn a_message_with_a_non_ascii_address_is_refused_when_the_server_cannot_ca
     h.smtp.with(|s| s.smtp_utf8 = false);
 
     let raw = b"From: Me <alias@example.com>\r\nTo: Jos\xc3\xa9 <jos\xc3\xa9@example.com>\r\n\
-        Subject: Kites\r\nMessage-ID: <accent@example.com>\r\n\r\nSunday?\r\n".to_vec();
+        Subject: Kites\r\nMessage-ID: <accent@example.com>\r\n\r\nSunday?\r\n"
+        .to_vec();
 
     let err = h.sync.send(raw, None, None).await.unwrap_err();
     assert!(

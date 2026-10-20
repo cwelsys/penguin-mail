@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mailrs_domain::{Address, Category, Filter, FilterAction, FilterCriteria, MailSet, MessageMeta, category};
+use mailrs_domain::{
+    Address, Category, Filter, FilterAction, FilterCriteria, MailSet, MessageMeta, category,
+};
 use mailrs_gmail::labels;
 use mailrs_store::unsubscribes::{self, How};
 
@@ -36,7 +38,10 @@ async fn a_one_click_list_that_refuses_says_so() {
     let said = err.expect_err("the list refused").to_string();
     // The list's own server answered, so the message names it and not
     // Gmail, which took no part.
-    assert_eq!(said, "news.example refused the request to unsubscribe (HTTP 500)");
+    assert_eq!(
+        said,
+        "news.example refused the request to unsubscribe (HTTP 500)"
+    );
     assert!(h.one_click.posted().is_empty());
     let nobody = actions(&h).unsubscribe(99, how).await;
     assert!(matches!(nobody, Err(SyncError::UnknownAccount(99))));
@@ -74,11 +79,10 @@ async fn a_list_left_is_kept_for_its_sender() {
         .unwrap();
 
     let id = h.account_id;
-    let left = h
-        .db
-        .read(move |c| unsubscribes::left(c, id, "news@trail.example"))
-        .await
-        .unwrap();
+    let left =
+        h.db.read(move |c| unsubscribes::left(c, id, "news@trail.example"))
+            .await
+            .unwrap();
     assert_eq!(left.map(|l| l.how), Some(How::OneClick));
 }
 
@@ -163,7 +167,10 @@ async fn categorizing_a_sender_moves_their_mail_and_replaces_their_rule() {
     );
     let new = rules.iter().find(|r| r.id != blocked.id).unwrap();
     assert_eq!(new.criteria.from.as_deref(), Some(shop));
-    assert_eq!(new.action.add, [MailSet::Category("CATEGORY_PROMOTIONS".into())]);
+    assert_eq!(
+        new.action.add,
+        [MailSet::Category("CATEGORY_PROMOTIONS".into())]
+    );
 }
 
 #[tokio::test]
@@ -185,7 +192,10 @@ async fn sorting_a_sender_into_focused_writes_a_rule_that_takes_other_off() {
     let rules = h.fake.with(|s| s.filters.clone());
     assert_eq!(rules.len(), 1, "the old Other rule was replaced: {rules:?}");
     assert!(rules[0].action.add.is_empty());
-    assert_eq!(rules[0].action.remove, [MailSet::Category(category::OTHER.into())]);
+    assert_eq!(
+        rules[0].action.remove,
+        [MailSet::Category(category::OTHER.into())]
+    );
 }
 
 #[tokio::test]

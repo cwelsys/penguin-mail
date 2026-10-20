@@ -154,11 +154,18 @@ pub fn clip_to_days(
 /// refuses one all day, so it comes as times. The week and day views
 /// draw such an entry with the all-day ones rather than as a column the
 /// day's height. `None` for an entry that starts or ends inside a day.
-pub fn whole_days<Z: TimeZone>(start: EpochMillis, end: EpochMillis, zone: &Z) -> Option<(NaiveDate, NaiveDate)> {
-    let local = |at: EpochMillis| DateTime::<Utc>::from_timestamp_millis(at).map(|t| t.with_timezone(zone).naive_local());
+pub fn whole_days<Z: TimeZone>(
+    start: EpochMillis,
+    end: EpochMillis,
+    zone: &Z,
+) -> Option<(NaiveDate, NaiveDate)> {
+    let local = |at: EpochMillis| {
+        DateTime::<Utc>::from_timestamp_millis(at).map(|t| t.with_timezone(zone).naive_local())
+    };
     let (from, to) = (local(start)?, local(end)?);
     let midnight = |t: NaiveDateTime| t.time() == chrono::NaiveTime::MIN;
-    (end > start && midnight(from) && midnight(to)).then(|| (from.date(), to.date() - chrono::Duration::days(1)))
+    (end > start && midnight(from) && midnight(to))
+        .then(|| (from.date(), to.date() - chrono::Duration::days(1)))
 }
 
 /// Hours from `day_start_local`'s midnight to `at`, by wall clock rather
@@ -177,9 +184,13 @@ pub fn wall_offset<Z: TimeZone>(at: EpochMillis, day_start_local: NaiveDateTime,
 /// the clock skips gives the first instant after the gap.
 pub fn instant_at<Z: TimeZone>(day: NaiveDate, hours: f64, tz: &Z) -> EpochMillis {
     let minutes = (hours * 60.0).round() as i64;
-    let wall = day.and_hms_opt(0, 0, 0).expect("midnight exists") + chrono::Duration::minutes(minutes);
+    let wall =
+        day.and_hms_opt(0, 0, 0).expect("midnight exists") + chrono::Duration::minutes(minutes);
     (0..=8)
-        .find_map(|quarter| tz.from_local_datetime(&(wall + chrono::Duration::minutes(15 * quarter))).earliest())
+        .find_map(|quarter| {
+            tz.from_local_datetime(&(wall + chrono::Duration::minutes(15 * quarter)))
+                .earliest()
+        })
         .map_or(0, |at| at.timestamp_millis())
 }
 
@@ -228,7 +239,11 @@ pub fn week_segments(first: i64, end: i64, weeks: usize) -> Vec<Segment> {
 /// every item fits, all show. Otherwise the last line goes to "N more"
 /// on each day that hides something, and an item on that line still
 /// shows when none of its days hides anything.
-pub fn fold_week(spans: &[(usize, usize)], lanes: &[usize], rows: usize) -> (Vec<bool>, [usize; 7]) {
+pub fn fold_week(
+    spans: &[(usize, usize)],
+    lanes: &[usize],
+    rows: usize,
+) -> (Vec<bool>, [usize; 7]) {
     let rows = rows.max(1);
     let days = |&(start, end): &(usize, usize)| start.min(7)..end.min(7);
     let mut overflows = [false; 7];
@@ -240,7 +255,9 @@ pub fn fold_week(spans: &[(usize, usize)], lanes: &[usize], rows: usize) -> (Vec
     let shown: Vec<bool> = spans
         .iter()
         .zip(lanes)
-        .map(|(span, &lane)| lane + 1 < rows || (lane + 1 == rows && !days(span).any(|day| overflows[day])))
+        .map(|(span, &lane)| {
+            lane + 1 < rows || (lane + 1 == rows && !days(span).any(|day| overflows[day]))
+        })
         .collect();
     let mut more = [0; 7];
     for (span, _) in spans.iter().zip(&shown).filter(|(_, shown)| !**shown) {
@@ -304,10 +321,15 @@ pub fn first_hour(timed_starts: &[f64]) -> f64 {
 /// pointing at it land in the upper part of the view with some of the
 /// day above for context.
 pub fn open_hour<Z: TimeZone>(start: EpochMillis, tz: &Z) -> f64 {
-    let Some(local) = DateTime::<Utc>::from_timestamp_millis(start).map(|utc| utc.with_timezone(tz)) else {
+    let Some(local) =
+        DateTime::<Utc>::from_timestamp_millis(start).map(|utc| utc.with_timezone(tz))
+    else {
         return 0.0;
     };
-    let midnight = local.date_naive().and_hms_opt(0, 0, 0).expect("midnight exists");
+    let midnight = local
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight exists");
     (wall_offset(start, midnight, tz) - 1.0).max(0.0)
 }
 
@@ -319,7 +341,12 @@ mod tests {
 
     fn lisbon(d: u32, h: u32) -> EpochMillis {
         chrono_tz::Europe::Lisbon
-            .from_local_datetime(&NaiveDate::from_ymd_opt(2026, 10, d).unwrap().and_hms_opt(h, 0, 0).unwrap())
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 10, d)
+                    .unwrap()
+                    .and_hms_opt(h, 0, 0)
+                    .unwrap(),
+            )
             .single()
             .unwrap()
             .timestamp_millis()
@@ -328,10 +355,19 @@ mod tests {
     #[test]
     fn a_timed_entry_from_midnight_to_midnight_covers_whole_days() {
         let zone = chrono_tz::Europe::Lisbon;
-        assert_eq!(whole_days(lisbon(5, 0), lisbon(6, 0), &zone), Some((day(5), day(5))));
-        assert_eq!(whole_days(lisbon(5, 0), lisbon(8, 0), &zone), Some((day(5), day(7))));
+        assert_eq!(
+            whole_days(lisbon(5, 0), lisbon(6, 0), &zone),
+            Some((day(5), day(5)))
+        );
+        assert_eq!(
+            whole_days(lisbon(5, 0), lisbon(8, 0), &zone),
+            Some((day(5), day(7)))
+        );
         // The clocks go back on 25 October; that day holds 25 hours.
-        assert_eq!(whole_days(lisbon(25, 0), lisbon(26, 0), &zone), Some((day(25), day(25))));
+        assert_eq!(
+            whole_days(lisbon(25, 0), lisbon(26, 0), &zone),
+            Some((day(25), day(25)))
+        );
     }
 
     #[test]
@@ -458,9 +494,20 @@ mod tests {
         use chrono::TimeZone;
         let tz = chrono_tz::Europe::Lisbon;
         let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
-        let noon = tz.from_local_datetime(&day.and_hms_opt(12, 0, 0).unwrap()).single().unwrap().timestamp_millis();
+        let noon = tz
+            .from_local_datetime(&day.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp_millis();
         assert_eq!(instant_at(day, 12.0, &tz), noon);
-        assert_eq!(wall_offset(instant_at(day, 15.25, &tz), day.and_hms_opt(0, 0, 0).unwrap(), &tz), 15.25);
+        assert_eq!(
+            wall_offset(
+                instant_at(day, 15.25, &tz),
+                day.and_hms_opt(0, 0, 0).unwrap(),
+                &tz
+            ),
+            15.25
+        );
     }
 
     #[test]
@@ -469,12 +516,27 @@ mod tests {
         let tz = chrono_tz::Europe::Lisbon;
         // On 29 March 2026 Lisbon jumps from 01:00 to 02:00.
         let day = chrono::NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
-        let two = chrono::Utc.with_ymd_and_hms(2026, 3, 29, 1, 0, 0).unwrap().timestamp_millis();
+        let two = chrono::Utc
+            .with_ymd_and_hms(2026, 3, 29, 1, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         assert_eq!(instant_at(day, 1.5, &tz), two);
     }
 
-    fn seg(week: usize, start: usize, end: usize, squared_start: bool, squared_end: bool) -> Segment {
-        Segment { week, start, end, squared_start, squared_end }
+    fn seg(
+        week: usize,
+        start: usize,
+        end: usize,
+        squared_start: bool,
+        squared_end: bool,
+    ) -> Segment {
+        Segment {
+            week,
+            start,
+            end,
+            squared_start,
+            squared_end,
+        }
     }
 
     #[test]
@@ -495,7 +557,11 @@ mod tests {
     fn a_span_over_three_weeks_squares_both_ends_of_the_middle_one() {
         assert_eq!(
             week_segments(5, 20, 6),
-            vec![seg(0, 5, 7, false, true), seg(1, 0, 7, true, true), seg(2, 0, 6, true, false)]
+            vec![
+                seg(0, 5, 7, false, true),
+                seg(1, 0, 7, true, true),
+                seg(2, 0, 6, true, false)
+            ]
         );
     }
 
@@ -526,7 +592,9 @@ mod tests {
     }
 
     fn day_spans(days: &[(usize, usize)]) -> Vec<(EpochMillis, EpochMillis)> {
-        days.iter().map(|&(s, e)| (s as EpochMillis, e as EpochMillis)).collect()
+        days.iter()
+            .map(|&(s, e)| (s as EpochMillis, e as EpochMillis))
+            .collect()
     }
 
     #[test]
@@ -534,7 +602,10 @@ mod tests {
         let spans = day_spans(&[(0, 1); 9]);
         let (placed, more) = lanes_within(&spans, usize::MAX);
         assert!(more.is_empty());
-        assert_eq!(placed.iter().map(|p| p.lane).collect::<Vec<_>>(), (0..9).collect::<Vec<_>>());
+        assert_eq!(
+            placed.iter().map(|p| p.lane).collect::<Vec<_>>(),
+            (0..9).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -578,7 +649,11 @@ mod tests {
     #[test]
     fn an_item_on_the_last_line_stays_when_its_days_hide_nothing() {
         // Monday overflows; Friday's chip on line 1 has nothing under it.
-        let (shown, more) = fold_week(&[(0, 1), (0, 1), (0, 1), (4, 5), (4, 5)], &[0, 1, 2, 0, 1], 2);
+        let (shown, more) = fold_week(
+            &[(0, 1), (0, 1), (0, 1), (4, 5), (4, 5)],
+            &[0, 1, 2, 0, 1],
+            2,
+        );
         assert_eq!(shown, vec![true, false, false, true, true]);
         assert_eq!(more, [2, 0, 0, 0, 0, 0, 0]);
     }

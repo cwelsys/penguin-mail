@@ -17,7 +17,10 @@ async fn a_page_draws_what_the_copy_holds_for_its_range() {
     let run = window.run();
     run.fill(ON_SCREEN);
     window.settle().await;
-    assert_eq!(window.view.borrow().drawn, vec![(ON_SCREEN, vec!["Standup".to_string()])]);
+    assert_eq!(
+        window.view.borrow().drawn,
+        vec![(ON_SCREEN, vec!["Standup".to_string()])]
+    );
 }
 
 #[tokio::test]
@@ -25,7 +28,9 @@ async fn a_refill_that_lands_after_the_range_moved_is_dropped() {
     let window = FakeWindow::new();
     window.with(|v| v.copy = vec![event_at("Standup", fixture_day(), 9)]);
     let next_week = Range::around(ViewKind::Week, fixture_day()).next();
-    window.during(Step::Occurrences, move |window, _| window.move_page(ON_SCREEN, next_week));
+    window.during(Step::Occurrences, move |window, _| {
+        window.move_page(ON_SCREEN, next_week)
+    });
     let run = window.run();
     run.fill(ON_SCREEN);
     window.settle().await;
@@ -45,7 +50,10 @@ async fn an_older_read_of_a_page_gives_way_to_a_newer_one() {
     let run = window.run();
     run.fill(ON_SCREEN);
     window.settle().await;
-    assert_eq!(window.view.borrow().drawn, vec![(ON_SCREEN, vec!["After".to_string()])]);
+    assert_eq!(
+        window.view.borrow().drawn,
+        vec![(ON_SCREEN, vec!["After".to_string()])]
+    );
 }
 
 #[tokio::test]
@@ -82,7 +90,10 @@ async fn show_in_calendar_goes_to_the_day_and_opens_the_popover() {
     window.settle().await;
     let view = window.view.borrow();
     assert_eq!(view.went_to, vec![later]);
-    assert_eq!(view.popovers, vec![(ON_SCREEN, key_of(&meeting), meeting.start)]);
+    assert_eq!(
+        view.popovers,
+        vec![(ON_SCREEN, key_of(&meeting), meeting.start)]
+    );
     assert!(run.pending().is_none());
 }
 
@@ -99,7 +110,10 @@ async fn show_in_calendar_in_a_narrow_window_opens_the_popover_from_the_list() {
     run.open(key_of(&meeting), meeting.start);
     window.settle().await;
     let view = window.view.borrow();
-    assert!(view.popovers.is_empty(), "the grid pages are hidden behind the list");
+    assert!(
+        view.popovers.is_empty(),
+        "the grid pages are hidden behind the list"
+    );
     assert_eq!(view.list_popovers, vec![(key_of(&meeting), meeting.start)]);
     assert!(run.pending().is_none());
 }
@@ -166,7 +180,9 @@ async fn an_open_answered_after_the_calendar_left_the_screen_goes_nowhere() {
     let window = FakeWindow::new();
     let meeting = event_at("Design review", fixture_day(), 15);
     window.with(|v| v.copy = vec![meeting.clone()]);
-    window.during(Step::Event, |window, _| window.with(|v| v.on_screen = false));
+    window.during(Step::Event, |window, _| {
+        window.with(|v| v.on_screen = false)
+    });
     let run = window.run();
     run.open(key_of(&meeting), meeting.start);
     window.settle().await;
@@ -225,7 +241,11 @@ async fn a_calendar_list_read_that_owes_a_refill_hands_it_to_a_newer_read() {
     window.settle().await;
     let view = window.view.borrow();
     assert_eq!(view.sidebars.len(), 1, "only the newer list read draws");
-    assert_eq!(view.drawn.len(), 3, "the newer read refills the three pages");
+    assert_eq!(
+        view.drawn.len(),
+        3,
+        "the newer read refills the three pages"
+    );
 }
 
 #[tokio::test]
@@ -251,7 +271,10 @@ async fn only_the_newest_waiting_read_draws_the_cards() {
 async fn a_search_answer_for_an_old_query_is_dropped() {
     let window = FakeWindow::new();
     window.with(|v| {
-        v.copy = vec![event_at("Kit check", fixture_day(), 9), event_at("Kite flying", fixture_day(), 11)];
+        v.copy = vec![
+            event_at("Kit check", fixture_day(), 9),
+            event_at("Kite flying", fixture_day(), 11),
+        ];
         v.search_text = "Kit".to_string();
     });
     window.during(Step::Search, |window, run| {
@@ -261,7 +284,10 @@ async fn a_search_answer_for_an_old_query_is_dropped() {
     let run = window.run();
     run.search("Kit");
     window.settle().await;
-    assert_eq!(window.view.borrow().results, vec![vec!["Kite flying".to_string()]]);
+    assert_eq!(
+        window.view.borrow().results,
+        vec![vec!["Kite flying".to_string()]]
+    );
 }
 
 #[tokio::test]
@@ -301,7 +327,10 @@ async fn a_reload_keeps_the_days_the_list_has_loaded_and_its_scroll() {
     let window = FakeWindow::new();
     window.with(|v| {
         v.showing_list = true;
-        v.copy = vec![event_at("Standup", fixture_day(), 9), event_at("Later", fixture_day() + chrono::Days::new(70), 9)];
+        v.copy = vec![
+            event_at("Standup", fixture_day(), 9),
+            event_at("Later", fixture_day() + chrono::Days::new(70), 9),
+        ];
     });
     let run = window.run();
     run.fill_list();
@@ -312,7 +341,11 @@ async fn a_reload_keeps_the_days_the_list_has_loaded_and_its_scroll() {
     window.settle().await;
     let view = window.view.borrow();
     assert_eq!(view.list, ["Standup", "Later"]);
-    assert_eq!(window.count(Step::DrawList), 1, "only the first window replaced the list");
+    assert_eq!(
+        window.count(Step::DrawList),
+        1,
+        "only the first window replaced the list"
+    );
 }
 
 #[tokio::test]
@@ -322,7 +355,13 @@ async fn earlier_days_read_for_a_list_that_has_since_been_replaced_are_dropped()
     let run = window.run();
     run.fill_list();
     window.settle().await;
-    window.with(|v| v.copy = vec![event_at("Last month", fixture_day() - chrono::Days::new(20), 9)]);
+    window.with(|v| {
+        v.copy = vec![event_at(
+            "Last month",
+            fixture_day() - chrono::Days::new(20),
+            9,
+        )]
+    });
     window.during(Step::Occurrences, |_, run| run.fill_list());
     run.load_earlier();
     window.settle().await;
@@ -373,7 +412,11 @@ async fn a_second_scroll_near_the_end_while_later_days_load_asks_nothing_more() 
     run.load_later();
     window.settle().await;
     assert_eq!(window.count(Step::AppendList), 1);
-    assert_eq!(window.count(Step::Occurrences), 2, "the first window and one later read");
+    assert_eq!(
+        window.count(Step::Occurrences),
+        2,
+        "the first window and one later read"
+    );
 }
 
 #[tokio::test]
@@ -397,7 +440,11 @@ async fn earlier_days_go_above_what_the_list_holds() {
     let window = FakeWindow::new();
     window.with(|v| {
         v.showing_list = true;
-        v.copy = vec![event_at("Last month", fixture_day() - chrono::Days::new(20), 9)];
+        v.copy = vec![event_at(
+            "Last month",
+            fixture_day() - chrono::Days::new(20),
+            9,
+        )];
     });
     let run = window.run();
     run.fill_list();
@@ -406,7 +453,10 @@ async fn earlier_days_go_above_what_the_list_holds() {
     window.settle().await;
     let view = window.view.borrow();
     assert_eq!(view.list, ["Last month"]);
-    assert_eq!(view.list_firsts.last(), Some(&(fixture_day() - chrono::Days::new(30))));
+    assert_eq!(
+        view.list_firsts.last(),
+        Some(&(fixture_day() - chrono::Days::new(30)))
+    );
 }
 
 #[tokio::test]
@@ -438,7 +488,11 @@ async fn offline_the_list_keeps_its_earlier_days_for_the_next_scroll() {
     run.load_earlier();
     window.settle().await;
     assert_eq!(window.count(Step::PrependList), 0);
-    assert_eq!(window.count(Step::OlderMissing), 2, "each scroll to the top asks again");
+    assert_eq!(
+        window.count(Step::OlderMissing),
+        2,
+        "each scroll to the top asks again"
+    );
 }
 
 #[tokio::test]

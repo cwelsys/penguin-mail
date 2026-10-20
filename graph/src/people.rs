@@ -98,7 +98,8 @@ impl Graph {
 
     /// One contact, with only its display name filled in.
     pub async fn contact_name(&self, id: &str) -> Result<GraphContact, GraphError> {
-        self.get(&format!("me/contacts/{id}"), &[("$select", "displayName")]).await
+        self.get(&format!("me/contacts/{id}"), &[("$select", "displayName")])
+            .await
     }
 
     pub async fn update_contact(&self, id: &str, body: &Value) -> Result<GraphContact, GraphError> {

@@ -48,7 +48,11 @@ pub(crate) fn thread_for(
     // The newest entry in References is the message this one answers
     // directly; In-Reply-To is only a fallback for a sender that sent
     // no References at all.
-    let named = links.references.iter().rev().chain(links.in_reply_to.iter());
+    let named = links
+        .references
+        .iter()
+        .rev()
+        .chain(links.in_reply_to.iter());
     for id in named.filter_map(|id| bare(id)) {
         if let Some(thread) = by_msgid(conn, account_id, id)? {
             return Ok(thread);
@@ -79,7 +83,12 @@ pub(crate) fn remember(
     let mut insert = conn.prepare_cached(
         "INSERT OR IGNORE INTO message_links (account_id, message_id, msgid) VALUES (?1, ?2, ?3)",
     )?;
-    for id in links.references.iter().chain(links.in_reply_to.iter()).filter_map(|id| bare(id)) {
+    for id in links
+        .references
+        .iter()
+        .chain(links.in_reply_to.iter())
+        .filter_map(|id| bare(id))
+    {
         insert.execute(params![account_id, meta.id, id])?;
     }
     Ok(())
@@ -107,7 +116,9 @@ const NAMING_SQL: &str = "SELECT m.thread_id FROM message_links l INDEXED BY mes
 fn by_msgid(conn: &Connection, account_id: AccountId, msgid: &str) -> Result<Option<String>> {
     Ok(conn
         .prepare_cached(BY_MSGID_SQL)?
-        .query_row(params![account_id, msgid, format!("<{msgid}>")], |row| row.get(0))
+        .query_row(params![account_id, msgid, format!("<{msgid}>")], |row| {
+            row.get(0)
+        })
         .optional()?)
 }
 

@@ -14,12 +14,22 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
             return Ok(None);
         }
         let uses = self.api.quota_root("INBOX").await?;
-        Ok(uses
-            .iter()
-            .filter(|u| u.resource == "STORAGE" && u.limit > 0)
-            .min_by_key(|u| u.limit.saturating_sub(u.usage))
-            .and_then(|u| Storage::new(u.usage.saturating_mul(KIB), u.limit.saturating_mul(KIB), None)))
+        Ok(from_quotas(&uses))
     }
+}
+
+/// The tightest byte quota on INBOX, converting IMAP's KiB units to bytes.
+pub(crate) fn from_quotas(uses: &[mailrs_imap::QuotaUse]) -> Option<Storage> {
+    uses.iter()
+        .filter(|u| u.resource == "STORAGE" && u.limit > 0)
+        .min_by_key(|u| u.limit.saturating_sub(u.usage))
+        .and_then(|u| {
+            Storage::new(
+                u.usage.saturating_mul(KIB),
+                u.limit.saturating_mul(KIB),
+                None,
+            )
+        })
 }
 
 #[cfg(test)]
@@ -29,9 +39,9 @@ mod tests {
     use mailrs_imap::QuotaUse;
 
     use super::super::Imap;
+    use crate::MailBackend;
     use crate::fake::{FakeImap, FakeSmtp};
     use crate::services::{ImapSettings, Storage};
-    use crate::MailBackend;
 
     /// Wraps `imap` and keeps it, so a test can look at its calls.
     fn services(imap: &Arc<FakeImap>) -> Imap<FakeImap, FakeSmtp> {
@@ -45,14 +55,22 @@ mod tests {
     }
 
     fn quota(resource: &str, usage: u64, limit: u64) -> QuotaUse {
-        QuotaUse { root: "".into(), resource: resource.into(), usage, limit }
+        QuotaUse {
+            root: "".into(),
+            resource: resource.into(),
+            usage,
+            limit,
+        }
     }
 
     #[tokio::test]
     async fn storage_is_the_inbox_roots_storage_in_bytes() {
         let imap = Arc::new(FakeImap::new());
         imap.with(|s| s.quota = vec![quota("MESSAGE", 3, 100), quota("STORAGE", 512, 1024)]);
-        assert_eq!(services(&imap).storage().await.unwrap(), Storage::new(512 * 1024, 1024 * 1024, None));
+        assert_eq!(
+            services(&imap).storage().await.unwrap(),
+            Storage::new(512 * 1024, 1024 * 1024, None)
+        );
     }
 
     #[tokio::test]
@@ -90,6 +108,9 @@ mod tests {
     async fn the_nearest_full_root_wins() {
         let imap = Arc::new(FakeImap::new());
         imap.with(|s| s.quota = vec![quota("STORAGE", 10, 1000), quota("STORAGE", 90, 100)]);
-        assert_eq!(services(&imap).storage().await.unwrap(), Storage::new(90 * 1024, 100 * 1024, None));
+        assert_eq!(
+            services(&imap).storage().await.unwrap(),
+            Storage::new(90 * 1024, 100 * 1024, None)
+        );
     }
 }

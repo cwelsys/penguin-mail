@@ -38,13 +38,18 @@ impl GmailClient {
             ListEdit::Rename { name } => {
                 let url = format!("{}/calendars/{}", self.calendar_base_url, encode(id));
                 let body = json!({ "summary": name });
-                let _: Value = self.call_at(&url, |url| self.http().patch(url).json(&body)).await?;
+                let _: Value = self
+                    .call_at(&url, |url| self.http().patch(url).json(&body))
+                    .await?;
                 // Google lists a calendar under the account's own name for
                 // it, `summaryOverride`, when one is set, so the new name
                 // shows only once that goes. `null` deletes the field in a
                 // PATCH; an empty string would set an empty name. The
                 // rename stands without the list permission.
-                match self.patch_list_entry(id, json!({ "summaryOverride": null })).await {
+                match self
+                    .patch_list_entry(id, json!({ "summaryOverride": null }))
+                    .await
+                {
                     Ok(entry) => Ok(Some(entry)),
                     Err(GmailError::MissingScope) => Ok(None),
                     Err(err) => Err(err),
@@ -52,15 +57,23 @@ impl GmailClient {
             }
             ListEdit::Delete => {
                 let url = format!("{}/calendars/{}", self.calendar_base_url, encode(id));
-                self.call_at_empty(&url, |url| self.http().delete(url)).await?;
+                self.call_at_empty(&url, |url| self.http().delete(url))
+                    .await?;
                 Ok(None)
             }
             ListEdit::Unsubscribe => {
-                let url = format!("{}/users/me/calendarList/{}", self.calendar_base_url, encode(id));
-                self.call_at_empty(&url, |url| self.http().delete(url)).await?;
+                let url = format!(
+                    "{}/users/me/calendarList/{}",
+                    self.calendar_base_url,
+                    encode(id)
+                );
+                self.call_at_empty(&url, |url| self.http().delete(url))
+                    .await?;
                 Ok(None)
             }
-            ListEdit::Recolor { color } => self.patch_list_entry(id, colored(color)).await.map(Some),
+            ListEdit::Recolor { color } => {
+                self.patch_list_entry(id, colored(color)).await.map(Some)
+            }
             ListEdit::Hide { hidden } => {
                 // Google's `hidden` is what its own list's "Hide from list"
                 // sets; `selected` is the tick beside a calendar. A calendar
@@ -70,7 +83,9 @@ impl GmailClient {
                 if !hidden {
                     body.insert("selected".into(), json!(true));
                 }
-                self.patch_list_entry(id, Value::Object(body)).await.map(Some)
+                self.patch_list_entry(id, Value::Object(body))
+                    .await
+                    .map(Some)
             }
             ListEdit::Subscribe { url } => self.insert_list_entry(url).await.map(Some),
             ListEdit::Add => self.insert_list_entry(id).await.map(Some),
@@ -87,7 +102,9 @@ impl GmailClient {
             body.insert("timeZone".into(), json!(zone));
         }
         let body = Value::Object(body);
-        let made: Value = self.call_at(&url, |url| self.http().post(url).json(&body)).await?;
+        let made: Value = self
+            .call_at(&url, |url| self.http().post(url).json(&body))
+            .await?;
         made.get("id")
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -100,15 +117,30 @@ impl GmailClient {
     async fn insert_list_entry(&self, id: &str) -> Result<calendar::Calendar, GmailError> {
         let url = format!("{}/users/me/calendarList", self.calendar_base_url);
         let body = json!({ "id": id, "selected": true });
-        let entry: Value = self.call_at(&url, |url| self.http().post(url).json(&body)).await?;
+        let entry: Value = self
+            .call_at(&url, |url| self.http().post(url).json(&body))
+            .await?;
         Ok(google_calendar(&entry))
     }
 
     /// Google's `calendarList.patch`, with colours given as `#rrggbb`.
-    async fn patch_list_entry(&self, id: &str, body: Value) -> Result<calendar::Calendar, GmailError> {
-        let url = format!("{}/users/me/calendarList/{}", self.calendar_base_url, encode(id));
+    async fn patch_list_entry(
+        &self,
+        id: &str,
+        body: Value,
+    ) -> Result<calendar::Calendar, GmailError> {
+        let url = format!(
+            "{}/users/me/calendarList/{}",
+            self.calendar_base_url,
+            encode(id)
+        );
         let entry: Value = self
-            .call_at(&url, |url| self.http().patch(url).query(&[("colorRgbFormat", "true")]).json(&body))
+            .call_at(&url, |url| {
+                self.http()
+                    .patch(url)
+                    .query(&[("colorRgbFormat", "true")])
+                    .json(&body)
+            })
             .await?;
         Ok(google_calendar(&entry))
     }
@@ -125,9 +157,17 @@ fn colored(color: &str) -> Value {
 /// does not move the answer for Google's palette).
 fn text_on(color: &str) -> &'static str {
     let hex = color.trim_start_matches('#');
-    let channel = |at: usize| hex.get(at..at + 2).and_then(|c| u8::from_str_radix(c, 16).ok()).map_or(0.0, f64::from);
+    let channel = |at: usize| {
+        hex.get(at..at + 2)
+            .and_then(|c| u8::from_str_radix(c, 16).ok())
+            .map_or(0.0, f64::from)
+    };
     let luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-    if luminance > 140.0 { "#000000" } else { "#ffffff" }
+    if luminance > 140.0 {
+        "#000000"
+    } else {
+        "#ffffff"
+    }
 }
 
 #[cfg(test)]

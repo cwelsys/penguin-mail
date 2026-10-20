@@ -12,9 +12,9 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib, graphene};
 use mailrs_domain::{AccountId, ThreadSummary};
 
+use super::list_feed::order;
 use super::sidebar::DRAG_MAIL;
 use super::thread_row::{Avatar, OpenMenu, ThreadRow};
-use super::list_feed::order;
 use crate::diff::splice;
 use crate::photos::ContactPhotos;
 use mailrs_domain::translate::gettext;
@@ -72,6 +72,7 @@ pub struct ThreadList {
     selection: gtk::MultiSelection,
     view: gtk::ListView,
     scroller: gtk::ScrolledWindow,
+    more: gtk::Button,
     rows: Rc<RefCell<Vec<Row>>>,
     /// The rows of the drag in progress.
     dragged: Rc<RefCell<Vec<Row>>>,
@@ -137,7 +138,10 @@ impl ThreadList {
                         .filter_map(|p| rows.get(p as usize).map(Rc::clone))
                         .collect()
                 } else {
-                    rows.get(position as usize).map(Rc::clone).into_iter().collect()
+                    rows.get(position as usize)
+                        .map(Rc::clone)
+                        .into_iter()
+                        .collect()
                 };
                 if taken.is_empty() {
                     return None;
@@ -305,7 +309,10 @@ impl ThreadList {
         header.pack_end(&search_button);
 
         let categories_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let banner = adw::Banner::builder().use_markup(false).revealed(false).build();
+        let banner = adw::Banner::builder()
+            .use_markup(false)
+            .revealed(false)
+            .build();
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.add_top_bar(&categories_slot);
@@ -313,7 +320,21 @@ impl ThreadList {
         toolbar.add_top_bar(&banner);
         let grant_bars = gtk::Box::new(gtk::Orientation::Vertical, 0);
         toolbar.add_top_bar(&grant_bars);
-        toolbar.set_content(Some(&stack));
+        // A page can contain only replies to one conversation, leaving
+        // no scrollbar. Keep the next server page reachable by a button.
+        let more = gtk::Button::builder()
+            .label(gettext("More"))
+            .halign(gtk::Align::Center)
+            .margin_top(6)
+            .margin_bottom(6)
+            .visible(false)
+            .build();
+        super::name(&more, &gettext("More"));
+        stack.set_vexpand(true);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&stack);
+        content.append(&more);
+        toolbar.set_content(Some(&content));
         let bottom_slot = adw::Bin::builder()
             .halign(gtk::Align::Center)
             .margin_top(6)
@@ -349,6 +370,7 @@ impl ThreadList {
             selection,
             view,
             scroller,
+            more,
             rows,
             dragged,
             show_accounts,
@@ -362,11 +384,12 @@ impl ThreadList {
         // A search's subtitle is its query, which the open entry already
         // shows; it comes back when the entry closes.
         let weak = Rc::downgrade(&list);
-        list.search_bar.connect_search_mode_enabled_notify(move |_| {
-            if let Some(list) = weak.upgrade() {
-                list.show_subtitle();
-            }
-        });
+        list.search_bar
+            .connect_search_mode_enabled_notify(move |_| {
+                if let Some(list) = weak.upgrade() {
+                    list.show_subtitle();
+                }
+            });
         let weak = Rc::downgrade(&list);
         list.search_entry.connect_changed(move |_| {
             if let Some(list) = weak.upgrade() {
@@ -408,7 +431,8 @@ impl ThreadList {
         let searching = self.search_bar.is_search_mode().then_some(query.as_str());
         let shows = subtitle_shows(layout.subtitle, &self.subtitle.label(), searching);
         self.subtitle.set_visible(shows);
-        self.categories_slot.set_height_request(if shows { 7 } else { 0 });
+        self.categories_slot
+            .set_height_request(if shows { 7 } else { 0 });
     }
 
     /// Lays the header out for a phone or for a wider window. On a phone
@@ -438,7 +462,8 @@ impl ThreadList {
             self.bottom_slot.set_child(Some(&self.compose_button));
         } else {
             self.bottom_slot.set_child(None::<&gtk::Widget>);
-            self.compose_button.set_icon_name("mail-message-new-symbolic");
+            self.compose_button
+                .set_icon_name("mail-message-new-symbolic");
             for class in ["suggested-action", "pill", "bottom-new"] {
                 self.compose_button.remove_css_class(class);
             }
@@ -528,8 +553,12 @@ impl ThreadList {
         mailrs_sync::Loaded::rows(&self.rows.borrow())
     }
 
-    /// Runs `more` when the view scrolls within a screenful of the end.
+    /// Runs `more` near the list's end or when the reader asks for the
+    /// next server page with the button, even when no scrollbar is needed.
     pub fn connect_more(&self, more: impl Fn() + 'static) {
+        let more = Rc::new(more);
+        let clicked = Rc::clone(&more);
+        self.more.connect_clicked(move |_| clicked());
         self.scroller
             .vadjustment()
             .connect_value_changed(move |adjustment| {
@@ -541,7 +570,14 @@ impl ThreadList {
     }
 
     pub fn show_loading(&self) {
+        self.more.set_visible(false);
         self.stack.set_visible_child_name("loading");
+    }
+
+    /// Only cursor-paged server mailboxes need a manual next page: a
+    /// grouped page may be too short to scroll, or may need a retry.
+    pub fn show_more(&self, more: bool) {
+        self.more.set_visible(more);
     }
 
     /// The line under the empty list's title, saying what fills the
@@ -920,7 +956,9 @@ fn land_on_selection(view: &gtk::ListView, selection: &gtk::MultiSelection) {
         let (list, selection) = (list.clone(), selection.clone());
         glib::idle_add_local_once(move || {
             let Some(list) = list.upgrade() else { return };
-            let Some(row) = list.focus_child() else { return };
+            let Some(row) = list.focus_child() else {
+                return;
+            };
             let focused = row
                 .first_child()
                 .and_downcast::<ThreadRow>()
@@ -977,6 +1015,98 @@ fn same_threads(old: &[Row], fresh: &[Row]) -> bool {
 /// where it is when the last unread message is read.
 fn subtitle_shows(room: bool, subtitle: &str, searching: Option<&str>) -> bool {
     room && searching.is_none_or(|query| query.trim() != subtitle.trim())
+}
+
+#[cfg(test)]
+pub(crate) mod checks {
+    use super::*;
+
+    pub(crate) fn run() {
+        let list = ThreadList::new(|_| {}, |_| {});
+        let calls = Rc::new(Cell::new(0));
+        let clicked = Rc::clone(&calls);
+        list.connect_more(move || clicked.set(clicked.get() + 1));
+        assert!(!list.more.is_visible());
+        list.show_more(true);
+        assert!(list.more.is_visible());
+        assert_eq!(list.more.label().as_deref(), Some(gettext("More").as_str()));
+        list.more.emit_clicked();
+        assert_eq!(calls.get(), 1);
+        let row = ThreadSummary {
+            account_id: 1,
+            id: "plans".into(),
+            from: "Ann".into(),
+            subject: "Project plans".into(),
+            snippet: "The updated plans are ready.".into(),
+            last_message_at: mailrs_sync::now_millis(),
+            message_count: 25,
+            unread: true,
+            ..Default::default()
+        };
+        list.set_title("Work / Clients", "");
+        list.set_rows(
+            vec![Rc::new(row.clone())],
+            "No Mail",
+            "mail-unread-symbolic",
+        );
+        list.selection.select_item(0, false);
+        list.set_rows(
+            vec![Rc::new(ThreadSummary {
+                message_count: 50,
+                ..row
+            })],
+            "No Mail",
+            "mail-unread-symbolic",
+        );
+        assert!(list.selection.is_selected(0));
+        if let Some(directory) = std::env::var_os("PENGUIN_MAIL_TEST_LIST_SHOTS") {
+            save_shots(&list, std::path::Path::new(&directory));
+        }
+        list.show_loading();
+        assert!(!list.more.is_visible());
+    }
+
+    fn save_shots(list: &ThreadList, directory: &std::path::Path) {
+        std::fs::create_dir_all(directory).unwrap();
+        let navigation = adw::NavigationView::new();
+        navigation.add(&list.page);
+        let window = adw::Window::builder()
+            .default_width(390)
+            .default_height(640)
+            .content(&navigation)
+            .build();
+        let style = adw::StyleManager::default();
+        let previous = style.color_scheme();
+        window.present();
+        for (name, scheme) in [
+            ("light", adw::ColorScheme::ForceLight),
+            ("dark", adw::ColorScheme::ForceDark),
+        ] {
+            style.set_color_scheme(scheme);
+            let wait = glib::MainLoop::new(None, false);
+            let done = wait.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+                done.quit()
+            });
+            wait.run();
+            let paintable = gtk::WidgetPaintable::new(Some(&window));
+            let snapshot = gtk::Snapshot::new();
+            paintable.snapshot(
+                &snapshot,
+                f64::from(window.width()),
+                f64::from(window.height()),
+            );
+            let texture = window
+                .renderer()
+                .unwrap()
+                .render_texture(snapshot.to_node().unwrap(), None);
+            texture
+                .save_to_png(directory.join(format!("folder-more-{name}.png")))
+                .unwrap();
+        }
+        window.close();
+        style.set_color_scheme(previous);
+    }
 }
 
 #[cfg(test)]

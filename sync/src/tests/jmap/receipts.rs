@@ -10,7 +10,9 @@ Message-ID: <rota@allotment.example>\r\nDisposition-Notification-To: ines@allotm
 /// A message that asks for a receipt, synced and opened, as the card
 /// sees it.
 async fn asked_by(h: &Harness, raw: &[u8]) -> String {
-    let id = h.fake.deliver("inbox", raw, chrono::Utc::now().timestamp_millis());
+    let id = h
+        .fake
+        .deliver("inbox", raw, chrono::Utc::now().timestamp_millis());
     h.bootstrap_all().await;
     h.sync.body(&id).await.unwrap();
     id
@@ -28,7 +30,10 @@ async fn a_receipt_goes_through_mdn_send_where_the_server_offers_it() {
     let sent = h.fake.with(|s| s.mdns.clone());
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].subject, "Read: Rota");
-    assert!(h.fake.with(|s| s.sent.is_empty()), "no second receipt as mail");
+    assert!(
+        h.fake.with(|s| s.sent.is_empty()),
+        "no second receipt as mail"
+    );
     assert!(h.sync.receipt_answered(&id).await.unwrap());
 }
 
@@ -41,10 +46,19 @@ async fn without_mdn_the_receipt_goes_as_a_report() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].rcpt_to, ["ines@allotment.example"]);
     let raw = String::from_utf8_lossy(&sent[0].raw).into_owned();
-    assert!(raw.contains("multipart/report") && raw.contains("Original-Message-ID: <rota@allotment.example>"), "{raw}");
-    let read = mailrs_mime::read(&sent[0].raw).read_report.expect("the report reads back");
+    assert!(
+        raw.contains("multipart/report")
+            && raw.contains("Original-Message-ID: <rota@allotment.example>"),
+        "{raw}"
+    );
+    let read = mailrs_mime::read(&sent[0].raw)
+        .read_report
+        .expect("the report reads back");
     assert_eq!((read.by.as_str(), read.displayed), ("me@example.com", true));
-    assert!(h.fake.with(|s| s.emails[&id].keywords.contains("$mdnsent")), "other mail programs do not ask again");
+    assert!(
+        h.fake.with(|s| s.emails[&id].keywords.contains("$mdnsent")),
+        "other mail programs do not ask again"
+    );
 }
 
 #[tokio::test]
@@ -55,13 +69,20 @@ async fn declining_sends_nothing_and_asks_no_more() {
     h.sync.answer_receipt(&id, false).await.unwrap();
     assert!(h.fake.with(|s| s.mdns.is_empty() && s.sent.is_empty()));
     assert!(h.sync.receipt_answered(&id).await.unwrap());
-    assert!(h.fake.with(|s| s.emails[&id].keywords.contains("$mdnsent")), "RFC 3503 marks a refusal too");
+    assert!(
+        h.fake.with(|s| s.emails[&id].keywords.contains("$mdnsent")),
+        "RFC 3503 marks a refusal too"
+    );
 }
 
 #[tokio::test]
 async fn a_message_that_asks_nothing_is_refused() {
     let h = over(FakeJmap::new()).await;
-    let id = h.fake.deliver("inbox", b"From: a@example.com\r\nSubject: s\r\n\r\nhi\r\n", chrono::Utc::now().timestamp_millis());
+    let id = h.fake.deliver(
+        "inbox",
+        b"From: a@example.com\r\nSubject: s\r\n\r\nhi\r\n",
+        chrono::Utc::now().timestamp_millis(),
+    );
     h.bootstrap_all().await;
     h.sync.body(&id).await.unwrap();
     assert!(h.sync.answer_receipt(&id, true).await.is_err());
@@ -97,7 +118,13 @@ async fn a_restart_that_lost_the_local_record_still_sends_nothing_more() {
     let id = asked(&h).await;
     // The answer went out and the server marked it, but this computer never
     // wrote its record.
-    h.fake.with(|s| s.emails.get_mut(&id).unwrap().keywords.insert("$mdnsent".into()));
+    h.fake.with(|s| {
+        s.emails
+            .get_mut(&id)
+            .unwrap()
+            .keywords
+            .insert("$mdnsent".into())
+    });
     h.bootstrap_all().await;
     h.sync.answer_receipt(&id, true).await.unwrap();
     assert!(h.fake.with(|s| s.sent.is_empty() && s.mdns.is_empty()));
@@ -109,9 +136,13 @@ async fn a_lost_answer_is_not_asked_again_after_a_restart() {
     let id = asked(&h).await;
     // The server took the receipt but the call that carried it failed here,
     // as when the connection drops before the answer arrives.
-    h.fake.with(|s| s.mdn_failure = Some(mailrs_jmap::JmapError::Network("dropped".into())));
+    h.fake
+        .with(|s| s.mdn_failure = Some(mailrs_jmap::JmapError::Network("dropped".into())));
     assert!(h.sync.answer_receipt(&id, true).await.is_err());
-    assert!(h.sync.receipt_answered(&id).await.unwrap(), "recorded before the send, so a retry cannot double it");
+    assert!(
+        h.sync.receipt_answered(&id).await.unwrap(),
+        "recorded before the send, so a retry cannot double it"
+    );
     assert!(!h.sync.receipt_open(&id).await.unwrap());
 }
 
@@ -119,9 +150,13 @@ async fn a_lost_answer_is_not_asked_again_after_a_restart() {
 async fn a_receipt_the_server_refused_can_be_sent_again() {
     let h = over(FakeJmap::new().with_capability(mailrs_jmap::MDN)).await;
     let id = asked(&h).await;
-    h.fake.with(|s| s.mdn_failure = Some(mailrs_jmap::JmapError::Forbidden(String::new())));
+    h.fake
+        .with(|s| s.mdn_failure = Some(mailrs_jmap::JmapError::Forbidden(String::new())));
     assert!(h.sync.answer_receipt(&id, true).await.is_err());
-    assert!(h.sync.receipt_open(&id).await.unwrap(), "nothing went, so the card asks again");
+    assert!(
+        h.sync.receipt_open(&id).await.unwrap(),
+        "nothing went, so the card asks again"
+    );
     h.sync.answer_receipt(&id, true).await.unwrap();
     assert_eq!(h.fake.with(|s| s.mdns.len()), 1);
 }
@@ -131,7 +166,12 @@ async fn a_receipt_the_server_refused_can_be_sent_again() {
 async fn a_server_failure_keeps_the_answer() {
     let h = over(FakeJmap::new().with_capability(mailrs_jmap::MDN)).await;
     let id = asked(&h).await;
-    h.fake.with(|s| s.mdn_failure = Some(mailrs_jmap::JmapError::Method { kind: "serverFail".into(), description: String::new() }));
+    h.fake.with(|s| {
+        s.mdn_failure = Some(mailrs_jmap::JmapError::Method {
+            kind: "serverFail".into(),
+            description: String::new(),
+        })
+    });
     assert!(h.sync.answer_receipt(&id, true).await.is_err());
     assert!(h.sync.receipt_answered(&id).await.unwrap());
 }
@@ -140,7 +180,10 @@ async fn a_server_failure_keeps_the_answer() {
 async fn two_answers_at_once_send_one_receipt() {
     let h = over(FakeJmap::new().with_capability(mailrs_jmap::MDN)).await;
     let id = asked(&h).await;
-    let (first, second) = tokio::join!(h.sync.answer_receipt(&id, true), h.sync.answer_receipt(&id, true));
+    let (first, second) = tokio::join!(
+        h.sync.answer_receipt(&id, true),
+        h.sync.answer_receipt(&id, true)
+    );
     first.unwrap();
     second.unwrap();
     assert_eq!(h.fake.with(|s| s.mdns.len()), 1);
@@ -150,14 +193,22 @@ async fn two_answers_at_once_send_one_receipt() {
 async fn a_decline_and_a_send_at_once_keep_the_first_answer() {
     let h = over(FakeJmap::new().with_capability(mailrs_jmap::MDN)).await;
     let id = asked(&h).await;
-    let (declined, sent) = tokio::join!(h.sync.answer_receipt(&id, false), h.sync.answer_receipt(&id, true));
+    let (declined, sent) = tokio::join!(
+        h.sync.answer_receipt(&id, false),
+        h.sync.answer_receipt(&id, true)
+    );
     declined.unwrap();
     sent.unwrap();
     let (account, message) = (h.account_id, id.clone());
-    let kept = h.db.read(move |c| mailrs_store::receipts::answered(c, account, &message)).await.unwrap();
+    let kept =
+        h.db.read(move |c| mailrs_store::receipts::answered(c, account, &message))
+            .await
+            .unwrap();
     let mdns = h.fake.with(|s| s.mdns.len());
     match kept {
-        Some(mailrs_store::receipts::Answered::Declined) => assert_eq!(mdns, 0, "declined, yet a receipt went"),
+        Some(mailrs_store::receipts::Answered::Declined) => {
+            assert_eq!(mdns, 0, "declined, yet a receipt went")
+        }
         Some(mailrs_store::receipts::Answered::Sent) => assert_eq!(mdns, 1),
         None => panic!("no answer kept"),
     }
@@ -175,8 +226,14 @@ Message-ID: <rota-{to}>\r\nDisposition-Notification-To: ines@allotment.example\r
 #[tokio::test]
 async fn a_receipt_for_mail_to_a_masked_address_goes_from_that_address() {
     let h = over(FakeJmap::new().with_capability(mailrs_jmap::MASKED_EMAIL)).await;
-    let crate::AnyMail::Jmap(jmap) = h.mail() else { unreachable!() };
-    let masked = jmap.make_masked("https://allotment.example", "Allotment").await.unwrap().email;
+    let crate::AnyMail::Jmap(jmap) = h.mail() else {
+        unreachable!()
+    };
+    let masked = jmap
+        .make_masked("https://allotment.example", "Allotment")
+        .await
+        .unwrap()
+        .email;
     lets_send_as(&h, &masked);
     let id = asked_by(&h, &asking_to(&masked)).await;
     assert!(h.sync.receipt_open(&id).await.unwrap(), "the card asks");
@@ -184,7 +241,11 @@ async fn a_receipt_for_mail_to_a_masked_address_goes_from_that_address() {
     let sent = h.fake.with(|s| s.sent.clone());
     assert_eq!(sent.len(), 1);
     let read = mailrs_mime::read(&sent[0].raw);
-    assert_eq!(read.read_report.expect("a report").by, masked, "the sender learns nothing of the real address");
+    assert_eq!(
+        read.read_report.expect("a report").by,
+        masked,
+        "the sender learns nothing of the real address"
+    );
     let raw = String::from_utf8_lossy(&sent[0].raw).into_owned();
     assert!(!raw.contains("me@example.com"), "{raw}");
 }
@@ -201,15 +262,33 @@ fn lets_send_as(h: &Harness, address: &str) {
 
 #[tokio::test]
 async fn mdn_send_never_names_another_address_than_the_one_mail_came_to() {
-    let h = over(FakeJmap::new().with_capability(mailrs_jmap::MDN).with_capability(mailrs_jmap::MASKED_EMAIL)).await;
-    let crate::AnyMail::Jmap(jmap) = h.mail() else { unreachable!() };
-    let masked = jmap.make_masked("https://allotment.example", "Allotment").await.unwrap().email;
+    let h = over(
+        FakeJmap::new()
+            .with_capability(mailrs_jmap::MDN)
+            .with_capability(mailrs_jmap::MASKED_EMAIL),
+    )
+    .await;
+    let crate::AnyMail::Jmap(jmap) = h.mail() else {
+        unreachable!()
+    };
+    let masked = jmap
+        .make_masked("https://allotment.example", "Allotment")
+        .await
+        .unwrap()
+        .email;
     let id = asked_by(&h, &asking_to(&masked)).await;
     // The server has no identity for the masked address, so MDN/send would
     // write the receipt from the account's own address.
     let _ = h.sync.answer_receipt(&id, true).await;
-    assert!(h.fake.with(|s| s.mdns.is_empty()), "no receipt from the real address");
-    let leaked = h.fake.with(|s| s.sent.iter().any(|sent| String::from_utf8_lossy(&sent.raw).contains("me@example.com")));
+    assert!(
+        h.fake.with(|s| s.mdns.is_empty()),
+        "no receipt from the real address"
+    );
+    let leaked = h.fake.with(|s| {
+        s.sent
+            .iter()
+            .any(|sent| String::from_utf8_lossy(&sent.raw).contains("me@example.com"))
+    });
     assert!(!leaked);
 }
 

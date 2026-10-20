@@ -21,11 +21,13 @@ use futures::channel::oneshot;
 use futures::stream::FuturesUnordered;
 use mailrs_domain::calendar::{Calendar, Event, Occurrence};
 use mailrs_domain::{AccountId, EpochMillis};
+use mailrs_sync::calendar_copy::Listed;
 use mailrs_sync::calendar_copy::event_change::{EventChange, Undo};
 use mailrs_sync::{Permitted, Waiting};
-use mailrs_sync::calendar_copy::Listed;
 
-use super::{Answer, CalendarRun, Desk, Effects, Older, PageId, Place, Shows, SidebarRead, Unreached, Work};
+use super::{
+    Answer, CalendarRun, Desk, Effects, Older, PageId, Place, Shows, SidebarRead, Unreached, Work,
+};
 use crate::ui::calendar::block::{EventKey, key_of};
 use crate::ui::calendar::range::{Range, ViewKind};
 use crate::ui::calendar::scope;
@@ -249,7 +251,12 @@ impl FakeWindow {
     }
 
     pub fn count(&self, step: Step) -> usize {
-        self.view.borrow().steps.iter().filter(|s| **s == step).count()
+        self.view
+            .borrow()
+            .steps
+            .iter()
+            .filter(|s| **s == step)
+            .count()
     }
 
     /// Holds the next call of `step` until the sender fires or drops.
@@ -261,7 +268,11 @@ impl FakeWindow {
 
     /// Runs `what` while the next call of `step` waits for its answer,
     /// after the call took what it answers with.
-    pub fn during(&self, step: Step, what: impl FnOnce(&Rc<FakeWindow>, &Rc<CalendarRun>) + 'static) {
+    pub fn during(
+        &self,
+        step: Step,
+        what: impl FnOnce(&Rc<FakeWindow>, &Rc<CalendarRun>) + 'static,
+    ) {
         self.with(|v| v.during.entry(step).or_default().push_back(Box::new(what)));
     }
 
@@ -280,18 +291,20 @@ impl FakeWindow {
     /// call nobody lets go of.
     pub async fn settle(&self) {
         let mut running: FuturesUnordered<Work> = FuturesUnordered::new();
-        let all = futures::future::poll_fn(|cx| loop {
-            let spawned = std::mem::take(&mut self.view.borrow_mut().spawned);
-            let spawned_any = !spawned.is_empty();
-            running.extend(spawned);
-            match running.poll_next_unpin(cx) {
-                Poll::Ready(Some(())) => continue,
-                Poll::Ready(None) if !spawned_any && self.view.borrow().spawned.is_empty() => {
-                    return Poll::Ready(());
+        let all = futures::future::poll_fn(|cx| {
+            loop {
+                let spawned = std::mem::take(&mut self.view.borrow_mut().spawned);
+                let spawned_any = !spawned.is_empty();
+                running.extend(spawned);
+                match running.poll_next_unpin(cx) {
+                    Poll::Ready(Some(())) => continue,
+                    Poll::Ready(None) if !spawned_any && self.view.borrow().spawned.is_empty() => {
+                        return Poll::Ready(());
+                    }
+                    Poll::Ready(None) => continue,
+                    Poll::Pending if !self.view.borrow().spawned.is_empty() => continue,
+                    Poll::Pending => return Poll::Pending,
                 }
-                Poll::Ready(None) => continue,
-                Poll::Pending if !self.view.borrow().spawned.is_empty() => continue,
-                Poll::Pending => return Poll::Pending,
             }
         });
         tokio::time::timeout(Duration::from_secs(5), all)
@@ -424,7 +437,11 @@ impl Effects for FakeWindow {
             .into_iter()
             .map(|account_id| Listed {
                 account_id,
-                calendars: vec![Calendar { id: "primary".to_string(), shown: true, ..Calendar::default() }],
+                calendars: vec![Calendar {
+                    id: "primary".to_string(),
+                    shown: true,
+                    ..Calendar::default()
+                }],
                 unlisted: Vec::new(),
             })
             .collect();
@@ -432,7 +449,11 @@ impl Effects for FakeWindow {
         self.answer(Step::Sidebar, Ok((listed, busy)))
     }
 
-    fn waiting(&self, _accounts: Vec<AccountId>, _now: EpochMillis) -> Answer<'_, Result<Vec<Waiting>, String>> {
+    fn waiting(
+        &self,
+        _accounts: Vec<AccountId>,
+        _now: EpochMillis,
+    ) -> Answer<'_, Result<Vec<Waiting>, String>> {
         let waiting = self.view.borrow().waiting.clone();
         self.answer(Step::Waiting, Ok(waiting))
     }
@@ -465,12 +486,20 @@ impl Effects for FakeWindow {
         self.answer(Step::Event, Ok(found))
     }
 
-    fn older_missing(&self, _accounts: Vec<AccountId>, _from: EpochMillis) -> Answer<'_, Result<bool, String>> {
+    fn older_missing(
+        &self,
+        _accounts: Vec<AccountId>,
+        _from: EpochMillis,
+    ) -> Answer<'_, Result<bool, String>> {
         let missing = self.view.borrow().older_missing;
         self.answer(Step::OlderMissing, Ok(missing))
     }
 
-    fn reach_back(&self, _accounts: Vec<AccountId>, _from: EpochMillis) -> Answer<'_, Result<(), Unreached>> {
+    fn reach_back(
+        &self,
+        _accounts: Vec<AccountId>,
+        _from: EpochMillis,
+    ) -> Answer<'_, Result<(), Unreached>> {
         let reach = self.view.borrow().reach.clone();
         self.answer(Step::ReachBack, reach)
     }
@@ -540,7 +569,13 @@ impl Effects for FakeWindow {
         self.with(|v| v.list = titles(&found));
     }
 
-    fn prepend_list(&self, found: Vec<Occurrence>, first: NaiveDate, _last: NaiveDate, _listed_from: EpochMillis) {
+    fn prepend_list(
+        &self,
+        found: Vec<Occurrence>,
+        first: NaiveDate,
+        _last: NaiveDate,
+        _listed_from: EpochMillis,
+    ) {
         self.record(Step::PrependList);
         self.with(|v| {
             let mut list = titles(&found);
@@ -610,7 +645,9 @@ impl Effects for FakeWindow {
         _undo: Undo,
     ) -> Answer<'_, Result<Permitted<Option<u64>>, String>> {
         let title = match &change {
-            EventChange::New(event) | EventChange::Edit { edited: event, .. } => event.title.clone(),
+            EventChange::New(event) | EventChange::Edit { edited: event, .. } => {
+                event.title.clone()
+            }
             EventChange::Remove(o) => o.event.title.clone(),
         };
         let written = self.with(|v| {

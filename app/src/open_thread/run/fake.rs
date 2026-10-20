@@ -702,7 +702,9 @@ impl Effects for FakeWindow {
             let _ = done.send(made);
         });
         Box::pin(async move {
-            let (worker, cleaned) = cleaned.await.unwrap_or_else(|_| (std::thread::current().id(), HashMap::new()));
+            let (worker, cleaned) = cleaned
+                .await
+                .unwrap_or_else(|_| (std::thread::current().id(), HashMap::new()));
             self.with(|screen| screen.cleaners.push(worker));
             cleaned
         })
@@ -844,9 +846,14 @@ impl Effects for FakeWindow {
         Box::pin(async move { Ok(found) })
     }
 
-    fn receipt_answered(&self, _account_id: AccountId, _message_id: String) -> Answer<'_, Result<bool, String>> {
+    fn receipt_answered(
+        &self,
+        _account_id: AccountId,
+        _message_id: String,
+    ) -> Answer<'_, Result<bool, String>> {
         self.reached(Step::ReceiptAnswered);
-        let (answered, held) = self.with(|screen| (screen.receipt_answered.clone(), screen.receipt_hold.take()));
+        let (answered, held) =
+            self.with(|screen| (screen.receipt_answered.clone(), screen.receipt_hold.take()));
         Box::pin(async move {
             if let Some(held) = held {
                 let _ = held.await;
@@ -855,7 +862,12 @@ impl Effects for FakeWindow {
         })
     }
 
-    fn answer_receipt(&self, _account_id: AccountId, message_id: String, send: bool) -> Answer<'_, Result<(), String>> {
+    fn answer_receipt(
+        &self,
+        _account_id: AccountId,
+        message_id: String,
+        send: bool,
+    ) -> Answer<'_, Result<(), String>> {
         self.reached(Step::AnswerReceipt);
         let answer = self.with(|screen| {
             screen.receipt_answers.push((message_id, send));
@@ -864,7 +876,11 @@ impl Effects for FakeWindow {
         Box::pin(async move { answer })
     }
 
-    fn sent_recipients(&self, _account_id: AccountId, rfc822_msgid: String) -> Answer<'_, Result<Vec<String>, String>> {
+    fn sent_recipients(
+        &self,
+        _account_id: AccountId,
+        rfc822_msgid: String,
+    ) -> Answer<'_, Result<Vec<String>, String>> {
         self.reached(Step::SentCopy);
         let recipients = self.with(|screen| {
             screen
@@ -929,9 +945,11 @@ impl Effects for FakeWindow {
         self.change(Step::ShowInvitation, |open| open.take_invitation_place(at));
         self.draw();
         self.with(|screen| {
-            screen
-                .invitations
-                .push(showing.as_ref().map(|showing| showing.invitation.uid.clone()));
+            screen.invitations.push(
+                showing
+                    .as_ref()
+                    .map(|showing| showing.invitation.uid.clone()),
+            );
             screen.off_calendar = showing.map(|showing| showing.invitation);
         });
     }
@@ -977,13 +995,17 @@ impl Effects for FakeWindow {
     }
 
     fn receipt_card(&self, card: ReceiptCard) {
-        self.change(Step::ReceiptCard, |open| open.take_receipt_card(card.clone()));
+        self.change(Step::ReceiptCard, |open| {
+            open.take_receipt_card(card.clone())
+        });
         self.with(|screen| screen.receipt_cards.push(card));
         self.draw();
     }
 
     fn report_checked(&self, message_id: String, sent: bool) {
-        self.change(Step::ReportChecked, |open| open.report_checked(message_id, sent));
+        self.change(Step::ReportChecked, |open| {
+            open.report_checked(message_id, sent)
+        });
         self.draw();
     }
 

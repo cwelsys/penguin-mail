@@ -2,31 +2,34 @@
 
 #[cfg(test)]
 mod accent_contrast;
-#[cfg(test)]
-mod text_contrast;
 mod add_account;
 mod app;
+#[cfg(any(feature = "packaging-appimage", test))]
+mod appimage;
 mod assistant;
 mod attachcheck;
 mod autostart;
+#[cfg(target_os = "macos")]
+mod bundle;
 mod clock_format;
 mod compose;
 mod contacts;
 mod core;
 mod dark_messages;
 mod demo;
+mod diff;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod drive;
-mod diff;
 mod event_reminders;
 mod exe;
 mod format;
-mod icon_theme;
 mod goa;
+mod icon_theme;
 mod images;
 mod keyring_plug;
 mod language;
 mod language_names;
+mod link_safety;
 mod locale_time;
 mod logging;
 mod notify;
@@ -37,9 +40,9 @@ mod packaging;
 mod permission;
 mod pgp;
 mod photos;
+mod protection;
 mod quoted;
 mod recent;
-mod protection;
 mod render;
 mod richtext;
 mod rules;
@@ -47,10 +50,12 @@ mod sanitize;
 mod search;
 mod servers;
 mod settings;
-mod starting;
 mod smime;
+mod starting;
 mod stray_markdown;
 mod templates;
+#[cfg(test)]
+mod text_contrast;
 mod translation;
 mod tray;
 mod ui;
@@ -60,8 +65,6 @@ mod unsubscribe_page;
 mod update;
 mod wanted;
 mod web;
-#[cfg(target_os = "macos")]
-mod bundle;
 
 use std::cell::RefCell;
 use std::ffi::OsString;
@@ -107,6 +110,8 @@ fn usage() -> String {
 }
 
 fn main() -> glib::ExitCode {
+    #[cfg(feature = "packaging-appimage")]
+    appimage::prepare().expect("could not prepare the AppImage");
     #[cfg(target_os = "macos")]
     bundle::prepare().expect("could not prepare the application bundle");
     // On macOS this has to come before GTK starts; see `web`.
@@ -135,7 +140,10 @@ fn main() -> glib::ExitCode {
     // calendar file's name in an old encoding. The flags read the lossy
     // copy; the file keeps its bytes.
     let raw_args: Vec<OsString> = std::env::args_os().collect();
-    let args: Vec<String> = raw_args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let args: Vec<String> = raw_args
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     // Claude Code starts this binary as the assistant's MCP server. It only
     // relays tool calls to the running window, so it needs no GTK.
     if args.get(1).map(String::as_str) == Some("--mcp-bridge") {
@@ -198,9 +206,7 @@ fn main() -> glib::ExitCode {
 
     // Wayland and X11 name the window after the program; matching the
     // desktop entry lets the dock show the right icon.
-    glib::set_prgname(Some(if demo { DEMO_ID } else {
-        APP_ID
-    }));
+    glib::set_prgname(Some(if demo { DEMO_ID } else { APP_ID }));
     #[cfg(target_os = "macos")]
     glib::set_application_name(&gettext("Penguin Mail"));
     // Linux starts GTK only when a window is needed. macOS needs
@@ -231,10 +237,22 @@ fn main() -> glib::ExitCode {
     gio_app.connect_startup(move |gio_app| {
         gio::resources_register_include!("penguin-mail.gresource")
             .expect("the resources are built into the binary");
+        #[cfg(feature = "packaging-appimage")]
+        if let sandbox @ (appimage::Sandbox::Missing | appimage::Sandbox::Blocked { .. }) =
+            appimage::sandbox()
+        {
+            ui::sandbox_setup::present(gio_app, &sandbox);
+            return;
+        }
         match core::Core::open(demo) {
             Ok(core) => {
-                *started.borrow_mut() =
-                    Some(app::App::new(gio_app, core, background, compose.clone(), file.clone()))
+                *started.borrow_mut() = Some(app::App::new(
+                    gio_app,
+                    core,
+                    background,
+                    compose.clone(),
+                    file.clone(),
+                ))
             }
             Err(err) => {
                 let report = err.downcast_ref::<core::StoreNotUpdated>().is_some();
@@ -258,7 +276,13 @@ fn main() -> glib::ExitCode {
     // The MCP servers live in a static, which nothing drops, and a stdio
     // server would outlive the app without this.
     match finished.borrow().as_ref() {
-        Some(app) => app.before_leaving(),
+        Some(app) => {
+            app.before_leaving();
+            // Only the copy that ran the app; one that handed its launch to
+            // it leaves the files that copy runs from.
+            #[cfg(feature = "packaging-appimage")]
+            appimage::leave();
+        }
         None => assistant::sources::mcp::registry().stop_all(),
     }
     code
@@ -322,6 +346,10 @@ pub fn ensure_gtk() {
     }
     gtk::init().expect("GTK starts on this display");
     adw::init().expect("libadwaita starts");
+    #[cfg(feature = "packaging-appimage")]
+    if let Some(context) = webkit::WebContext::default() {
+        context.add_path_to_sandbox(appimage::root().expect("AppImage root is configured"), true);
+    }
     if let Some(display) = gdk::Display::default() {
         let icons = gtk::IconTheme::for_display(&display);
         icons.add_resource_path("/io/github/c9dev/PenguinMail/icons");
@@ -395,7 +423,10 @@ mod tests {
     use super::{calendar_file, mailto_recipient, path_from_variant};
 
     fn args(list: &[&str]) -> Vec<OsString> {
-        std::iter::once("penguin-mail").chain(list.iter().copied()).map(OsString::from).collect()
+        std::iter::once("penguin-mail")
+            .chain(list.iter().copied())
+            .map(OsString::from)
+            .collect()
     }
 
     /// The folder the launch was typed in.
@@ -416,8 +447,14 @@ mod tests {
     fn a_relative_calendar_file_is_found_from_where_the_launch_was_typed() {
         // The running copy opens the path from its own folder, so a bare
         // name would point at a file that is not there.
-        assert_eq!(file(&["invite.ics"]), Some(PathBuf::from("/home/ann/Downloads/invite.ics")));
-        assert_eq!(file(&["./trips/invite.ics"]), Some(PathBuf::from("/home/ann/Downloads/trips/invite.ics")));
+        assert_eq!(
+            file(&["invite.ics"]),
+            Some(PathBuf::from("/home/ann/Downloads/invite.ics"))
+        );
+        assert_eq!(
+            file(&["./trips/invite.ics"]),
+            Some(PathBuf::from("/home/ann/Downloads/trips/invite.ics"))
+        );
     }
 
     #[test]

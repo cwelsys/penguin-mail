@@ -15,8 +15,8 @@ mod outgoing;
 mod receipts;
 mod rules;
 mod search;
-mod storage;
 mod send_later;
+mod storage;
 mod vacation;
 mod watch;
 mod writes;
@@ -45,11 +45,26 @@ pub(crate) async fn fastmail() -> Harness {
 pub(crate) async fn over(fake: FakeJmap) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("mail.db")).unwrap();
-    let account_id = db.write(|c| accounts::insert_account(c, "me@example.com", 0)).await.unwrap();
+    let account_id = db
+        .write(|c| accounts::insert_account(c, "me@example.com", 0))
+        .await
+        .unwrap();
     let fake = Arc::new(fake);
     let (sender, events) = async_channel::unbounded();
-    let sync = Arc::new(AccountSync::new(account_id, AccountServices::fake_jmap(Arc::clone(&fake)), db.clone(), sender));
-    Harness { fake, sync, db, events, account_id, _dir: dir }
+    let sync = Arc::new(AccountSync::new(
+        account_id,
+        AccountServices::fake_jmap(Arc::clone(&fake)),
+        db.clone(),
+        sender,
+    ));
+    Harness {
+        fake,
+        sync,
+        db,
+        events,
+        account_id,
+        _dir: dir,
+    }
 }
 
 /// A second install of the app on the same account: its own store, the
@@ -57,11 +72,26 @@ pub(crate) async fn over(fake: FakeJmap) -> Harness {
 pub(crate) async fn beside(first: &Harness) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("mail.db")).unwrap();
-    let account_id = db.write(|c| accounts::insert_account(c, "me@example.com", 0)).await.unwrap();
+    let account_id = db
+        .write(|c| accounts::insert_account(c, "me@example.com", 0))
+        .await
+        .unwrap();
     let fake = Arc::clone(&first.fake);
     let (sender, events) = async_channel::unbounded();
-    let sync = Arc::new(AccountSync::new(account_id, AccountServices::fake_jmap(Arc::clone(&fake)), db.clone(), sender));
-    Harness { fake, sync, db, events, account_id, _dir: dir }
+    let sync = Arc::new(AccountSync::new(
+        account_id,
+        AccountServices::fake_jmap(Arc::clone(&fake)),
+        db.clone(),
+        sender,
+    ));
+    Harness {
+        fake,
+        sync,
+        db,
+        events,
+        account_id,
+        _dir: dir,
+    }
 }
 
 /// A message to the account, dated now.
@@ -89,12 +119,21 @@ impl Harness {
 
     pub async fn stored(&self, id: &str) -> bool {
         let (account, wanted) = (self.account_id, vec![id.to_string()]);
-        self.db.read(move |c| messages::existing_ids(c, account, &wanted)).await.unwrap().contains(id)
+        self.db
+            .read(move |c| messages::existing_ids(c, account, &wanted))
+            .await
+            .unwrap()
+            .contains(id)
     }
 
     pub async fn held(&self, id: &str) -> Memberships {
         let (account, wanted) = (self.account_id, vec![id.to_string()]);
-        self.db.read(move |c| messages::memberships_of(c, account, &wanted)).await.unwrap().remove(id).unwrap_or_default()
+        self.db
+            .read(move |c| messages::memberships_of(c, account, &wanted))
+            .await
+            .unwrap()
+            .remove(id)
+            .unwrap_or_default()
     }
 
     pub fn drain(&self) -> Vec<ChangeEvent> {

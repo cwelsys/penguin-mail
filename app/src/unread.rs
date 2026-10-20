@@ -284,7 +284,9 @@ async fn run<C: Counter + 'static, P: Future<Output = ()>>(
         // Whatever else this turn of the main loop asks joins this count.
         pause(Duration::ZERO).await;
         let Some(unread) = weak.upgrade() else { return };
-        let Some(mut ask) = unread.take() else { continue };
+        let Some(mut ask) = unread.take() else {
+            continue;
+        };
         if ask.refresh {
             let now = Instant::now();
             if refreshed.is_some_and(|at| now < at + REFRESH_GAP) {

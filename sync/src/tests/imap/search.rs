@@ -33,9 +33,7 @@ async fn search_hits_open_under_their_local_threads() {
         );
         h.imap.deliver_flagged(
             "Archive",
-            &message(
-                "reply", "Re: Kites", "References: <parent@example.com>\r\n",
-            ),
+            &message("reply", "Re: Kites", "References: <parent@example.com>\r\n"),
             &["\\Seen"],
             days_ago(400),
         );
@@ -48,7 +46,8 @@ async fn search_hits_open_under_their_local_threads() {
         h.bootstrap().await;
         assert_eq!(h.ids().await.len(), usize::from(cached_parent));
 
-        let searched = h.sync
+        let searched = h
+            .sync
             .search_listing(&SearchQuery::Native("subject:kites".into()), 10)
             .await
             .unwrap();
@@ -63,10 +62,10 @@ async fn search_hits_open_under_their_local_threads() {
             for row in rows {
                 h.sync.open_thread(&row.id).await.unwrap();
                 let account_id = h.account_id;
-                let stored = h.db
-                    .read(move |c| messages::thread_messages(c, account_id, &row.id))
-                    .await
-                    .unwrap();
+                let stored =
+                    h.db.read(move |c| messages::thread_messages(c, account_id, &row.id))
+                        .await
+                        .unwrap();
                 if row.subject == "Kites receipt" {
                     assert_eq!(stored.len(), 1);
                 } else {
@@ -76,6 +75,57 @@ async fn search_hits_open_under_their_local_threads() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn junk_and_trash_list_messages_the_sync_window_does_not_hold() {
+    for (folder, mailbox, expected) in [
+        (Folder::Junk, "Junk", "Junk/1005/1"),
+        (Folder::Trash, "Trash", "Trash/1004/1"),
+    ] {
+        for age in [1, 400] {
+            let h = imap_harness().await;
+            h.imap.deliver_flagged(
+                mailbox,
+                &message("outside", "A message outside sync", ""),
+                &[],
+                days_ago(age),
+            );
+            h.bootstrap().await;
+            assert!(h.ids().await.is_empty());
+
+            let listing = h
+                .sync
+                .search_listing(&SearchQuery::Tree(folder.query()), 10)
+                .await
+                .unwrap();
+            assert!(!listing.store_only);
+            assert_eq!(ids(&listing.refs), [expected]);
+            let rows = h.sync.metadata_of(&listing.refs).await.unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].subject, "A message outside sync");
+        }
+    }
+}
+
+#[tokio::test]
+async fn archive_listings_keep_the_stored_sync_window() {
+    let h = imap_harness().await;
+    for (id, age) in [("recent", 1), ("old", 400)] {
+        h.imap.deliver_flagged(
+            "Archive",
+            &message(id, "Archived mail", ""),
+            &[],
+            days_ago(age),
+        );
+    }
+    h.bootstrap().await;
+    let listing = h
+        .sync
+        .search_listing(&SearchQuery::Tree(Folder::Archive.query()), 10)
+        .await
+        .unwrap();
+    assert_eq!(ids(&listing.refs), ["Archive/1006/1"]);
 }
 
 #[tokio::test]
@@ -250,7 +300,12 @@ async fn a_typed_search_the_server_cannot_run_lists_from_this_computer_and_says_
     };
 
     let listing = lists
-        .list(&search, &Scope::over(signed_in), &view, Loaded::nothing())
+        .list(
+            &search,
+            &Scope::of_mail_accounts(&signed_in),
+            &view,
+            Loaded::nothing(),
+        )
         .await
         .unwrap();
 
@@ -272,7 +327,7 @@ async fn listings(h: &crate::tests::ImapHarness) -> (Mailboxes<Connected>, Scope
         )]))),
         h.db.clone(),
     );
-    (lists, Scope::over(signed_in))
+    (lists, Scope::of_mail_accounts(&signed_in))
 }
 
 /// IMAP has no key for "in no Inbox, Sent, Drafts, Junk or Trash", so the

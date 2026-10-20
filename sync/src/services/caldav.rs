@@ -9,18 +9,24 @@
 //! schedules (`calendar-auto-schedule`) then mails the organizer itself;
 //! one that does not gets the iTIP REPLY from the account's mail adapter,
 //! and the attendee line carries `SCHEDULE-AGENT=CLIENT` so a later
-//! server upgrade does not send a second one. The adapter never opens the
-//! store.
+//! server upgrade does not send a second one. A calendar account has no
+//! mail to carry that REPLY: its answer is saved and nobody is told.
+//! `tells_organizer` says so, and the window passes it on. The adapter
+//! never opens the store.
+//!
+//! Who the account is on an event comes from its mail address. An
+//! account without one asks the server, whose principal lists the
+//! addresses invitations name it by.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use mailrs_dav::ids::{path_of, resource_href, resource_id};
 use mailrs_dav::{DavApi, DavError, Fetched, Kind, MULTIGET_BATCH, Precondition, ical};
+use mailrs_domain::EpochMillis;
 use mailrs_domain::calendar::{self as model, Access, Notify, split_occurrence_id};
 use mailrs_domain::invitation::Answer;
 use mailrs_domain::translate::gettext;
-use mailrs_domain::EpochMillis;
 
 use super::dav_read::{Reads, TOKEN_CTAG, TOKEN_SYNC, backend};
 use super::{AnyMail, CalendarService};
@@ -43,7 +49,10 @@ pub struct CalDav<D> {
     /// The account's mail, which carries the REPLY of a server that does
     /// not schedule.
     mail: AnyMail,
+    /// The addresses the account was handed. Empty for a calendar
+    /// account, which learns them from the server instead.
     me: Arc<Vec<String>>,
+    discovered: Arc<Mutex<Discovered>>,
     reads: Arc<Mutex<Reads>>,
     written: Arc<Mutex<VecDeque<(String, String)>>>,
     refused: Arc<Mutex<Option<String>>>,
@@ -59,6 +68,7 @@ impl<D> Clone for CalDav<D> {
             api: Arc::clone(&self.api),
             mail: self.mail.clone(),
             me: Arc::clone(&self.me),
+            discovered: Arc::clone(&self.discovered),
             reads: Arc::clone(&self.reads),
             written: Arc::clone(&self.written),
             refused: Arc::clone(&self.refused),
@@ -66,6 +76,15 @@ impl<D> Clone for CalDav<D> {
             listed: Arc::clone(&self.listed),
         }
     }
+}
+
+/// What the server has said about the account, each part once asked.
+#[derive(Default)]
+struct Discovered {
+    /// The addresses the server's principal goes by.
+    addresses: Option<Arc<Vec<String>>>,
+    /// Whether the server mails a guest's answer itself.
+    schedules: Option<bool>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -81,7 +100,9 @@ fn range_key(calendar: &str) -> String {
 /// The name a resource gets for an imported UID: letters, digits and
 /// hyphens, so no server or path rule can object.
 fn id_for_uid(uid: &str) -> String {
-    uid.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    uid.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn refused(err: DavError) -> BackendError {
@@ -94,6 +115,7 @@ impl<D: DavApi> CalDav<D> {
             api,
             mail,
             me: Arc::new(me),
+            discovered: Arc::default(),
             reads: Arc::default(),
             written: Arc::default(),
             refused: Arc::default(),
@@ -111,8 +133,54 @@ impl<D: DavApi> CalDav<D> {
         backend(err, &self.refused)
     }
 
+    /// Whether an answer to an invitation reaches its organizer: always
+    /// with mail to send the REPLY, and otherwise only once the server has
+    /// said it sends the REPLY itself. Before the first calendar read, or
+    /// from a server that does not answer the question, the window warns
+    /// that nobody will hear: a note typed for an organizer who never
+    /// gets it would look sent.
+    pub fn tells_organizer(&self) -> bool {
+        self.mail.serves_mail() || locked(&self.discovered).schedules.unwrap_or(false)
+    }
+
+    /// The addresses the account goes by on an event: the ones it was
+    /// handed, or what the server's principal lists, asked for once.
+    async fn me(&self) -> Result<Arc<Vec<String>>, BackendError> {
+        if !self.me.is_empty() {
+            return Ok(Arc::clone(&self.me));
+        }
+        if let Some(learned) = locked(&self.discovered).addresses.clone() {
+            return Ok(learned);
+        }
+        let homes = self.api.homes().await.map_err(|e| self.err(e))?;
+        Ok(self.learn(homes.addresses))
+    }
+
+    fn learn(&self, addresses: Vec<String>) -> Arc<Vec<String>> {
+        let learned = Arc::new(addresses);
+        locked(&self.discovered).addresses = Some(Arc::clone(&learned));
+        learned
+    }
+
+    /// Whether the server mails a guest's answer itself, remembered for
+    /// `tells_organizer`. An account with mail asks at the server's
+    /// address, as it always has: where the server says nothing there the
+    /// account mails the answer itself, which works on any server. An
+    /// account with no mail has only the server to carry an answer, so it
+    /// asks at `calendar`, a calendar or the calendar home, where RFC 6638
+    /// has a server say that it schedules. Nextcloud says so there and
+    /// not at its address.
+    async fn server_schedules(&self, calendar: &str) -> Result<bool, BackendError> {
+        let at = (!self.mail.serves_mail()).then_some(calendar);
+        let schedules = self.api.auto_schedule(at).await.map_err(|e| self.err(e))?;
+        locked(&self.discovered).schedules = Some(schedules);
+        Ok(schedules)
+    }
+
     fn wrote(&self, href: &str, etag: &str) -> bool {
-        locked(&self.written).iter().any(|(h, e)| path_of(h) == path_of(href) && e == etag)
+        locked(&self.written)
+            .iter()
+            .any(|(h, e)| path_of(h) == path_of(href) && e == etag)
     }
 
     fn remember(&self, href: &str, etag: &str) {
@@ -127,14 +195,21 @@ impl<D: DavApi> CalDav<D> {
     /// adapter wrote since.
     fn current(&self, href: &str, held: Option<&str>, now: &str) -> Result<(), BackendError> {
         match held {
-            Some(held) if !held.is_empty() && held != now && !self.wrote(href, now) => Err(BackendError::Changed),
+            Some(held) if !held.is_empty() && held != now && !self.wrote(href, now) => {
+                Err(BackendError::Changed)
+            }
             _ => Ok(()),
         }
     }
 
     /// What the first page of a read lists: hrefs to fetch, hrefs gone,
     /// and the token after.
-    async fn listing(&self, calendar: &str, token: Option<&str>, from: EpochMillis) -> Result<(Vec<String>, Vec<String>, String), BackendError> {
+    async fn listing(
+        &self,
+        calendar: &str,
+        token: Option<&str>,
+        from: EpochMillis,
+    ) -> Result<(Vec<String>, Vec<String>, String), BackendError> {
         match token {
             Some(t) if t.starts_with(TOKEN_SYNC) => {
                 let (mut changed, mut removed) = (Vec::new(), Vec::new());
@@ -168,39 +243,75 @@ impl<D: DavApi> CalDav<D> {
             Some(_) => Err(BackendError::StateLost),
             None => {
                 let state = self.api.state(calendar).await.map_err(|e| self.err(e))?;
-                let members = self.api.members(calendar, Kind::Calendar, Some((from, i64::MAX))).await.map_err(|e| self.err(e))?;
+                let members = self
+                    .api
+                    .members(calendar, Kind::Calendar, Some((from, i64::MAX)))
+                    .await
+                    .map_err(|e| self.err(e))?;
                 let reads_sync = !locked(&self.no_sync).contains(calendar);
                 let token = match (state.sync_token, reads_sync) {
                     (Some(sync), true) => format!("{TOKEN_SYNC}{sync}"),
                     _ => format!("{TOKEN_CTAG}{}", state.ctag.unwrap_or_default()),
                 };
-                Ok((members.into_iter().map(|m| m.href).collect(), Vec::new(), token))
+                Ok((
+                    members.into_iter().map(|m| m.href).collect(),
+                    Vec::new(),
+                    token,
+                ))
             }
         }
     }
 
     /// The next batch of the read waiting under `key`. `with_token` ends
     /// the last page with the read's sync token; a range read has none.
-    async fn page(&self, key: &str, calendar: &str, serial: u64, with_token: bool) -> Result<model::EventPage, BackendError> {
-        let taken = locked(&self.reads).take(key, serial, MULTIGET_BATCH).ok_or(BackendError::StateLost)?;
+    async fn page(
+        &self,
+        key: &str,
+        calendar: &str,
+        serial: u64,
+        with_token: bool,
+    ) -> Result<model::EventPage, BackendError> {
+        let taken = locked(&self.reads)
+            .take(key, serial, MULTIGET_BATCH)
+            .ok_or(BackendError::StateLost)?;
         let fetched = match taken.hrefs.is_empty() {
             true => Vec::new(),
-            false => self.api.fetch(calendar, Kind::Calendar, &taken.hrefs).await.map_err(|e| self.err(e))?,
+            false => self
+                .api
+                .fetch(calendar, Kind::Calendar, &taken.hrefs)
+                .await
+                .map_err(|e| self.err(e))?,
         };
+        let me = self.me().await?;
         let mut page = model::EventPage::default();
         let found: HashSet<String> = fetched.iter().map(|f| path_of(&f.href)).collect();
         for resource in fetched {
-            match ical::read_resource(&resource.body, calendar, &resource.href, &resource.etag, &self.me) {
+            match ical::read_resource(
+                &resource.body,
+                calendar,
+                &resource.href,
+                &resource.etag,
+                &me,
+            ) {
                 Ok(read) => {
                     page.whole_series.extend(read.series);
                     page.events.extend(read.events);
                 }
-                Err(err) => tracing::warn!(href = %resource.href, %err, "skipped a calendar resource Penguin Mail cannot read"),
+                Err(err) => {
+                    tracing::warn!(href = %resource.href, %err, "skipped a calendar resource Penguin Mail cannot read")
+                }
             }
         }
         // A member listed and gone before the fetch has gone.
-        page.removed.extend(taken.hrefs.iter().filter(|h| !found.contains(&path_of(h))).map(|h| resource_id(h)));
-        page.removed.extend(taken.removed.iter().map(|h| resource_id(h)));
+        page.removed.extend(
+            taken
+                .hrefs
+                .iter()
+                .filter(|h| !found.contains(&path_of(h)))
+                .map(|h| resource_id(h)),
+        );
+        page.removed
+            .extend(taken.removed.iter().map(|h| resource_id(h)));
         match taken.last {
             true => page.next_sync = with_token.then_some(taken.token),
             false => page.next_page = Some(serial.to_string()),
@@ -210,14 +321,29 @@ impl<D: DavApi> CalDav<D> {
 
     /// `id` as the event the copy keeps, read out of a resource just
     /// written.
-    fn read_back(&self, calendar: &str, href: &str, etag: &str, body: &str, id: &str) -> Result<model::Event, BackendError> {
-        let read = ical::read_resource(body, calendar, href, etag, &self.me).map_err(refused)?;
-        read.events.into_iter().find(|e| e.id == id).ok_or(BackendError::NotFound)
+    fn read_back(
+        &self,
+        calendar: &str,
+        href: &str,
+        etag: &str,
+        body: &str,
+        id: &str,
+        me: &[String],
+    ) -> Result<model::Event, BackendError> {
+        let read = ical::read_resource(body, calendar, href, etag, me).map_err(refused)?;
+        read.events
+            .into_iter()
+            .find(|e| e.id == id)
+            .ok_or(BackendError::NotFound)
     }
 
     /// The etag after a PUT, from the answer or, when the server did not
     /// say, from a GET.
-    async fn etag_after(&self, href: &str, answered: Option<String>) -> Result<String, BackendError> {
+    async fn etag_after(
+        &self,
+        href: &str,
+        answered: Option<String>,
+    ) -> Result<String, BackendError> {
         match answered {
             Some(etag) => Ok(etag),
             None => Ok(self.api.get(href).await.map_err(|e| self.err(e))?.etag),
@@ -225,8 +351,17 @@ impl<D: DavApi> CalDav<D> {
     }
 
     /// PUTs `body` at `href` and answers the etag it now has, remembered.
-    async fn write(&self, href: &str, body: &str, when: Precondition) -> Result<String, BackendError> {
-        let answered = self.api.put(href, body, Kind::Calendar, when).await.map_err(|e| self.err(e))?;
+    async fn write(
+        &self,
+        href: &str,
+        body: &str,
+        when: Precondition,
+    ) -> Result<String, BackendError> {
+        let answered = self
+            .api
+            .put(href, body, Kind::Calendar, when)
+            .await
+            .map_err(|e| self.err(e))?;
         let etag = self.etag_after(href, answered).await?;
         self.remember(href, &etag);
         Ok(etag)
@@ -237,24 +372,46 @@ impl<D: DavApi> CalDav<D> {
     /// DELETE or a move would otherwise make the server mail a
     /// cancellation, and DavApi sends no `Schedule-Reply` header to stop
     /// it. Any other `notify` leaves the resource as it is.
-    async fn silenced(&self, calendar: &str, current: Fetched, notify: Notify) -> Result<Fetched, BackendError> {
+    async fn silenced(
+        &self,
+        calendar: &str,
+        current: Fetched,
+        notify: Notify,
+    ) -> Result<Fetched, BackendError> {
         if notify != Notify::Nobody {
             return Ok(current);
         }
-        let Ok(read) = ical::read_resource(&current.body, calendar, &current.href, &current.etag, &self.me) else {
+        let me = self.me().await?;
+        let Ok(read) =
+            ical::read_resource(&current.body, calendar, &current.href, &current.etag, &me)
+        else {
             return Ok(current);
         };
         let Some(master) = read.events.into_iter().find(|e| e.series.is_none()) else {
             return Ok(current);
         };
-        let text = ical::write_event_notifying(Some(&current.body), &master, &self.me, crate::now_millis(), Notify::Nobody).map_err(refused)?;
+        let text = ical::write_event_notifying(
+            Some(&current.body),
+            &master,
+            &me,
+            crate::now_millis(),
+            Notify::Nobody,
+        )
+        .map_err(refused)?;
         // The writer rewrites a file in its own layout, so only a new
         // SCHEDULE-AGENT line is worth a PUT.
-        if text.matches("SCHEDULE-AGENT").count() <= current.body.matches("SCHEDULE-AGENT").count() {
+        if text.matches("SCHEDULE-AGENT").count() <= current.body.matches("SCHEDULE-AGENT").count()
+        {
             return Ok(current);
         }
-        let etag = self.write(&current.href, &text, Precondition::Match(current.etag)).await?;
-        Ok(Fetched { href: current.href, etag, body: text })
+        let etag = self
+            .write(&current.href, &text, Precondition::Match(current.etag))
+            .await?;
+        Ok(Fetched {
+            href: current.href,
+            etag,
+            body: text,
+        })
     }
 
     /// Marks the answer on the resource `found` and, on a server that
@@ -272,20 +429,34 @@ impl<D: DavApi> CalDav<D> {
         note: Option<&str>,
     ) -> Result<Option<model::Event>, BackendError> {
         let mut who = vec![me.to_string()];
-        who.extend(self.me.iter().cloned());
-        let schedules = self.api.auto_schedule().await.map_err(|e| self.err(e))?;
+        who.extend(self.me().await?.iter().cloned());
+        let schedules = self.server_schedules(calendar).await?;
+        // Without mail the answer is never the client's to send, so the
+        // server is not told to leave it: one that schedules though it
+        // did not say so still carries it.
+        let by_server = schedules || !self.mail.serves_mail();
         let now = crate::now_millis();
         let written = match occurrence {
-            Some(original) => ical::answer_occurrence(&found.body, &who, answer, original, now, schedules),
-            None => ical::answer_scheduled(&found.body, &who, answer, now, schedules),
+            Some(original) => {
+                ical::answer_occurrence(&found.body, &who, answer, original, now, by_server)
+            }
+            None => ical::answer_scheduled(&found.body, &who, answer, now, by_server),
         };
         let Some(text) = written.map_err(refused)? else {
             return Ok(None);
         };
-        let etag = self.write(&found.href, &text, Precondition::Match(found.etag)).await?;
-        let read = ical::read_resource(&text, calendar, &found.href, &etag, &who).map_err(refused)?;
+        let etag = self
+            .write(&found.href, &text, Precondition::Match(found.etag))
+            .await?;
+        let read =
+            ical::read_resource(&text, calendar, &found.href, &etag, &who).map_err(refused)?;
         let master = read.events.iter().find(|e| e.series.is_none()).cloned();
-        if !schedules && let Some(master) = &master {
+        // Without mail nothing can carry the REPLY. The answer stays on
+        // the calendar, and `tells_organizer` now says nobody heard it.
+        if !schedules
+            && self.mail.serves_mail()
+            && let Some(master) = &master
+        {
             mail::tell_organizer(&self.mail, master, me, answer, occurrence, note, now).await?;
         }
         let event = read.events.into_iter().find(|e| e.id == id).or(master);
@@ -296,8 +467,25 @@ impl<D: DavApi> CalDav<D> {
 impl<D: DavApi> CalendarService for CalDav<D> {
     async fn calendars(&self) -> Result<Vec<model::Calendar>, BackendError> {
         let homes = self.api.homes().await.map_err(|e| self.err(e))?;
+        if self.me.is_empty() {
+            // Each read of the list brings the addresses again, so one
+            // changed on the server is picked up without a restart.
+            self.learn(homes.addresses);
+        }
         let home = homes.calendar.ok_or(BackendError::Unsupported)?;
-        let found = self.api.collections(&home, Kind::Calendar).await.map_err(|e| self.err(e))?;
+        let found = self
+            .api
+            .collections(&home, Kind::Calendar)
+            .await
+            .map_err(|e| self.err(e))?;
+        // The window says before an answer whether its organizer will
+        // hear of it, which only an account without mail has to ask. A
+        // server that does not say is taken to send nothing.
+        if !self.mail.serves_mail() {
+            let _ = self.server_schedules(&home).await;
+        }
+        // The list was read, so the login was taken, whatever the server
+        // made of the question after it.
         *locked(&self.refused) = None;
         let home_path = path_of(&home);
         let calendars: Vec<model::Calendar> = found
@@ -309,7 +497,11 @@ impl<D: DavApi> CalendarService for CalDav<D> {
                     (true, false) => Access::Writer,
                     (false, _) => Access::Reader,
                 },
-                zone: c.timezone.as_deref().and_then(ical::calendar_zone).unwrap_or_default(),
+                zone: c
+                    .timezone
+                    .as_deref()
+                    .and_then(ical::calendar_zone)
+                    .unwrap_or_default(),
                 color: c.color.unwrap_or_else(|| DEFAULT_COLOR.to_string()),
                 name: c.name,
                 id: c.href,
@@ -324,7 +516,13 @@ impl<D: DavApi> CalendarService for CalDav<D> {
         Ok(calendars)
     }
 
-    async fn event_changes(&self, calendar: &str, token: Option<&str>, page: Option<&str>, from: EpochMillis) -> Result<model::EventPage, BackendError> {
+    async fn event_changes(
+        &self,
+        calendar: &str,
+        token: Option<&str>,
+        page: Option<&str>,
+        from: EpochMillis,
+    ) -> Result<model::EventPage, BackendError> {
         if let Some(page) = page {
             let serial = page.parse().map_err(|_| BackendError::StateLost)?;
             return self.page(calendar, calendar, serial, true).await;
@@ -334,34 +532,66 @@ impl<D: DavApi> CalendarService for CalDav<D> {
         self.page(calendar, calendar, serial, true).await
     }
 
-    async fn event_range(&self, calendar: &str, from: EpochMillis, to: EpochMillis, page: Option<&str>) -> Result<model::EventPage, BackendError> {
+    async fn event_range(
+        &self,
+        calendar: &str,
+        from: EpochMillis,
+        to: EpochMillis,
+        page: Option<&str>,
+    ) -> Result<model::EventPage, BackendError> {
         let key = range_key(calendar);
         if let Some(page) = page {
             let serial = page.parse().map_err(|_| BackendError::StateLost)?;
             return self.page(&key, calendar, serial, false).await;
         }
-        let members = self.api.members(calendar, Kind::Calendar, Some((from, to))).await.map_err(|e| self.err(e))?;
-        let serial = locked(&self.reads).start(&key, members.into_iter().map(|m| m.href).collect(), Vec::new(), String::new());
+        let members = self
+            .api
+            .members(calendar, Kind::Calendar, Some((from, to)))
+            .await
+            .map_err(|e| self.err(e))?;
+        let serial = locked(&self.reads).start(
+            &key,
+            members.into_iter().map(|m| m.href).collect(),
+            Vec::new(),
+            String::new(),
+        );
         self.page(&key, calendar, serial, false).await
     }
 
-    async fn put_event(&self, event: &model::Event, etag: Option<&str>, create: bool, notify: Notify) -> Result<model::Event, BackendError> {
+    async fn put_event(
+        &self,
+        event: &model::Event,
+        etag: Option<&str>,
+        create: bool,
+        notify: Notify,
+    ) -> Result<model::Event, BackendError> {
         let owner = event.series.as_deref().unwrap_or(&event.id);
         let href = resource_href(&event.calendar, owner);
         let now = crate::now_millis();
+        let me = self.me().await?;
         if create && event.series.is_none() {
-            let body = ical::write_event_notifying(None, event, &self.me, now, notify).map_err(refused)?;
+            let body =
+                ical::write_event_notifying(None, event, &me, now, notify).map_err(refused)?;
             let etag = self.write(&href, &body, Precondition::NoneMatch).await?;
-            return self.read_back(&event.calendar, &href, &etag, &body, &event.id);
+            return self.read_back(&event.calendar, &href, &etag, &body, &event.id, &me);
         }
         let current = self.api.get(&href).await.map_err(|e| self.err(e))?;
         self.current(&href, etag, &current.etag)?;
-        let body = ical::write_event_notifying(Some(&current.body), event, &self.me, now, notify).map_err(refused)?;
-        let etag = self.write(&href, &body, Precondition::Match(current.etag)).await?;
-        self.read_back(&event.calendar, &href, &etag, &body, &event.id)
+        let body = ical::write_event_notifying(Some(&current.body), event, &me, now, notify)
+            .map_err(refused)?;
+        let etag = self
+            .write(&href, &body, Precondition::Match(current.etag))
+            .await?;
+        self.read_back(&event.calendar, &href, &etag, &body, &event.id, &me)
     }
 
-    async fn remove_event(&self, calendar: &str, id: &str, etag: Option<&str>, notify: Notify) -> Result<(), BackendError> {
+    async fn remove_event(
+        &self,
+        calendar: &str,
+        id: &str,
+        etag: Option<&str>,
+        notify: Notify,
+    ) -> Result<(), BackendError> {
         let now = crate::now_millis();
         if let Some((series, original)) = split_occurrence_id(id) {
             let href = resource_href(calendar, series);
@@ -370,57 +600,114 @@ impl<D: DavApi> CalendarService for CalDav<D> {
             let current = self.silenced(calendar, current, notify).await?;
             return match ical::cancel_occurrence(&current.body, original, now).map_err(refused)? {
                 Some(text) => {
-                    self.write(&href, &text, Precondition::Match(current.etag)).await?;
+                    self.write(&href, &text, Precondition::Match(current.etag))
+                        .await?;
                     Ok(())
                 }
-                None => self.api.delete(&href, Some(&current.etag)).await.map_err(|e| self.err(e)),
+                None => self
+                    .api
+                    .delete(&href, Some(&current.etag))
+                    .await
+                    .map_err(|e| self.err(e)),
             };
         }
         let href = resource_href(calendar, id);
         let current = self.api.get(&href).await.map_err(|e| self.err(e))?;
         self.current(&href, etag, &current.etag)?;
         let current = self.silenced(calendar, current, notify).await?;
-        self.api.delete(&href, Some(&current.etag)).await.map_err(|e| self.err(e))
+        self.api
+            .delete(&href, Some(&current.etag))
+            .await
+            .map_err(|e| self.err(e))
     }
 
     async fn import_event(&self, event: &model::Event) -> Result<model::Event, BackendError> {
         if event.uid.trim().is_empty() {
-            return Err(BackendError::Refused(gettext("An event needs an ID to be imported.")));
+            return Err(BackendError::Refused(gettext(
+                "An event needs an ID to be imported.",
+            )));
         }
         let now = crate::now_millis();
-        match self.api.find_uid(&event.calendar, &event.uid).await.map_err(|e| self.err(e))? {
+        let me = self.me().await?;
+        match self
+            .api
+            .find_uid(&event.calendar, &event.uid)
+            .await
+            .map_err(|e| self.err(e))?
+        {
             Some(found) => {
                 let id = resource_id(&found.href);
-                let body = ical::write_event_notifying(Some(&found.body), &model::Event { id: id.clone(), ..event.clone() }, &self.me, now, Notify::Nobody).map_err(refused)?;
-                let etag = self.write(&found.href, &body, Precondition::Match(found.etag)).await?;
-                self.read_back(&event.calendar, &found.href, &etag, &body, &id)
+                let body = ical::write_event_notifying(
+                    Some(&found.body),
+                    &model::Event {
+                        id: id.clone(),
+                        ..event.clone()
+                    },
+                    &me,
+                    now,
+                    Notify::Nobody,
+                )
+                .map_err(refused)?;
+                let etag = self
+                    .write(&found.href, &body, Precondition::Match(found.etag))
+                    .await?;
+                self.read_back(&event.calendar, &found.href, &etag, &body, &id, &me)
             }
             None => {
-                let id = if event.id.is_empty() { id_for_uid(&event.uid) } else { event.id.clone() };
+                let id = if event.id.is_empty() {
+                    id_for_uid(&event.uid)
+                } else {
+                    event.id.clone()
+                };
                 let href = resource_href(&event.calendar, &id);
-                let body = ical::write_event_notifying(None, &model::Event { id: id.clone(), ..event.clone() }, &self.me, now, Notify::Nobody).map_err(refused)?;
+                let body = ical::write_event_notifying(
+                    None,
+                    &model::Event {
+                        id: id.clone(),
+                        ..event.clone()
+                    },
+                    &me,
+                    now,
+                    Notify::Nobody,
+                )
+                .map_err(refused)?;
                 let etag = self.write(&href, &body, Precondition::NoneMatch).await?;
-                self.read_back(&event.calendar, &href, &etag, &body, &id)
+                self.read_back(&event.calendar, &href, &etag, &body, &id, &me)
             }
         }
     }
 
-    async fn upload_attachment(&self, _file: &model::Attachment, _sent: Arc<std::sync::atomic::AtomicU64>) -> Result<model::Attachment, BackendError> {
-        Err(BackendError::Refused(gettext("A CalDAV calendar cannot store attached files.")))
+    async fn upload_attachment(
+        &self,
+        _file: &model::Attachment,
+        _sent: Arc<std::sync::atomic::AtomicU64>,
+    ) -> Result<model::Attachment, BackendError> {
+        Err(BackendError::Refused(gettext(
+            "A CalDAV calendar cannot store attached files.",
+        )))
     }
 
     async fn share_file(&self, _file_id: &str, _email: &str) -> Result<(), BackendError> {
-        Err(BackendError::Refused(gettext("A CalDAV calendar has no files to share.")))
+        Err(BackendError::Refused(gettext(
+            "A CalDAV calendar has no files to share.",
+        )))
     }
 
-    async fn move_event(&self, event: &model::Event, destination: &str, notify: Notify) -> Result<model::Event, BackendError> {
+    async fn move_event(
+        &self,
+        event: &model::Event,
+        destination: &str,
+        notify: Notify,
+    ) -> Result<model::Event, BackendError> {
         let owner = event.series.as_deref().unwrap_or(&event.id);
         let from = resource_href(&event.calendar, owner);
         let current = self.api.get(&from).await.map_err(|e| self.err(e))?;
         self.current(&from, Some(&event.etag), &current.etag)?;
         let current = self.silenced(&event.calendar, current, notify).await?;
         let to = resource_href(destination, owner);
-        let etag = self.write(&to, &current.body, Precondition::NoneMatch).await?;
+        let etag = self
+            .write(&to, &current.body, Precondition::NoneMatch)
+            .await?;
         if let Err(err) = self.api.delete(&from, Some(&current.etag)).await {
             // Half a move would leave the event on both calendars and
             // every retry refused, so the copy at the destination goes.
@@ -429,21 +716,45 @@ impl<D: DavApi> CalendarService for CalDav<D> {
             }
             return Err(self.err(err));
         }
-        self.read_back(destination, &to, &etag, &current.body, owner)
+        self.read_back(
+            destination,
+            &to,
+            &etag,
+            &current.body,
+            owner,
+            &self.me().await?,
+        )
     }
 
-    async fn answer_event(&self, calendar: &str, id: &str, me: &str, answer: Answer, note: Option<&str>) -> Result<model::Event, BackendError> {
+    async fn answer_event(
+        &self,
+        calendar: &str,
+        id: &str,
+        me: &str,
+        answer: Answer,
+        note: Option<&str>,
+    ) -> Result<model::Event, BackendError> {
         let (owner, occurrence) = match split_occurrence_id(id) {
             Some((series, original)) => (series, Some(original)),
             None => (id, None),
         };
-        let found = self.api.get(&resource_href(calendar, owner)).await.map_err(|e| self.err(e))?;
+        let found = self
+            .api
+            .get(&resource_href(calendar, owner))
+            .await
+            .map_err(|e| self.err(e))?;
         self.answer_in(calendar, found, id, me, answer, occurrence, note)
             .await?
             .ok_or_else(|| BackendError::Refused(gettext("You are not a guest of this event.")))
     }
 
-    async fn edit_list(&self, _calendar: &str, _edit: &model::list::ListEdit) -> Result<Option<model::Calendar>, BackendError> {
-        Err(BackendError::Refused(gettext("Penguin Mail cannot change the calendar list of a CalDAV server.")))
+    async fn edit_list(
+        &self,
+        _calendar: &str,
+        _edit: &model::list::ListEdit,
+    ) -> Result<Option<model::Calendar>, BackendError> {
+        Err(BackendError::Refused(gettext(
+            "Penguin Mail cannot change the calendar list of a CalDAV server.",
+        )))
     }
 }

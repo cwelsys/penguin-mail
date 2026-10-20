@@ -372,8 +372,9 @@ impl Host {
         }
         let webview = self.webview.clone();
         let root = self.overlay.root();
-        self.webview
-            .eval(&format!("window.mailrsLeaveCard({backward})"), move |done| {
+        self.webview.eval(
+            &format!("window.mailrsLeaveCard({backward})"),
+            move |done| {
                 if done.is_ok_and(|value| value == "moved") {
                     webview.grab_focus();
                 } else if let Some(root) = root {
@@ -381,7 +382,8 @@ impl Host {
                     // to whatever follows the conversation.
                     root.child_focus(direction);
                 }
-            });
+            },
+        );
         glib::Propagation::Stop
     }
 }

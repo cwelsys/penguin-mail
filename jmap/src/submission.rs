@@ -85,7 +85,11 @@ pub struct EnvelopeAddress {
 impl SubmissionState {
     /// The addresses the server sends it to.
     pub fn recipients(&self) -> Vec<String> {
-        self.envelope.iter().flat_map(|e| &e.rcpt_to).map(|a| a.email.clone()).collect()
+        self.envelope
+            .iter()
+            .flat_map(|e| &e.rcpt_to)
+            .map(|a| a.email.clone())
+            .collect()
     }
 }
 
@@ -137,7 +141,11 @@ fn one(answer: Created, key: &str) -> Result<Value, JmapError> {
 }
 
 fn string(value: &Value, key: &str) -> String {
-    value.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// The `id` a created object came back with.
@@ -178,14 +186,18 @@ impl JmapClient {
         let sender = submission_account(&session)?;
         let mail = self.mail_account().await?;
         let mut request = Request::new();
-        let import = request.call(MAIL, "Email/import", json!({
-            "accountId": mail,
-            "emails": { "m": {
-                "blobId": hold.blob_id,
-                "mailboxIds": { hold.drafts.clone(): true },
-                "keywords": { "$draft": true, "$seen": true, HELD: true }
-            } }
-        }));
+        let import = request.call(
+            MAIL,
+            "Email/import",
+            json!({
+                "accountId": mail,
+                "emails": { "m": {
+                    "blobId": hold.blob_id,
+                    "mailboxIds": { hold.drafts.clone(): true },
+                    "keywords": { "$draft": true, "$seen": true, HELD: true }
+                } }
+            }),
+        );
         let rcpt: Vec<Value> = hold.rcpt_to.iter().map(|a| json!({ "email": a })).collect();
         let submitted = request.call(SUBMISSION, "EmailSubmission/set", json!({
             "accountId": sender,
@@ -201,7 +213,13 @@ impl JmapClient {
         let mut answer = self.send(&request).await.map_err(unknown_if_sent)?;
         // An answer that is no clear refusal may follow a hold the server
         // made, and the look for it reads the copy in Drafts.
-        let unclear = |e: JmapError| if refused_outright(&e) { e } else { JmapError::HoldUnknown };
+        let unclear = |e: JmapError| {
+            if refused_outright(&e) {
+                e
+            } else {
+                JmapError::HoldUnknown
+            }
+        };
         let made: Created = answer.take(&import, "Email/import").map_err(unclear)?;
         // A refused import leaves `#m` naming nothing, so nothing went.
         if let Some(refused) = made.not_created.as_ref().and_then(|n| n.get("m")) {
@@ -215,14 +233,24 @@ impl JmapClient {
                 Some(refused) => refused.error(),
                 None => {
                     let made = one(set, "s").and_then(|created| id_of(&created, "the submission"));
-                    return made.map(|id| HeldSubmission { id, email_id, thread_id }).map_err(unclear);
+                    return made
+                        .map(|id| HeldSubmission {
+                            id,
+                            email_id,
+                            thread_id,
+                        })
+                        .map_err(unclear);
                 }
             },
             Err(error) if refused_outright(&error) => error,
             Err(_) => return Err(JmapError::HoldUnknown),
         };
         // Nothing will go out, so the copy must not wait in Drafts.
-        if self.set_emails(&Map::new(), std::slice::from_ref(&email_id)).await.is_err() {
+        if self
+            .set_emails(&Map::new(), std::slice::from_ref(&email_id))
+            .await
+            .is_err()
+        {
             tracing::warn!("could not remove the Drafts copy of a hold the server refused");
         }
         Err(refused)
@@ -251,9 +279,13 @@ impl JmapClient {
         let session = self.session().await?;
         let account = submission_account(&session)?;
         let mut request = Request::new();
-        let asked = request.call(SUBMISSION, "EmailSubmission/query", json!({
-            "accountId": account, "filter": { "emailIds": [email_id] }
-        }));
+        let asked = request.call(
+            SUBMISSION,
+            "EmailSubmission/query",
+            json!({
+                "accountId": account, "filter": { "emailIds": [email_id] }
+            }),
+        );
         let mut answer = self.send(&request).await?;
         Ok(answer.take::<Ids>(&asked, "EmailSubmission/query")?.ids)
     }
@@ -273,9 +305,13 @@ impl JmapClient {
         let session = self.session().await?;
         let account = submission_account(&session)?;
         let mut request = Request::new();
-        let set = request.call(SUBMISSION, "EmailSubmission/set", json!({
-            "accountId": account, "update": { id: { "undoStatus": "canceled" } }
-        }));
+        let set = request.call(
+            SUBMISSION,
+            "EmailSubmission/set",
+            json!({
+                "accountId": account, "update": { id: { "undoStatus": "canceled" } }
+            }),
+        );
         let mut answer = self.send(&request).await?;
         let said: Updated = answer.take(&set, "EmailSubmission/set")?;
         if let Some(refused) = said.not_updated.as_ref().and_then(|n| n.get(id)) {
@@ -288,13 +324,20 @@ impl JmapClient {
         match said.updated.as_ref().is_some_and(|u| u.contains_key(id)) {
             true => Ok(Canceled::Canceled),
             // James answers neither; it never calls a hold back.
-            false => Err(JmapError::Decode("the server said nothing about the cancel".into())),
+            false => Err(JmapError::Decode(
+                "the server said nothing about the cancel".into(),
+            )),
         }
     }
 
     /// Moves a hold the server sent from Drafts to Sent, and takes off
     /// `$draft` and [`HELD`].
-    pub async fn file_held(&self, email_id: &str, drafts: &str, sent: &str) -> Result<(), JmapError> {
+    pub async fn file_held(
+        &self,
+        email_id: &str,
+        drafts: &str,
+        sent: &str,
+    ) -> Result<(), JmapError> {
         let mut patch = Map::new();
         patch.insert(format!("mailboxIds/{}", pointer(drafts)), Value::Null);
         patch.insert(format!("mailboxIds/{}", pointer(sent)), json!(true));
@@ -311,7 +354,11 @@ impl JmapClient {
         self.patch_email(email_id, patch).await
     }
 
-    async fn patch_email(&self, email_id: &str, patch: Map<String, Value>) -> Result<(), JmapError> {
+    async fn patch_email(
+        &self,
+        email_id: &str,
+        patch: Map<String, Value>,
+    ) -> Result<(), JmapError> {
         let mut update = Map::new();
         update.insert(email_id.to_string(), Value::Object(patch));
         let answer = self.set_emails(&update, &[]).await?;

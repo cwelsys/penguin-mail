@@ -19,7 +19,8 @@ fn with_file(message_id: &str) -> Vec<u8> {
 }
 
 fn downloads(h: &super::Harness) -> usize {
-    h.fake.with(|s| s.calls.iter().filter(|c| *c == "download").count())
+    h.fake
+        .with(|s| s.calls.iter().filter(|c| *c == "download").count())
 }
 
 #[tokio::test]
@@ -41,7 +42,9 @@ async fn a_message_past_the_cap_says_it_is_too_large() {
         s.oversized.insert(blob);
     });
     match h.mail().fetch_raw(&[id]).await {
-        Err(crate::BackendError::Refused(said)) => assert_eq!(said, "This message is too large to open."),
+        Err(crate::BackendError::Refused(said)) => {
+            assert_eq!(said, "This message is too large to open.")
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -51,13 +54,28 @@ async fn a_message_past_the_cap_says_it_is_too_large() {
 #[tokio::test]
 async fn raw_messages_asked_together_share_one_budget() {
     let h = fastmail().await;
-    let ids: Vec<String> = (0..2).map(|n| h.fake.deliver("inbox", &raw(&format!("b{n}@x"), "Budget"), 1_000)).collect();
+    let ids: Vec<String> = (0..2)
+        .map(|n| {
+            h.fake
+                .deliver("inbox", &raw(&format!("b{n}@x"), "Budget"), 1_000)
+        })
+        .collect();
     assert_eq!(h.mail().fetch_raw(&ids).await.unwrap().len(), 2);
-    let many: Vec<String> = (0..12).map(|n| h.fake.deliver("inbox", &raw(&format!("m{n}@x"), "Budget"), 1_000)).collect();
+    let many: Vec<String> = (0..12)
+        .map(|n| {
+            h.fake
+                .deliver("inbox", &raw(&format!("m{n}@x"), "Budget"), 1_000)
+        })
+        .collect();
     let one = raw("m0@x", "Budget").len();
-    assert!(one * many.len() > crate::services::jmap::RAWS_BUDGET, "the test messages must pass the budget together");
+    assert!(
+        one * many.len() > crate::services::jmap::RAWS_BUDGET,
+        "the test messages must pass the budget together"
+    );
     match h.mail().fetch_raw(&many).await {
-        Err(crate::BackendError::Refused(said)) => assert_eq!(said, "This message is too large to open."),
+        Err(crate::BackendError::Refused(said)) => {
+            assert_eq!(said, "This message is too large to open.")
+        }
         other => panic!("{:?}", other.map(|r| r.len())),
     }
 }
@@ -69,7 +87,10 @@ async fn a_structure_carries_the_text_and_leaves_the_file_on_the_server() {
     let parts = h.mail().fetch_structure(&id).await.unwrap();
     assert!(!parts.incomplete);
     assert_eq!(parts.header("Subject"), Some("Report"));
-    assert_eq!(parts.find("1").unwrap().data.as_deref(), Some(&b"See the report."[..]));
+    assert_eq!(
+        parts.find("1").unwrap().data.as_deref(),
+        Some(&b"See the report."[..])
+    );
     let file = parts.find("2").unwrap();
     assert!(file.attachment);
     assert_eq!(file.filename.as_deref(), Some("report.pdf"));
@@ -84,14 +105,21 @@ async fn a_file_comes_alone_by_its_part_path() {
     assert_eq!(h.mail().fetch_part(&id, "2").await.unwrap(), b"Hello PDF");
     let before = downloads(&h);
     assert_eq!(h.mail().fetch_part(&id, "2").await.unwrap(), b"Hello PDF");
-    assert_eq!(downloads(&h) - before, 1, "the second read reuses the remembered blob id");
+    assert_eq!(
+        downloads(&h) - before,
+        1,
+        "the second read reuses the remembered blob id"
+    );
 }
 
 #[tokio::test]
 async fn a_part_the_message_lacks_is_not_found() {
     let h = fastmail().await;
     let id = h.fake.deliver("inbox", &with_file("p2@x"), 1_000);
-    assert!(matches!(h.mail().fetch_part(&id, "9").await, Err(crate::BackendError::NotFound)));
+    assert!(matches!(
+        h.mail().fetch_part(&id, "9").await,
+        Err(crate::BackendError::NotFound)
+    ));
 }
 
 #[tokio::test]
@@ -108,14 +136,27 @@ async fn a_text_part_that_fails_to_download_marks_the_structure_incomplete() {
 
 #[test]
 fn parts_take_imap_section_numbers() {
-    let leaf = |t: &str, blob: &str| BodyPart { mime_type: t.into(), blob_id: Some(blob.into()), size: 5, ..BodyPart::default() };
+    let leaf = |t: &str, blob: &str| BodyPart {
+        mime_type: t.into(),
+        blob_id: Some(blob.into()),
+        size: 5,
+        ..BodyPart::default()
+    };
     let alternative = BodyPart {
         mime_type: "multipart/alternative".into(),
         sub_parts: Some(vec![leaf("text/plain", "B1"), leaf("text/html", "B2")]),
         ..BodyPart::default()
     };
-    let file = BodyPart { disposition: Some("attachment".into()), name: Some("a.pdf".into()), ..leaf("application/pdf", "B3") };
-    let root = BodyPart { mime_type: "multipart/mixed".into(), sub_parts: Some(vec![alternative, file]), ..BodyPart::default() };
+    let file = BodyPart {
+        disposition: Some("attachment".into()),
+        name: Some("a.pdf".into()),
+        ..leaf("application/pdf", "B3")
+    };
+    let root = BodyPart {
+        mime_type: "multipart/mixed".into(),
+        sub_parts: Some(vec![alternative, file]),
+        ..BodyPart::default()
+    };
     let part = numbered(&root);
     assert_eq!(part.path, "");
     assert_eq!(part.children[0].children[1].path, "1.2");
@@ -144,12 +185,23 @@ async fn a_conversation_exports_its_messages_in_one_batch() {
     let thread = h.fake.with(|s| s.emails[&first].thread_id.clone());
     let mut one_by_one = Vec::new();
     for id in &ids {
-        let raw = h.mail().fetch_raw(std::slice::from_ref(id)).await.unwrap().remove(0);
+        let raw = h
+            .mail()
+            .fetch_raw(std::slice::from_ref(id))
+            .await
+            .unwrap()
+            .remove(0);
         crate::export::append(&mut one_by_one, &raw.bytes);
     }
-    let gets = |h: &super::Harness| h.fake.with(|s| s.calls.iter().filter(|c| *c == "Email/get").count());
+    let gets = |h: &super::Harness| {
+        h.fake
+            .with(|s| s.calls.iter().filter(|c| *c == "Email/get").count())
+    };
     let before = gets(&h);
     let mbox = h.sync.export_mbox(&thread, None).await.unwrap();
-    assert_eq!(String::from_utf8(mbox).unwrap(), String::from_utf8(one_by_one).unwrap());
+    assert_eq!(
+        String::from_utf8(mbox).unwrap(),
+        String::from_utf8(one_by_one).unwrap()
+    );
     assert_eq!(gets(&h) - before, 1, "one for every message's blob");
 }

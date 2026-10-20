@@ -47,12 +47,31 @@ mod tests {
 
     #[test]
     fn a_forward_is_a_new_message_that_carries_the_original_whole() {
-        let original = b"From: news@example.com\r\nTo: me@example.com\r\nSubject: Hello\r\n\r\nBody.\r\n";
-        let sent = forwarded(original, "me@example.com", "you@example.org", 1_700_000_000_000).unwrap();
+        let original =
+            b"From: news@example.com\r\nTo: me@example.com\r\nSubject: Hello\r\n\r\nBody.\r\n";
+        let sent = forwarded(
+            original,
+            "me@example.com",
+            "you@example.org",
+            1_700_000_000_000,
+        )
+        .unwrap();
         let parsed = mail_parser::MessageParser::default().parse(&sent).unwrap();
         assert_eq!(parsed.subject(), Some("Fwd: Hello"));
-        assert_eq!(parsed.from().and_then(|f| f.first()).and_then(|a| a.address()), Some("me@example.com"));
-        assert_eq!(parsed.to().and_then(|f| f.first()).and_then(|a| a.address()), Some("you@example.org"));
+        assert_eq!(
+            parsed
+                .from()
+                .and_then(|f| f.first())
+                .and_then(|a| a.address()),
+            Some("me@example.com")
+        );
+        assert_eq!(
+            parsed
+                .to()
+                .and_then(|f| f.first())
+                .and_then(|a| a.address()),
+            Some("you@example.org")
+        );
         assert!(String::from_utf8_lossy(&sent).contains("message/rfc822"));
         assert!(is_forward(&sent) && !is_forward(original));
     }

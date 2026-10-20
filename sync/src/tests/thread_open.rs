@@ -63,7 +63,8 @@ async fn bodies_are_fetched_once_then_served_from_the_cache() {
 async fn bodies_of_unstored_messages_are_not_cached() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("x".into(), meta("x", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("x".into(), meta("x", "t1", 1, &["INBOX"]));
         s.bodies.insert("x".into(), MessageBody::default());
     });
     h.sync.body("x").await.unwrap();
@@ -184,15 +185,16 @@ async fn opening_a_thread_keeps_a_change_history_brought_while_gmail_answered() 
     let mut held = h.fake.hold("users.threads.get");
     let opening = h.sync.ensure_thread("t1");
     // Gmail read the thread with the message still in the inbox, then the
-    // message was archived and a replay stored that before the answer came.
+    // message was archived. The replay that carries the archive waits for
+    // the answer to be stored, so it lands on top of it.
     let meanwhile = async {
         held.entered().await;
         h.fake.remote_relabel("a", &[], &["INBOX"]);
-        h.sync.incremental().await.unwrap();
         held.release();
     };
     let (opened, ()) = tokio::join!(opening, meanwhile);
     opened.unwrap();
+    h.sync.incremental().await.unwrap();
     assert_eq!(h.labels_of("a").await, Vec::<String>::new());
 }
 
@@ -200,7 +202,7 @@ async fn opening_a_thread_keeps_a_change_history_brought_while_gmail_answered() 
 async fn list_trash(h: &super::Harness) -> Vec<String> {
     let connected = HashMap::from([(h.account_id, Arc::clone(&h.sync))]);
     let lists = Mailboxes::new(Arc::new(super::Connected(connected)), h.db.clone());
-    let scope = Scope::over([Account {
+    let scope = Scope::of_mail_accounts(&[Account {
         id: h.account_id,
         email: "me@example.com".into(),
         state: AccountState::Ok,
@@ -316,7 +318,8 @@ async fn the_body_cache_keeps_to_its_cap() {
 async fn opening_a_body_then_its_file_asks_gmail_once() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert(
             "m1".into(),
             MessageBody {
@@ -332,12 +335,16 @@ async fn opening_a_body_then_its_file_asks_gmail_once() {
                 ..MessageBody::default()
             },
         );
-        s.attachments.insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
+        s.attachments
+            .insert(("m1".into(), "h1".into()), vec![1, 2, 3]);
     });
     h.sync.ensure_thread("t1").await.unwrap();
     let body = h.sync.body("m1").await.unwrap();
     let path = body.attachments[0].attachment_id.clone().unwrap();
     assert_eq!(path, crate::fake::attachment_path(0));
     assert_eq!(h.sync.attachment("m1", &path).await.unwrap(), vec![1, 2, 3]);
-    assert_eq!(h.fake.with(|s| (s.raw_fetches, s.structure_fetches)), (1, 0));
+    assert_eq!(
+        h.fake.with(|s| (s.raw_fetches, s.structure_fetches)),
+        (1, 0)
+    );
 }

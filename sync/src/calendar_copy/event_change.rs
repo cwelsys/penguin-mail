@@ -21,7 +21,11 @@ pub enum EventChange {
     /// `occurrence` becomes `edited`: an edit in the editor, a drag or a
     /// keyboard nudge, or the assistant's change. `edited` on another
     /// calendar of the account moves the event there.
-    Edit { occurrence: Occurrence, edited: Event, how: Edit },
+    Edit {
+        occurrence: Occurrence,
+        edited: Event,
+        how: Edit,
+    },
     /// Takes `occurrence` off the calendar. For a guest of someone else's
     /// event, only the guest's own copy goes.
     Remove(Occurrence),
@@ -144,7 +148,11 @@ pub fn has_other_guests(guests: &[Guest]) -> bool {
 
 /// Whether `after` holds an address `before` does not.
 pub fn adds_guests(before: &[Guest], after: &[Guest]) -> bool {
-    after.iter().any(|a| !before.iter().any(|b| b.email.eq_ignore_ascii_case(&a.email)))
+    after.iter().any(|a| {
+        !before
+            .iter()
+            .any(|b| b.email.eq_ignore_ascii_case(&a.email))
+    })
 }
 
 /// The question for `action` on an event with `guests`, offering
@@ -154,7 +162,12 @@ pub fn adds_guests(before: &[Guest], after: &[Guest]) -> bool {
 /// guests; any other edit only when it repeats. A change that adds guests
 /// tells every guest without a choice, since the new ones need their
 /// invitation.
-pub fn question(action: Action, scopes: &[RepeatScope], guests: &[Guest], facts: Facts) -> Option<Question> {
+pub fn question(
+    action: Action,
+    scopes: &[RepeatScope],
+    guests: &[Guest],
+    facts: Facts,
+) -> Option<Question> {
     let question = whole_question(action, scopes, guests, facts);
     let needed = match action {
         Action::Move => true,
@@ -166,7 +179,12 @@ pub fn question(action: Action, scopes: &[RepeatScope], guests: &[Guest], facts:
 }
 
 /// Every part of the question, whether or not anything needs asking.
-fn whole_question(action: Action, scopes: &[RepeatScope], guests: &[Guest], facts: Facts) -> Question {
+fn whole_question(
+    action: Action,
+    scopes: &[RepeatScope],
+    guests: &[Guest],
+    facts: Facts,
+) -> Question {
     let seen = action != Action::Edit || facts.seen;
     let guests_hear = action != Action::Answer && has_other_guests(guests) && seen;
     Question {
@@ -194,7 +212,14 @@ impl Question {
 /// cannot send nothing, so it says `Guests`.
 pub fn unasked(action: Action, facts: Facts) -> Choice {
     let quiet = action == Action::Edit && !facts.seen && !facts.always_mails;
-    Choice { scope: None, notify: if quiet { Notify::Nobody } else { Notify::Guests } }
+    Choice {
+        scope: None,
+        notify: if quiet {
+            Notify::Nobody
+        } else {
+            Notify::Guests
+        },
+    }
 }
 
 /// What to ask before `change`, on an account that mails the guests of
@@ -218,15 +243,33 @@ pub fn confirmation(change: &EventChange, always_mails: bool) -> Question {
 /// What the question rule reads from `change`: the action, the scopes on
 /// offer, the guests who may hear of it, and the facts.
 fn read(change: &EventChange, always_mails: bool) -> (Action, Vec<RepeatScope>, &[Guest], Facts) {
-    let base = Facts { always_mails, ..Facts::default() };
+    let base = Facts {
+        always_mails,
+        ..Facts::default()
+    };
     match change {
         // Every guest of a new event is new, and gets their invitation.
-        EventChange::New(event) => {
-            (Action::Edit, Vec::new(), &event.guests, Facts { seen: true, adds_guests: true, ..base })
-        }
-        EventChange::Edit { occurrence, edited, how } => {
+        EventChange::New(event) => (
+            Action::Edit,
+            Vec::new(),
+            &event.guests,
+            Facts {
+                seen: true,
+                adds_guests: true,
+                ..base
+            },
+        ),
+        EventChange::Edit {
+            occurrence,
+            edited,
+            how,
+        } => {
             let before = &occurrence.event;
-            let action = if how.moves { Action::Move } else { Action::Edit };
+            let action = if how.moves {
+                Action::Move
+            } else {
+                Action::Edit
+            };
             let facts = Facts {
                 seen: how.seen,
                 adds_guests: adds_guests(&before.guests, &edited.guests),
@@ -242,13 +285,23 @@ fn read(change: &EventChange, always_mails: bool) -> (Action, Vec<RepeatScope>, 
                 (false, true) => &before.guests,
                 (false, false) => &edited.guests,
             };
-            (action, edit_scopes(before, edited, how.rule_changed), guests, facts)
+            (
+                action,
+                edit_scopes(before, edited, how.rule_changed),
+                guests,
+                facts,
+            )
         }
         EventChange::Remove(occurrence) => {
             let event = &occurrence.event;
             // A guest's removal takes only their own copy.
             let guests: &[Guest] = if event.limited() { &[] } else { &event.guests };
-            (Action::Delete, own_scopes(event, series::scopes(event, false)), guests, base)
+            (
+                Action::Delete,
+                own_scopes(event, series::scopes(event, false)),
+                guests,
+                base,
+            )
         }
     }
 }
@@ -259,7 +312,10 @@ fn read(change: &EventChange, always_mails: bool) -> (Action, Vec<RepeatScope>, 
 fn edit_scopes(before: &Event, edited: &Event, rule_changed: bool) -> Vec<RepeatScope> {
     let offered = series::scopes(before, rule_changed);
     if edited.calendar != before.calendar {
-        return offered.into_iter().filter(|s| *s == RepeatScope::All).collect();
+        return offered
+            .into_iter()
+            .filter(|s| *s == RepeatScope::All)
+            .collect();
     }
     own_scopes(before, offered)
 }
@@ -268,7 +324,10 @@ fn edit_scopes(before: &Event, edited: &Event, rule_changed: bool) -> Vec<Repeat
 /// else's series: it would start a new series the guest organizes.
 fn own_scopes(event: &Event, offered: Vec<RepeatScope>) -> Vec<RepeatScope> {
     match event.limited() {
-        true => offered.into_iter().filter(|s| *s != RepeatScope::Following).collect(),
+        true => offered
+            .into_iter()
+            .filter(|s| *s != RepeatScope::Following)
+            .collect(),
         false => offered,
     }
 }
@@ -290,7 +349,11 @@ fn forced(event: Option<&Event>, quiet_changes: bool, chosen: Notify) -> Notify 
 impl<A: Accounts> CalendarCopy<A> {
     /// What to ask the person before `change` is written on `account_id`,
     /// or the choice it takes when nothing needs asking.
-    pub fn ask_before(&self, account_id: AccountId, change: &EventChange) -> Result<Ask, SyncError> {
+    pub fn ask_before(
+        &self,
+        account_id: AccountId,
+        change: &EventChange,
+    ) -> Result<Ask, SyncError> {
         Ok(asking(change, !self.quiet_changes(account_id)?))
     }
 
@@ -309,24 +372,49 @@ impl<A: Accounts> CalendarCopy<A> {
     ) -> Result<Permitted<Changed>, SyncError> {
         let quiet = self.quiet_changes(account_id)?;
         let (steps, notify) = match change {
-            EventChange::New(event) => (vec![Step::Save(event)], forced(None, quiet, choice.notify)),
-            EventChange::Edit { occurrence, edited, how } => {
+            EventChange::New(event) => {
+                (vec![Step::Save(event)], forced(None, quiet, choice.notify))
+            }
+            EventChange::Edit {
+                occurrence,
+                edited,
+                how,
+            } => {
                 // An edit the guests would not notice tells nobody, also
                 // when the person answered only which occurrences it covers.
-                let chosen = if how.moves || how.seen { choice.notify } else { Notify::Nobody };
+                let chosen = if how.moves || how.seen {
+                    choice.notify
+                } else {
+                    Notify::Nobody
+                };
                 let notify = forced(Some(&occurrence.event), quiet, chosen);
-                (self.change_steps(account_id, &occurrence, edited, choice.scope).await?, notify)
+                (
+                    self.change_steps(account_id, &occurrence, edited, choice.scope)
+                        .await?,
+                    notify,
+                )
             }
             EventChange::Remove(occurrence) => {
                 let notify = forced(Some(&occurrence.event), quiet, choice.notify);
-                (self.delete_steps(account_id, &occurrence, choice.scope).await?, notify)
+                (
+                    self.delete_steps(account_id, &occurrence, choice.scope)
+                        .await?,
+                    notify,
+                )
             }
         };
         let written = match undo {
-            Undo::Offer => self.hold_with(account_id, steps, notify).await?.done().map(Changed::Held),
+            Undo::Offer => self
+                .hold_with(account_id, steps, notify)
+                .await?
+                .done()
+                .map(Changed::Held),
             Undo::Skip => {
                 let queued = steps.clone();
-                self.apply_with(account_id, steps, notify).await?.done().map(|()| Changed::Queued(queued))
+                self.apply_with(account_id, steps, notify)
+                    .await?
+                    .done()
+                    .map(|()| Changed::Queued(queued))
             }
         };
         Ok(written.map_or(Permitted::NeedsPermission, Permitted::Done))

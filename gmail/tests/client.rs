@@ -894,7 +894,10 @@ async fn an_answer_over_the_json_cap_is_refused_not_read_whole() {
     let padding = "x".repeat(17 << 20);
     Mock::given(method("GET"))
         .and(path(format!("{API}/profile")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"emailAddress": padding, "historyId": "1"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"emailAddress": padding, "historyId": "1"})),
+        )
         .mount(&server)
         .await;
     let err = client(&server).profile().await.unwrap_err();
@@ -923,5 +926,8 @@ async fn a_photo_under_the_cap_comes_back_whole() {
         .mount(&server)
         .await;
     let url = format!("{}/photo", server.uri());
-    assert_eq!(client(&server).contact_photo(&url).await.unwrap().len(), 100_000);
+    assert_eq!(
+        client(&server).contact_photo(&url).await.unwrap().len(),
+        100_000
+    );
 }

@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use mailrs_dav::fake::FakeDav;
 use mailrs_dav::Kind;
+use mailrs_dav::fake::FakeDav;
 use mailrs_domain::calendar::list::ListEdit;
 use mailrs_domain::calendar::{Access, Attachment, Event, Notify, occurrence_id};
 use mailrs_domain::invitation::Answer;
@@ -25,7 +25,12 @@ async fn adapter() -> (Arc<FakeDav>, Arc<FakeSmtp>, Adapter) {
     let dav = Arc::new(FakeDav::new());
     dav.add_collection(WORK, Kind::Calendar, "Work", Some("#3a87ad"));
     let smtp = Arc::new(FakeSmtp::default());
-    let mail = AccountServices::imap(Arc::new(FakeImap::new()), Arc::clone(&smtp), fake_settings()).mail;
+    let mail = AccountServices::imap(
+        Arc::new(FakeImap::new()),
+        Arc::clone(&smtp),
+        fake_settings(),
+    )
+    .mail;
     mail.mailboxes().await.unwrap();
     let caldav = CalDav::new(Arc::clone(&dav), mail, vec![ME.to_string()]);
     (dav, smtp, caldav)
@@ -42,7 +47,10 @@ fn series_ics(uid: &str, title: &str) -> String {
 
 /// The same series, organized by someone else who expects an answer.
 fn invitation_ics(uid: &str, title: &str) -> String {
-    series_ics(uid, title).replace("ATTENDEE;", &format!("ORGANIZER:mailto:{BOSS}\r\nATTENDEE;"))
+    series_ics(uid, title).replace(
+        "ATTENDEE;",
+        &format!("ORGANIZER:mailto:{BOSS}\r\nATTENDEE;"),
+    )
 }
 
 fn one_off_ics(uid: &str, title: &str) -> String {
@@ -69,7 +77,9 @@ async fn read_all(caldav: &Adapter, token: Option<&str>) -> Result<Read, Backend
     let (mut events, mut removed, mut whole) = (Vec::new(), Vec::new(), Vec::new());
     let mut page = None;
     loop {
-        let got = caldav.event_changes(WORK, token, page.as_deref(), 0).await?;
+        let got = caldav
+            .event_changes(WORK, token, page.as_deref(), 0)
+            .await?;
         events.extend(got.events);
         removed.extend(got.removed);
         whole.extend(got.whole_series);
@@ -92,25 +102,38 @@ async fn the_calendar_list_names_each_calendar_with_its_color_and_access() {
     assert_eq!(calendars[0].access, Access::Owner);
     assert!(calendars[0].primary);
     assert_eq!(calendars[1].access, Access::Reader);
-    assert!(!calendars[1].color.is_empty(), "a calendar without a color gets one");
+    assert!(
+        !calendars[1].color.is_empty(),
+        "a calendar without a color gets one"
+    );
 }
 
 #[tokio::test]
 async fn a_whole_read_pages_by_fifty_and_ends_with_a_sync_token() {
     let (dav, _, caldav) = adapter().await;
     for n in 0..120 {
-        dav.put_resource(&format!("{WORK}e{n}.ics"), &one_off_ics(&format!("u{n}"), &format!("Event {n}")));
+        dav.put_resource(
+            &format!("{WORK}e{n}.ics"),
+            &one_off_ics(&format!("u{n}"), &format!("Event {n}")),
+        );
     }
     let mut pages = 0;
     let mut page = None;
     loop {
-        let got = caldav.event_changes(WORK, None, page.as_deref(), 0).await.unwrap();
+        let got = caldav
+            .event_changes(WORK, None, page.as_deref(), 0)
+            .await
+            .unwrap();
         pages += 1;
         assert!(got.events.len() <= mailrs_dav::MULTIGET_BATCH);
         match got.next_page {
             Some(next) => page = Some(next),
             None => {
-                assert!(got.next_sync.as_deref().is_some_and(|t| t.starts_with("sync:")));
+                assert!(
+                    got.next_sync
+                        .as_deref()
+                        .is_some_and(|t| t.starts_with("sync:"))
+                );
                 break;
             }
         }
@@ -127,7 +150,10 @@ async fn a_later_read_brings_what_changed_and_what_went() {
     dav.put_resource(&format!("{WORK}a.ics"), &one_off_ics("a", "Lunch moved"));
     dav.remove_resource(&format!("{WORK}b.ics"));
     let (events, removed, _, _) = read_all(&caldav, token.as_deref()).await.unwrap();
-    assert_eq!(events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["Lunch moved"]);
+    assert_eq!(
+        events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(),
+        ["Lunch moved"]
+    );
     assert_eq!(removed, ["b"]);
 }
 
@@ -137,7 +163,10 @@ async fn a_refused_sync_token_reads_the_calendar_whole() {
     dav.put_resource(&format!("{WORK}a.ics"), &one_off_ics("a", "Lunch"));
     let (_, _, _, token) = read_all(&caldav, None).await.unwrap();
     dav.forget_tokens();
-    assert!(matches!(read_all(&caldav, token.as_deref()).await, Err(BackendError::StateLost)));
+    assert!(matches!(
+        read_all(&caldav, token.as_deref()).await,
+        Err(BackendError::StateLost)
+    ));
 }
 
 #[tokio::test]
@@ -151,7 +180,10 @@ async fn a_server_without_sync_collection_reads_whole_when_its_ctag_moves() {
     assert!(events.is_empty(), "an unchanged ctag reads nothing");
     assert_eq!(again, token);
     dav.put_resource(&format!("{WORK}b.ics"), &one_off_ics("b", "Dinner"));
-    assert!(matches!(read_all(&caldav, token.as_deref()).await, Err(BackendError::StateLost)));
+    assert!(matches!(
+        read_all(&caldav, token.as_deref()).await,
+        Err(BackendError::StateLost)
+    ));
 }
 
 #[tokio::test]
@@ -167,16 +199,25 @@ async fn a_series_reads_whole_so_the_copy_can_drop_what_went() {
 async fn a_range_read_pages_and_leaves_the_sync_token_alone() {
     let (dav, _, caldav) = adapter().await;
     for n in 0..60 {
-        dav.put_resource(&format!("{WORK}e{n}.ics"), &one_off_ics(&format!("u{n}"), "Event"));
+        dav.put_resource(
+            &format!("{WORK}e{n}.ics"),
+            &one_off_ics(&format!("u{n}"), "Event"),
+        );
     }
     // 6 October 2026, 12:00 UTC, is inside; the range ends before 7 October.
     let (from, to) = (1_791_244_800_000, 1_791_331_200_000);
     let first = caldav.event_range(WORK, from, to, None).await.unwrap();
     assert_eq!(first.events.len(), 50);
     assert_eq!(first.next_sync, None);
-    let second = caldav.event_range(WORK, from, to, first.next_page.as_deref()).await.unwrap();
+    let second = caldav
+        .event_range(WORK, from, to, first.next_page.as_deref())
+        .await
+        .unwrap();
     assert_eq!((second.events.len(), second.next_page), (10, None));
-    let outside = caldav.event_range(WORK, to, to + 86_400_000, None).await.unwrap();
+    let outside = caldav
+        .event_range(WORK, to, to + 86_400_000, None)
+        .await
+        .unwrap();
     assert!(outside.events.is_empty());
 }
 
@@ -187,7 +228,10 @@ async fn an_edit_keeps_the_rest_of_the_resource() {
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     let mut edited = events[0].clone();
     edited.title = "Standup (short)".into();
-    let sent = caldav.put_event(&edited, Some(&edited.etag), false, Notify::Nobody).await.unwrap();
+    let sent = caldav
+        .put_event(&edited, Some(&edited.etag), false, Notify::Nobody)
+        .await
+        .unwrap();
     assert_eq!(sent.title, "Standup (short)");
     assert_ne!(sent.etag, edited.etag);
     let body = dav.body(&format!("{WORK}standup.ics")).unwrap();
@@ -212,14 +256,23 @@ async fn a_second_change_to_one_resource_follows_the_first() {
         rules: Vec::new(),
         ..master.clone()
     };
-    caldav.put_event(&moved, Some(&master.etag), false, Notify::Nobody).await.unwrap();
-    let renamed = Event { title: "Standup (new name)".into(), ..master.clone() };
+    caldav
+        .put_event(&moved, Some(&master.etag), false, Notify::Nobody)
+        .await
+        .unwrap();
+    let renamed = Event {
+        title: "Standup (new name)".into(),
+        ..master.clone()
+    };
     caldav
         .put_event(&renamed, Some(&master.etag), false, Notify::Nobody)
         .await
         .expect("the adapter knows it wrote the newer etag");
     let body = dav.body(&format!("{WORK}standup.ics")).unwrap();
-    assert!(body.contains("RECURRENCE-ID") && body.contains("Standup (new name)"), "{body}");
+    assert!(
+        body.contains("RECURRENCE-ID") && body.contains("Standup (new name)"),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -228,14 +281,21 @@ async fn a_change_made_elsewhere_first_is_changed() {
     dav.put_resource(&format!("{WORK}a.ics"), &one_off_ics("a", "Lunch"));
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     dav.put_resource(&format!("{WORK}a.ics"), &one_off_ics("a", "Lunch, theirs"));
-    let mine = Event { title: "Lunch, mine".into(), ..events[0].clone() };
-    assert!(matches!(caldav.put_event(&mine, Some(&mine.etag), false, Notify::Nobody).await, Err(BackendError::Changed)));
+    let mine = Event {
+        title: "Lunch, mine".into(),
+        ..events[0].clone()
+    };
+    assert!(matches!(
+        caldav
+            .put_event(&mine, Some(&mine.etag), false, Notify::Nobody)
+            .await,
+        Err(BackendError::Changed)
+    ));
 }
 
-#[tokio::test]
-async fn a_new_event_is_created_under_its_own_id() {
-    let (dav, _, caldav) = adapter().await;
-    let event = Event {
+/// An event of mine that the server does not hold yet.
+fn coffee() -> Event {
+    Event {
         calendar: WORK.into(),
         id: "pm0123456789abcdefghijklmnopqrstuv".into(),
         start: 1_791_300_000_000,
@@ -244,12 +304,24 @@ async fn a_new_event_is_created_under_its_own_id() {
         title: "Coffee".into(),
         busy: true,
         ..Event::default()
-    };
-    let sent = caldav.put_event(&event, None, true, Notify::Nobody).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_new_event_is_created_under_its_own_id() {
+    let (dav, _, caldav) = adapter().await;
+    let event = coffee();
+    let sent = caldav
+        .put_event(&event, None, true, Notify::Nobody)
+        .await
+        .unwrap();
     assert_eq!(sent.id, event.id);
     assert!(dav.body(&format!("{WORK}{}.ics", event.id)).is_some());
     assert!(
-        matches!(caldav.put_event(&event, None, true, Notify::Nobody).await, Err(BackendError::Changed)),
+        matches!(
+            caldav.put_event(&event, None, true, Notify::Nobody).await,
+            Err(BackendError::Changed)
+        ),
         "a second create finds it there"
     );
 }
@@ -259,14 +331,35 @@ async fn telling_nobody_keeps_the_server_from_mailing_the_guests() {
     let (dav, _, caldav) = adapter().await;
     dav.put_resource(&format!("{WORK}review.ics"), &meeting_ics("review"));
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
-    let renamed = Event { title: "Review, moved".into(), ..events[0].clone() };
-    caldav.put_event(&renamed, Some(&renamed.etag), false, Notify::Nobody).await.unwrap();
-    assert!(dav.body(&format!("{WORK}review.ics")).unwrap().contains("SCHEDULE-AGENT=CLIENT"));
+    let renamed = Event {
+        title: "Review, moved".into(),
+        ..events[0].clone()
+    };
+    caldav
+        .put_event(&renamed, Some(&renamed.etag), false, Notify::Nobody)
+        .await
+        .unwrap();
+    assert!(
+        dav.body(&format!("{WORK}review.ics"))
+            .unwrap()
+            .contains("SCHEDULE-AGENT=CLIENT")
+    );
     dav.put_resource(&format!("{WORK}review.ics"), &meeting_ics("review"));
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
-    let renamed = Event { title: "Review, moved".into(), ..events[0].clone() };
-    caldav.put_event(&renamed, Some(&renamed.etag), false, Notify::Guests).await.unwrap();
-    assert!(!dav.body(&format!("{WORK}review.ics")).unwrap().contains("SCHEDULE-AGENT"), "the server tells the guests");
+    let renamed = Event {
+        title: "Review, moved".into(),
+        ..events[0].clone()
+    };
+    caldav
+        .put_event(&renamed, Some(&renamed.etag), false, Notify::Guests)
+        .await
+        .unwrap();
+    assert!(
+        !dav.body(&format!("{WORK}review.ics"))
+            .unwrap()
+            .contains("SCHEDULE-AGENT"),
+        "the server tells the guests"
+    );
 }
 
 #[tokio::test]
@@ -276,26 +369,53 @@ async fn cancelling_one_occurrence_writes_an_exdate_and_deleting_the_series_remo
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     let master = &events[0];
     let one = occurrence_id(master, master.start + 7 * 24 * 3_600_000);
-    caldav.remove_event(WORK, &one, Some(&master.etag), Notify::Nobody).await.unwrap();
-    assert!(dav.body(&format!("{WORK}standup.ics")).unwrap().contains("EXDATE:20261012T093000Z"));
-    caldav.remove_event(WORK, &master.id, None, Notify::Nobody).await.unwrap();
+    caldav
+        .remove_event(WORK, &one, Some(&master.etag), Notify::Nobody)
+        .await
+        .unwrap();
+    assert!(
+        dav.body(&format!("{WORK}standup.ics"))
+            .unwrap()
+            .contains("EXDATE:20261012T093000Z")
+    );
+    caldav
+        .remove_event(WORK, &master.id, None, Notify::Nobody)
+        .await
+        .unwrap();
     assert!(dav.body(&format!("{WORK}standup.ics")).is_none());
 }
 
 #[tokio::test]
 async fn cancelling_one_occurrence_with_nobody_told_silences_the_guests_first() {
     let (dav, _, caldav) = adapter().await;
-    let meeting = meeting_ics("review").replace("SUMMARY:Review\r\n", "SUMMARY:Review\r\nRRULE:FREQ=WEEKLY\r\n");
+    let meeting = meeting_ics("review").replace(
+        "SUMMARY:Review\r\n",
+        "SUMMARY:Review\r\nRRULE:FREQ=WEEKLY\r\n",
+    );
     dav.put_resource(&format!("{WORK}review.ics"), &meeting);
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     let one = occurrence_id(&events[0], events[0].start + 7 * 24 * 3_600_000);
-    caldav.remove_event(WORK, &one, None, Notify::Nobody).await.unwrap();
+    caldav
+        .remove_event(WORK, &one, None, Notify::Nobody)
+        .await
+        .unwrap();
     let body = dav.body(&format!("{WORK}review.ics")).unwrap();
     assert!(body.contains("EXDATE"), "{body}");
-    assert!(body.contains("SCHEDULE-AGENT=CLIENT"), "the server tells nobody: {body}");
+    assert!(
+        body.contains("SCHEDULE-AGENT=CLIENT"),
+        "the server tells nobody: {body}"
+    );
     dav.put_resource(&format!("{WORK}review.ics"), &meeting);
-    caldav.remove_event(WORK, &one, None, Notify::Guests).await.unwrap();
-    assert!(!dav.body(&format!("{WORK}review.ics")).unwrap().contains("SCHEDULE-AGENT"), "the server mails the cancellation");
+    caldav
+        .remove_event(WORK, &one, None, Notify::Guests)
+        .await
+        .unwrap();
+    assert!(
+        !dav.body(&format!("{WORK}review.ics"))
+            .unwrap()
+            .contains("SCHEDULE-AGENT"),
+        "the server mails the cancellation"
+    );
 }
 
 #[tokio::test]
@@ -308,28 +428,57 @@ async fn cancelling_one_of_two_invited_occurrences_keeps_the_other() {
              ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:{ME}\r\nEND:VEVENT\r\n"
         )
     };
-    let body = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n{}{}END:VCALENDAR\r\n", occurrence("05"), occurrence("12"));
+    let body = format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n{}{}END:VCALENDAR\r\n",
+        occurrence("05"),
+        occurrence("12")
+    );
     dav.put_resource(&format!("{WORK}theirs.ics"), &body);
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     assert_eq!(events.len(), 2);
-    let first = events.iter().find(|e| e.id.ends_with("20261005T093000Z")).unwrap().id.clone();
-    caldav.remove_event(WORK, &first, None, Notify::Guests).await.unwrap();
-    let left = dav.body(&format!("{WORK}theirs.ics")).expect("the other occurrence stays");
-    assert!(!left.contains("20261005T093000Z") && left.contains("RECURRENCE-ID:20261012T093000Z"), "{left}");
+    let first = events
+        .iter()
+        .find(|e| e.id.ends_with("20261005T093000Z"))
+        .unwrap()
+        .id
+        .clone();
+    caldav
+        .remove_event(WORK, &first, None, Notify::Guests)
+        .await
+        .unwrap();
+    let left = dav
+        .body(&format!("{WORK}theirs.ics"))
+        .expect("the other occurrence stays");
+    assert!(
+        !left.contains("20261005T093000Z") && left.contains("RECURRENCE-ID:20261012T093000Z"),
+        "{left}"
+    );
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
-    caldav.remove_event(WORK, &events[0].id, None, Notify::Guests).await.unwrap();
-    assert!(dav.body(&format!("{WORK}theirs.ics")).is_none(), "nothing left, so the resource goes");
+    caldav
+        .remove_event(WORK, &events[0].id, None, Notify::Guests)
+        .await
+        .unwrap();
+    assert!(
+        dav.body(&format!("{WORK}theirs.ics")).is_none(),
+        "nothing left, so the resource goes"
+    );
 }
 
 #[tokio::test]
 async fn deleting_with_nobody_told_silences_the_guests_first() {
     let (dav, _, caldav) = adapter().await;
     dav.put_resource(&format!("{WORK}review.ics"), &meeting_ics("review"));
-    caldav.remove_event(WORK, "review", None, Notify::Nobody).await.unwrap();
+    caldav
+        .remove_event(WORK, "review", None, Notify::Nobody)
+        .await
+        .unwrap();
     assert_eq!(dav.puts(), 1, "the guests are marked before the delete");
     assert!(dav.body(&format!("{WORK}review.ics")).is_none());
     dav.put_resource(&format!("{WORK}review.ics"), &meeting_ics("review"));
-    caldav.remove_event(WORK, "review", None, Notify::Guests).await.unwrap();
+    caldav
+        .remove_event(WORK, "review", None, Notify::Guests)
+        .await
+        .unwrap();
     assert_eq!(dav.puts(), 1, "the server mails the cancellation");
 }
 
@@ -347,8 +496,18 @@ async fn an_import_updates_the_event_a_uid_already_names() {
         ..Event::default()
     };
     let first = caldav.import_event(&event).await.unwrap();
-    assert!(dav.body(&format!("{WORK}{}.ics", first.id)).unwrap().contains("UID:from-a-file@example.com"));
-    let again = caldav.import_event(&Event { title: "Offsite, renamed".into(), ..event }).await.unwrap();
+    assert!(
+        dav.body(&format!("{WORK}{}.ics", first.id))
+            .unwrap()
+            .contains("UID:from-a-file@example.com")
+    );
+    let again = caldav
+        .import_event(&Event {
+            title: "Offsite, renamed".into(),
+            ..event
+        })
+        .await
+        .unwrap();
     assert_eq!(again.id, first.id, "the same UID is the same event");
     assert_eq!(again.title, "Offsite, renamed");
     assert_eq!(dav.with(|s| s.resources.len()), 1);
@@ -360,18 +519,38 @@ async fn a_move_puts_the_event_on_the_other_calendar_and_takes_it_off_this_one()
     dav.add_collection("/cal/home/", Kind::Calendar, "Home", None);
     dav.put_resource(&format!("{WORK}standup.ics"), &series_ics("s", "Standup"));
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
-    let moved = caldav.move_event(&events[0], "/cal/home/", Notify::Nobody).await.unwrap();
-    assert_eq!((moved.calendar.as_str(), moved.id.as_str()), ("/cal/home/", "standup"));
+    let moved = caldav
+        .move_event(&events[0], "/cal/home/", Notify::Nobody)
+        .await
+        .unwrap();
+    assert_eq!(
+        (moved.calendar.as_str(), moved.id.as_str()),
+        ("/cal/home/", "standup")
+    );
     assert!(dav.body(&format!("{WORK}standup.ics")).is_none());
-    assert!(dav.body("/cal/home/standup.ics").unwrap().contains("X-KEEP-ME:yes"));
+    assert!(
+        dav.body("/cal/home/standup.ics")
+            .unwrap()
+            .contains("X-KEEP-ME:yes")
+    );
 }
 
 #[tokio::test]
 async fn an_answer_to_a_server_that_does_not_schedule_is_mailed_to_the_organizer() {
     let (dav, smtp, caldav) = adapter().await;
-    dav.put_resource(&format!("{WORK}standup.ics"), &invitation_ics("invite-uid", "Standup"));
-    caldav.answer_event(WORK, "standup", ME, Answer::Yes, Some("See you there")).await.unwrap();
-    assert!(dav.body(&format!("{WORK}standup.ics")).unwrap().contains("PARTSTAT=ACCEPTED"));
+    dav.put_resource(
+        &format!("{WORK}standup.ics"),
+        &invitation_ics("invite-uid", "Standup"),
+    );
+    caldav
+        .answer_event(WORK, "standup", ME, Answer::Yes, Some("See you there"))
+        .await
+        .unwrap();
+    assert!(
+        dav.body(&format!("{WORK}standup.ics"))
+            .unwrap()
+            .contains("PARTSTAT=ACCEPTED")
+    );
     let sent = smtp.sent();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].to, [BOSS]);
@@ -381,43 +560,235 @@ async fn an_answer_to_a_server_that_does_not_schedule_is_mailed_to_the_organizer
 #[tokio::test]
 async fn an_answer_from_the_calendar_view_follows_the_same_rule() {
     let (dav, smtp, caldav) = adapter().await;
-    dav.put_resource(&format!("{WORK}standup.ics"), &invitation_ics("invite-uid", "Standup"));
-    let event = caldav.answer_event(WORK, "standup", ME, Answer::No, None).await.unwrap();
+    dav.put_resource(
+        &format!("{WORK}standup.ics"),
+        &invitation_ics("invite-uid", "Standup"),
+    );
+    let event = caldav
+        .answer_event(WORK, "standup", ME, Answer::No, None)
+        .await
+        .unwrap();
     assert_eq!(event.my_answer, Some(Answer::No));
     assert_eq!(smtp.sent().len(), 1);
+    assert!(
+        caldav.tells_organizer(),
+        "the account's mail carried the reply"
+    );
     dav.set_auto_schedule(true);
-    caldav.answer_event(WORK, "standup", ME, Answer::Yes, None).await.unwrap();
-    assert_eq!(smtp.sent().len(), 1, "no second mail from a server that schedules");
+    caldav
+        .answer_event(WORK, "standup", ME, Answer::Yes, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        smtp.sent().len(),
+        1,
+        "no second mail from a server that schedules"
+    );
+    assert!(caldav.tells_organizer(), "the server did");
 }
 
 #[tokio::test]
 async fn answering_one_occurrence_leaves_the_rest_of_the_series_unanswered() {
     let (dav, smtp, caldav) = adapter().await;
-    dav.put_resource(&format!("{WORK}standup.ics"), &invitation_ics("invite-uid", "Standup"));
+    dav.put_resource(
+        &format!("{WORK}standup.ics"),
+        &invitation_ics("invite-uid", "Standup"),
+    );
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     let master = events[0].clone();
     let original = master.start + 7 * 24 * 3_600_000;
     let one = occurrence_id(&master, original);
-    let answered = caldav.answer_event(WORK, &one, ME, Answer::No, None).await.unwrap();
-    assert_eq!((answered.id.as_str(), answered.my_answer), (one.as_str(), Some(Answer::No)));
+    let answered = caldav
+        .answer_event(WORK, &one, ME, Answer::No, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        (answered.id.as_str(), answered.my_answer),
+        (one.as_str(), Some(Answer::No))
+    );
     let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
     let series = events.iter().find(|e| e.id == master.id).unwrap();
     assert_eq!(series.my_answer, None, "the series stays unanswered");
-    let changed = events.iter().find(|e| e.original_start == Some(original)).unwrap();
-    assert_eq!((changed.start, changed.end - changed.start), (original, master.end - master.start));
+    let changed = events
+        .iter()
+        .find(|e| e.original_start == Some(original))
+        .unwrap();
+    assert_eq!(
+        (changed.start, changed.end - changed.start),
+        (original, master.end - master.start)
+    );
     assert_eq!(changed.my_answer, Some(Answer::No));
     let body = dav.body(&format!("{WORK}standup.ics")).unwrap();
     assert!(body.contains("RECURRENCE-ID:20261012T093000Z"), "{body}");
-    assert_eq!(body.matches("RRULE").count(), 1, "the changed occurrence does not repeat");
+    assert_eq!(
+        body.matches("RRULE").count(),
+        1,
+        "the changed occurrence does not repeat"
+    );
     let sent = String::from_utf8_lossy(&smtp.sent()[0].raw).to_string();
-    assert!(sent.contains("RECURRENCE-ID"), "the reply names the one occurrence");
+    assert!(
+        sent.contains("RECURRENCE-ID"),
+        "the reply names the one occurrence"
+    );
+}
+
+/// The adapter of an account with no mail and no address handed in, on
+/// a server that holds the standup invitation and says the account goes
+/// by `addresses`.
+async fn alone(addresses: &[&str]) -> (Arc<FakeDav>, Adapter) {
+    let (dav, _, _) = adapter().await;
+    dav.with(|s| {
+        s.addresses = addresses
+            .iter()
+            .map(|address| address.to_string())
+            .collect()
+    });
+    dav.put_resource(
+        &format!("{WORK}standup.ics"),
+        &invitation_ics("invite-uid", "Standup"),
+    );
+    let caldav = CalDav::new(
+        Arc::clone(&dav),
+        crate::AnyMail::NoMail(crate::services::NoMail),
+        Vec::new(),
+    );
+    (dav, caldav)
+}
+
+#[tokio::test]
+async fn an_adapter_given_no_address_asks_the_server_once() {
+    let (dav, caldav) = alone(&[ME]).await;
+    let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
+    let mine: Vec<&str> = events[0]
+        .guests
+        .iter()
+        .filter(|g| g.me)
+        .map(|g| g.email.as_str())
+        .collect();
+    assert_eq!(mine, [ME], "the server said who the account is");
+    read_all(&caldav, None).await.unwrap();
+    assert_eq!(dav.with(|s| s.homes), 1, "the answer is kept for the run");
+}
+
+#[tokio::test]
+async fn an_adapter_whose_server_names_nobody_reads_and_writes() {
+    let (_, caldav) = alone(&[]).await;
+    let (events, _, _, _) = read_all(&caldav, None).await.unwrap();
+    assert!(
+        events[0].guests.iter().all(|g| !g.me),
+        "nobody on the event is the account"
+    );
+    let sent = caldav
+        .put_event(&coffee(), None, true, Notify::Nobody)
+        .await
+        .unwrap();
+    assert_eq!(sent.title, "Coffee");
+}
+
+#[tokio::test]
+async fn an_answer_with_no_mail_reaches_the_organizer_only_through_a_server_that_schedules() {
+    for schedules in [false, true] {
+        let (dav, caldav) = alone(&[ME]).await;
+        dav.set_auto_schedule(schedules);
+        assert!(
+            !caldav.tells_organizer(),
+            "not until the server has said that it schedules"
+        );
+        let event = caldav
+            .answer_event(WORK, "standup", ME, Answer::Yes, None)
+            .await
+            .unwrap();
+        assert_eq!(event.my_answer, Some(Answer::Yes));
+        let body = dav.body(&format!("{WORK}standup.ics")).unwrap();
+        assert!(body.contains("PARTSTAT=ACCEPTED"));
+        // CLIENT would tell a server that schedules after all, though it
+        // did not say so, to leave the reply to mail there is none of.
+        assert!(
+            !body.contains("SCHEDULE-AGENT=CLIENT"),
+            "schedules: {schedules}: {body}"
+        );
+        assert_eq!(
+            caldav.tells_organizer(),
+            schedules,
+            "only the server can carry the reply"
+        );
+    }
+}
+
+/// Nextcloud says that it schedules on its calendars and not at the
+/// address typed for it. An account with no mail has only the server to
+/// carry its answer, so it asks the calendar; one with mail asks as it
+/// always has and mails the answer itself, which works on any server.
+#[tokio::test]
+async fn an_account_with_no_mail_asks_the_calendar_whether_the_server_schedules() {
+    let (dav, caldav) = alone(&[ME]).await;
+    dav.with(|s| (s.auto_schedule, s.quiet_at_its_address) = (true, true));
+    caldav.calendars().await.unwrap();
+    assert!(caldav.tells_organizer(), "the server will carry the answer");
+    caldav
+        .answer_event(WORK, "standup", ME, Answer::Yes, None)
+        .await
+        .unwrap();
+    let body = dav.body(&format!("{WORK}standup.ics")).unwrap();
+    assert!(
+        !body.contains("SCHEDULE-AGENT=CLIENT"),
+        "the server was told to stay out of it: {body}"
+    );
+    assert!(caldav.tells_organizer());
+
+    let (dav, smtp, with_mail) = adapter().await;
+    dav.with(|s| (s.auto_schedule, s.quiet_at_its_address) = (true, true));
+    dav.put_resource(
+        &format!("{WORK}standup.ics"),
+        &invitation_ics("invite-uid", "Standup"),
+    );
+    with_mail
+        .answer_event(WORK, "standup", ME, Answer::Yes, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        smtp.sent().len(),
+        1,
+        "an account with mail goes on sending the answer itself"
+    );
+}
+
+#[tokio::test]
+async fn reading_the_calendar_list_settles_whether_the_organizer_will_hear() {
+    let (dav, caldav) = alone(&[]).await;
+    caldav.calendars().await.unwrap();
+    assert!(
+        !caldav.tells_organizer(),
+        "the window knows before the first answer"
+    );
+    dav.set_auto_schedule(true);
+    caldav.calendars().await.unwrap();
+    assert!(caldav.tells_organizer());
+}
+
+/// The list was read, so the login was taken, whatever the server made
+/// of the question that follows it. An account said to be refused here
+/// would wait for a sign-in that changes nothing.
+#[tokio::test]
+async fn a_scheduling_question_turned_away_is_not_a_refused_login() {
+    let (dav, caldav) = alone(&[]).await;
+    dav.with(|s| s.refuse_options = true);
+    assert!(!caldav.calendars().await.unwrap().is_empty());
+    assert_eq!(caldav.login_refused(), None);
+    assert!(
+        !caldav.tells_organizer(),
+        "a server that does not say is taken to send nothing"
+    );
 }
 
 #[tokio::test]
 async fn an_event_without_an_organizer_has_nobody_to_tell() {
     let (dav, smtp, caldav) = adapter().await;
     dav.put_resource(&format!("{WORK}standup.ics"), &series_ics("s", "Standup"));
-    caldav.answer_event(WORK, "standup", ME, Answer::Yes, None).await.unwrap();
+    caldav
+        .answer_event(WORK, "standup", ME, Answer::Yes, None)
+        .await
+        .unwrap();
     assert!(smtp.sent().is_empty());
 }
 
@@ -425,16 +796,28 @@ async fn an_event_without_an_organizer_has_nobody_to_tell() {
 async fn writes_a_caldav_server_cannot_do_are_refused_not_held() {
     let (_, _, caldav) = adapter().await;
     let sent = Arc::default();
-    assert!(matches!(caldav.upload_attachment(&Attachment::default(), sent).await, Err(BackendError::Refused(_))));
-    assert!(matches!(caldav.share_file("file", "ann@example.com").await, Err(BackendError::Refused(_))));
-    assert!(matches!(caldav.edit_list(WORK, &ListEdit::Delete).await, Err(BackendError::Refused(_))));
+    assert!(matches!(
+        caldav.upload_attachment(&Attachment::default(), sent).await,
+        Err(BackendError::Refused(_))
+    ));
+    assert!(matches!(
+        caldav.share_file("file", "ann@example.com").await,
+        Err(BackendError::Refused(_))
+    ));
+    assert!(matches!(
+        caldav.edit_list(WORK, &ListEdit::Delete).await,
+        Err(BackendError::Refused(_))
+    ));
 }
 
 #[tokio::test]
 async fn a_refused_login_waits_in_the_queue_and_says_why() {
     let (dav, _, caldav) = adapter().await;
     dav.refuse_login(true);
-    assert!(matches!(caldav.calendars().await, Err(BackendError::NeedsReauth)));
+    assert!(matches!(
+        caldav.calendars().await,
+        Err(BackendError::NeedsReauth)
+    ));
     assert!(caldav.login_refused().is_some());
     dav.refuse_login(false);
     caldav.calendars().await.unwrap();
@@ -458,9 +841,16 @@ async fn an_event_the_server_reports_under_an_encoded_href_stays_one_event() {
     };
     let made = caldav.import_event(&event).await.unwrap();
     // Another client edits it, and the server spells the href its own way.
-    dav.put_resource(&format!("{encoded}{}.ics", made.id), &one_off_ics("one@example.com", "Edited elsewhere"));
+    dav.put_resource(
+        &format!("{encoded}{}.ics", made.id),
+        &one_off_ics("one@example.com", "Edited elsewhere"),
+    );
     let page = caldav.event_changes(decoded, None, None, 0).await.unwrap();
     let ids: Vec<&str> = page.events.iter().map(|e| e.id.as_str()).collect();
-    assert_eq!(ids, [made.id.as_str()], "one event, not one per spelling: {page:?}");
+    assert_eq!(
+        ids,
+        [made.id.as_str()],
+        "one event, not one per spelling: {page:?}"
+    );
     assert_eq!(dav.with(|s| s.resources.len()), 1);
 }

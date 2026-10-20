@@ -29,7 +29,10 @@ pub(crate) struct Outlook {
 pub(crate) async fn outlook() -> Outlook {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("mail.db")).unwrap();
-    let account_id = db.write(|c| accounts::insert_account(c, "me@outlook.com", 0)).await.unwrap();
+    let account_id = db
+        .write(|c| accounts::insert_account(c, "me@outlook.com", 0))
+        .await
+        .unwrap();
     let fake = Arc::new(FakeGraph::new());
     let (sender, events) = async_channel::unbounded();
     let sync = Arc::new(AccountSync::new(
@@ -38,7 +41,14 @@ pub(crate) async fn outlook() -> Outlook {
         db.clone(),
         sender,
     ));
-    Outlook { fake, sync, db, events, account_id, _dir: dir }
+    Outlook {
+        fake,
+        sync,
+        db,
+        events,
+        account_id,
+        _dir: dir,
+    }
 }
 
 impl Outlook {

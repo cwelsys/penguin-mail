@@ -45,7 +45,9 @@ impl FeedState {
 
 fn memberships_in(change: &RemoteChange) -> usize {
     match change {
-        RemoteChange::Gained { memberships, .. } | RemoteChange::Lost { memberships, .. } => memberships.len(),
+        RemoteChange::Gained { memberships, .. } | RemoteChange::Lost { memberships, .. } => {
+            memberships.len()
+        }
         _ => 0,
     }
 }
@@ -56,7 +58,10 @@ impl<J: JmapApi> Jmap<J> {
             let email = self.api().email_state().await.map_err(backend)?;
             self.list_mailboxes().await?;
             let mailbox = self.known().mailbox_state.clone();
-            return Ok(Changes { changes: Vec::new(), state: FeedState { email, mailbox }.written() });
+            return Ok(Changes {
+                changes: Vec::new(),
+                state: FeedState { email, mailbox }.written(),
+            });
         };
         let mut state = FeedState::read(since)?;
         self.listed().await?;
@@ -71,16 +76,27 @@ impl<J: JmapApi> Jmap<J> {
                 break;
             }
             let max = fits.clamp(1, CHANGES_PER_PAGE);
-            let page = self.api().mail_changes(&state.email, &state.mailbox, max).await.map_err(backend)?;
+            let page = self
+                .api()
+                .mail_changes(&state.email, &state.mailbox, max)
+                .await
+                .map_err(backend)?;
             // Any mailbox change relists: a new or renamed mailbox, and the
             // counts the sidebar shows, all come from one Mailbox/get.
-            relist |= !page.mailbox.created.is_empty() || !page.mailbox.updated.is_empty() || !page.mailbox.destroyed.is_empty();
+            relist |= !page.mailbox.created.is_empty()
+                || !page.mailbox.updated.is_empty()
+                || !page.mailbox.destroyed.is_empty();
             for email in &page.changed {
                 let made = self.restated(email);
                 restated += made.iter().map(memberships_in).sum::<usize>();
                 changes.extend(made);
             }
-            changes.extend(page.email.destroyed.iter().map(|id| RemoteChange::Deleted { id: id.clone() }));
+            changes.extend(
+                page.email
+                    .destroyed
+                    .iter()
+                    .map(|id| RemoteChange::Deleted { id: id.clone() }),
+            );
             state.email = page.email.new_state;
             state.mailbox = page.mailbox.new_state;
             if !page.email.has_more_changes {
@@ -90,7 +106,10 @@ impl<J: JmapApi> Jmap<J> {
         if relist {
             self.list_mailboxes().await?;
         }
-        Ok(Changes { changes, state: state.written() })
+        Ok(Changes {
+            changes,
+            state: state.written(),
+        })
     }
 
     /// `email` as it stands: a gain of each mailbox and keyword it has, a
@@ -98,9 +117,21 @@ impl<J: JmapApi> Jmap<J> {
     fn restated(&self, email: &Email) -> Vec<RemoteChange> {
         let filed = self.filed_in(email);
         let has_mailbox: BTreeSet<&str> = filed.iter().map(String::as_str).collect();
-        let has_keyword: BTreeSet<&str> = email.keywords.iter().filter(|(_, on)| **on).map(|(k, _)| k.as_str()).collect();
-        let mut gained: Vec<Membership> = has_mailbox.iter().map(|id| Membership::Mailbox((*id).to_string())).collect();
-        gained.extend(has_keyword.iter().map(|k| Membership::Keyword((*k).to_string())));
+        let has_keyword: BTreeSet<&str> = email
+            .keywords
+            .iter()
+            .filter(|(_, on)| **on)
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let mut gained: Vec<Membership> = has_mailbox
+            .iter()
+            .map(|id| Membership::Mailbox((*id).to_string()))
+            .collect();
+        gained.extend(
+            has_keyword
+                .iter()
+                .map(|k| Membership::Keyword((*k).to_string())),
+        );
         let mut lost: Vec<Membership> = self
             .known()
             .mailboxes
@@ -111,10 +142,21 @@ impl<J: JmapApi> Jmap<J> {
         // The held keyword is no keyword the app offers, but the store
         // keeps it while a hold lasts, so it has to go when the hold ends.
         let known = KEYWORDS.iter().copied().chain([HELD]);
-        lost.extend(known.filter(|k| !has_keyword.contains(k)).map(|k| Membership::Keyword(k.to_string())));
-        let mut out = vec![RemoteChange::Gained { id: email.id.clone(), thread_id: email.thread_id.clone(), memberships: gained }];
+        lost.extend(
+            known
+                .filter(|k| !has_keyword.contains(k))
+                .map(|k| Membership::Keyword(k.to_string())),
+        );
+        let mut out = vec![RemoteChange::Gained {
+            id: email.id.clone(),
+            thread_id: email.thread_id.clone(),
+            memberships: gained,
+        }];
         if !lost.is_empty() {
-            out.push(RemoteChange::Lost { id: email.id.clone(), memberships: lost });
+            out.push(RemoteChange::Lost {
+                id: email.id.clone(),
+                memberships: lost,
+            });
         }
         out
     }

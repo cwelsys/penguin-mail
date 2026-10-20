@@ -10,8 +10,8 @@ use adw::prelude::*;
 use mailrs_domain::calendar::series::RepeatScope;
 use mailrs_domain::calendar::{Event, Notify};
 use mailrs_domain::translate::{fill, gettext};
-pub use mailrs_sync::calendar_copy::event_change::{Action, Question};
 use mailrs_sync::calendar_copy::event_change::Choice;
+pub use mailrs_sync::calendar_copy::event_change::{Action, Question};
 
 /// What the person answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,13 +25,20 @@ pub struct Answer {
 impl Answer {
     /// The scope and notify the calendar copy writes the change with.
     pub fn choice(self) -> Choice {
-        Choice { scope: self.scope, notify: self.notify }
+        Choice {
+            scope: self.scope,
+            notify: self.notify,
+        }
     }
 }
 
 impl From<Choice> for Answer {
     fn from(choice: Choice) -> Answer {
-        Answer { scope: choice.scope, notify: choice.notify, keep_time: false }
+        Answer {
+            scope: choice.scope,
+            notify: choice.notify,
+            keep_time: false,
+        }
     }
 }
 
@@ -83,28 +90,60 @@ fn scope_label(scope: RepeatScope) -> String {
 pub fn responses(question: &Question) -> Vec<Response> {
     if question.keeps {
         return vec![
-            Response { id: "keep", label: gettext("Keep Old Time"), look: Look::Plain },
-            Response { id: "go", label: gettext("Move"), look: Look::Suggested },
+            Response {
+                id: "keep",
+                label: gettext("Keep Old Time"),
+                look: Look::Plain,
+            },
+            Response {
+                id: "go",
+                label: gettext("Move"),
+                look: Look::Suggested,
+            },
         ];
     }
     let deleting = question.action == Action::Delete;
-    let doing = if deleting { Look::Destructive } else { Look::Suggested };
-    let mut out = vec![Response { id: "cancel", label: gettext("Cancel"), look: Look::Plain }];
+    let doing = if deleting {
+        Look::Destructive
+    } else {
+        Look::Suggested
+    };
+    let mut out = vec![Response {
+        id: "cancel",
+        label: gettext("Cancel"),
+        look: Look::Plain,
+    }];
     if question.ask_guests {
         out.push(Response {
             id: "quiet",
             label: gettext("Don't send"),
-            look: if deleting { Look::Destructive } else { Look::Plain },
+            look: if deleting {
+                Look::Destructive
+            } else {
+                Look::Plain
+            },
         });
         let send = if deleting {
             gettext("Send a cancellation to the guests")
         } else {
             gettext("Send an update to the guests")
         };
-        out.push(Response { id: "send", label: send, look: doing });
+        out.push(Response {
+            id: "send",
+            label: send,
+            look: doing,
+        });
     } else if !question.scopes.is_empty() {
-        let look = if deleting { Look::Destructive } else { Look::Plain };
-        out.extend(question.scopes.iter().map(|&s| Response { id: scope_id(s), label: scope_label(s), look }));
+        let look = if deleting {
+            Look::Destructive
+        } else {
+            Look::Plain
+        };
+        out.extend(question.scopes.iter().map(|&s| Response {
+            id: scope_id(s),
+            label: scope_label(s),
+            look,
+        }));
     } else {
         let label = match question.action {
             Action::Move => gettext("Move"),
@@ -112,7 +151,11 @@ pub fn responses(question: &Question) -> Vec<Response> {
             Action::Delete => gettext("Delete"),
             Action::Answer => gettext("Send"),
         };
-        out.push(Response { id: "go", label, look: doing });
+        out.push(Response {
+            id: "go",
+            label,
+            look: doing,
+        });
     }
     out
 }
@@ -139,17 +182,44 @@ pub fn default_response(question: &Question) -> &'static str {
 /// Reads the button pressed, with the option picked in the list when
 /// [`scope_options`] shows one and the state of the check when
 /// [`send_check`] shows it. `None` for Cancel.
-pub fn answer(question: &Question, response: &str, picked: Option<RepeatScope>, send: bool) -> Option<Answer> {
-    let listed = || if scope_options(question) { picked.or(question.scopes.first().copied()) } else { None };
+pub fn answer(
+    question: &Question,
+    response: &str,
+    picked: Option<RepeatScope>,
+    send: bool,
+) -> Option<Answer> {
+    let listed = || {
+        if scope_options(question) {
+            picked.or(question.scopes.first().copied())
+        } else {
+            None
+        }
+    };
     if question.keeps {
-        let guests = if send_check(question) && !send { Notify::Nobody } else { Notify::Guests };
+        let guests = if send_check(question) && !send {
+            Notify::Nobody
+        } else {
+            Notify::Guests
+        };
         return match response {
-            "go" => Some(Answer { scope: listed(), notify: guests, keep_time: false }),
+            "go" => Some(Answer {
+                scope: listed(),
+                notify: guests,
+                keep_time: false,
+            }),
             // The other edits go out at the old time. They reach the
             // guests only when they change something the guests see.
             "keep" => {
-                let notify = if question.rest_seen { guests } else { Notify::Nobody };
-                Some(Answer { scope: listed(), notify, keep_time: true })
+                let notify = if question.rest_seen {
+                    guests
+                } else {
+                    Notify::Nobody
+                };
+                Some(Answer {
+                    scope: listed(),
+                    notify,
+                    keep_time: true,
+                })
             }
             _ => None,
         };
@@ -158,11 +228,23 @@ pub fn answer(question: &Question, response: &str, picked: Option<RepeatScope>, 
         "send" | "go" => Notify::Guests,
         "quiet" => Notify::Nobody,
         other => {
-            let scope = question.scopes.iter().copied().find(|&s| scope_id(s) == other)?;
-            return Some(Answer { scope: Some(scope), notify: Notify::Guests, keep_time: false });
+            let scope = question
+                .scopes
+                .iter()
+                .copied()
+                .find(|&s| scope_id(s) == other)?;
+            return Some(Answer {
+                scope: Some(scope),
+                notify: Notify::Guests,
+                keep_time: false,
+            });
         }
     };
-    Some(Answer { scope: listed(), notify, keep_time: false })
+    Some(Answer {
+        scope: listed(),
+        notify,
+        keep_time: false,
+    })
 }
 
 /// The heading: the event's title for a one-off event, the repeat
@@ -184,10 +266,17 @@ fn heading(question: &Question, title: &str) -> String {
 /// of a move, in words. `None` for Cancel or the dialog closing another
 /// way; a move then springs back and nothing is written, also when the
 /// question [`keeps`](Question::keeps).
-pub async fn ask(parent: &impl IsA<gtk::Widget>, question: &Question, event: &Event, when: Option<&str>) -> Option<Answer> {
+pub async fn ask(
+    parent: &impl IsA<gtk::Widget>,
+    question: &Question,
+    event: &Event,
+    when: Option<&str>,
+) -> Option<Answer> {
     let mut body: Vec<String> = when.map(str::to_string).into_iter().collect();
     if question.keeps {
-        body.push(gettext("Keep Old Time saves your other changes at the time the event had."));
+        body.push(gettext(
+            "Keep Old Time saves your other changes at the time the event had.",
+        ));
     }
     if question.mailed {
         body.push(if question.action == Action::Delete {
@@ -197,7 +286,9 @@ pub async fn ask(parent: &impl IsA<gtk::Widget>, question: &Question, event: &Ev
         });
     }
     if question.told {
-        body.push(gettext("The new guests get their invitation, and the others get an update."));
+        body.push(gettext(
+            "The new guests get their invitation, and the others get an update.",
+        ));
     }
     let dialog = adw::AlertDialog::builder()
         .heading(heading(question, &event.title))
@@ -208,8 +299,12 @@ pub async fn ask(parent: &impl IsA<gtk::Widget>, question: &Question, event: &Ev
         dialog.add_response(response.id, &response.label);
         match response.look {
             Look::Plain => {}
-            Look::Suggested => dialog.set_response_appearance(response.id, adw::ResponseAppearance::Suggested),
-            Look::Destructive => dialog.set_response_appearance(response.id, adw::ResponseAppearance::Destructive),
+            Look::Suggested => {
+                dialog.set_response_appearance(response.id, adw::ResponseAppearance::Suggested)
+            }
+            Look::Destructive => {
+                dialog.set_response_appearance(response.id, adw::ResponseAppearance::Destructive)
+            }
         }
     }
     dialog.set_default_response(Some(default_response(question)));
@@ -256,11 +351,19 @@ mod tests {
     use super::*;
 
     fn ann() -> Guest {
-        Guest { email: "ann@example.com".into(), ..Guest::default() }
+        Guest {
+            email: "ann@example.com".into(),
+            ..Guest::default()
+        }
     }
 
     fn me() -> Guest {
-        Guest { email: "me@example.com".into(), me: true, organizer: true, ..Guest::default() }
+        Guest {
+            email: "me@example.com".into(),
+            me: true,
+            organizer: true,
+            ..Guest::default()
+        }
     }
 
     fn ids(question: &Question) -> Vec<&'static str> {
@@ -274,7 +377,14 @@ mod tests {
         let q = question(Action::Move, &[], &[me()], Facts::default()).unwrap();
         assert_eq!(ids(&q), ["cancel", "go"]);
         assert_eq!(responses(&q)[1].label, "Move");
-        assert_eq!(answer(&q, "go", None, true), Some(Answer { scope: None, notify: Notify::Guests, keep_time: false }));
+        assert_eq!(
+            answer(&q, "go", None, true),
+            Some(Answer {
+                scope: None,
+                notify: Notify::Guests,
+                keep_time: false
+            })
+        );
     }
 
     #[test]
@@ -284,8 +394,14 @@ mod tests {
         assert_eq!(responses(&q)[2].label, "Send an update to the guests");
         assert_eq!(responses(&q)[1].label, "Don't send");
         assert_eq!(default_response(&q), "send");
-        assert_eq!(answer(&q, "quiet", None, true).unwrap().notify, Notify::Nobody);
-        assert_eq!(answer(&q, "send", None, true).unwrap().notify, Notify::Guests);
+        assert_eq!(
+            answer(&q, "quiet", None, true).unwrap().notify,
+            Notify::Nobody
+        );
+        assert_eq!(
+            answer(&q, "send", None, true).unwrap().notify,
+            Notify::Guests
+        );
     }
 
     #[test]
@@ -304,7 +420,11 @@ mod tests {
         assert_eq!(ids(&q), ["cancel", "quiet", "send"]);
         assert_eq!(
             answer(&q, "quiet", Some(RepeatScope::Following), true),
-            Some(Answer { scope: Some(RepeatScope::Following), notify: Notify::Nobody, keep_time: false })
+            Some(Answer {
+                scope: Some(RepeatScope::Following),
+                notify: Notify::Nobody,
+                keep_time: false
+            })
         );
     }
 
@@ -313,16 +433,35 @@ mod tests {
         let q = question(Action::Edit, &EVERY, &[], Facts::default()).unwrap();
         assert!(!scope_options(&q));
         assert_eq!(ids(&q), ["cancel", "this", "following", "all"]);
-        assert_eq!(answer(&q, "all", None, true), Some(Answer { scope: Some(RepeatScope::All), notify: Notify::Guests, keep_time: false }));
+        assert_eq!(
+            answer(&q, "all", None, true),
+            Some(Answer {
+                scope: Some(RepeatScope::All),
+                notify: Notify::Guests,
+                keep_time: false
+            })
+        );
     }
 
     #[test]
     fn answering_a_repeating_invitation_offers_this_event_or_all_events() {
-        let q = question(Action::Answer, &[RepeatScope::This, RepeatScope::All], &[ann()], Facts::default()).unwrap();
+        let q = question(
+            Action::Answer,
+            &[RepeatScope::This, RepeatScope::All],
+            &[ann()],
+            Facts::default(),
+        )
+        .unwrap();
         assert_eq!(ids(&q), ["cancel", "this", "all"]);
         assert!(!q.ask_guests, "only the organizer hears an answer");
-        assert_eq!(answer(&q, "this", None, true).and_then(|a| a.scope), Some(RepeatScope::This));
-        assert_eq!(answer(&q, "all", None, true).and_then(|a| a.scope), Some(RepeatScope::All));
+        assert_eq!(
+            answer(&q, "this", None, true).and_then(|a| a.scope),
+            Some(RepeatScope::This)
+        );
+        assert_eq!(
+            answer(&q, "all", None, true).and_then(|a| a.scope),
+            Some(RepeatScope::All)
+        );
     }
 
     /// Cancelling a meeting you organize tells the guests unless you say
@@ -333,36 +472,61 @@ mod tests {
         assert_eq!(ids(&q), ["cancel", "quiet", "send"]);
         assert_eq!(responses(&q)[2].label, "Send a cancellation to the guests");
         assert_eq!(default_response(&q), "send");
-        assert!(responses(&q)[1..].iter().all(|r| r.look == Look::Destructive));
+        assert!(
+            responses(&q)[1..]
+                .iter()
+                .all(|r| r.look == Look::Destructive)
+        );
     }
 
     #[test]
     fn a_move_that_adds_guests_tells_them_without_a_choice() {
-        let q = question(Action::Move, &[], &[ann()], Facts { adds_guests: true, ..Facts::default() }).unwrap();
+        let q = question(
+            Action::Move,
+            &[],
+            &[ann()],
+            Facts {
+                adds_guests: true,
+                ..Facts::default()
+            },
+        )
+        .unwrap();
         assert!(q.told);
         assert_eq!(ids(&q), ["cancel", "go"]);
         assert_eq!(answer(&q, "go", None, true).unwrap().notify, Notify::Guests);
     }
 
     fn seen() -> Facts {
-        Facts { seen: true, ..Facts::default() }
+        Facts {
+            seen: true,
+            ..Facts::default()
+        }
     }
 
     /// An account that mails the guests whatever the person picks, as
     /// Microsoft does, gets no choice to send nobody or to send an update.
     fn mails() -> Facts {
-        Facts { always_mails: true, ..Facts::default() }
+        Facts {
+            always_mails: true,
+            ..Facts::default()
+        }
     }
 
     #[test]
     fn an_account_that_always_mails_offers_no_choice_about_the_guests() {
         for action in [Action::Move, Action::Delete, Action::Edit] {
-            let change = Facts { seen: true, ..mails() };
+            let change = Facts {
+                seen: true,
+                ..mails()
+            };
             let q = question(action, &[], &[me(), ann()], change).unwrap();
             assert!(!q.ask_guests, "{action:?}");
             assert!(q.mailed, "{action:?}");
             let shown = ids(&q);
-            assert!(!shown.contains(&"quiet") && !shown.contains(&"send"), "{action:?}: {shown:?}");
+            assert!(
+                !shown.contains(&"quiet") && !shown.contains(&"send"),
+                "{action:?}: {shown:?}"
+            );
             assert_eq!(answer(&q, "go", None, true).unwrap().notify, Notify::Guests);
         }
     }
@@ -376,11 +540,18 @@ mod tests {
 
     #[test]
     fn a_move_with_other_changes_on_such_an_account_has_no_send_check() {
-        let change = Facts { more_than_time: true, rest_seen: true, ..mails() };
+        let change = Facts {
+            more_than_time: true,
+            rest_seen: true,
+            ..mails()
+        };
         let q = question(Action::Move, &[], &[me(), ann()], change).unwrap();
         assert!(q.keeps && !send_check(&q));
         assert_eq!(answer(&q, "go", None, true).unwrap().notify, Notify::Guests);
-        assert_eq!(answer(&q, "keep", None, true).unwrap().notify, Notify::Guests);
+        assert_eq!(
+            answer(&q, "keep", None, true).unwrap().notify,
+            Notify::Guests
+        );
     }
 
     /// A new title on a meeting reaches the guests, so the save asks
@@ -390,7 +561,10 @@ mod tests {
         let q = question(Action::Edit, &[], &[me(), ann()], seen()).unwrap();
         assert_eq!(ids(&q), ["cancel", "quiet", "send"]);
         assert_eq!(default_response(&q), "send");
-        assert_eq!(answer(&q, "quiet", None, true).unwrap().notify, Notify::Nobody);
+        assert_eq!(
+            answer(&q, "quiet", None, true).unwrap().notify,
+            Notify::Nobody
+        );
         assert_eq!(answer(&q, "cancel", None, true), None);
     }
 
@@ -402,7 +576,12 @@ mod tests {
     }
 
     fn move_and_more(rest_seen: bool) -> Facts {
-        Facts { seen: true, more_than_time: true, rest_seen, ..Facts::default() }
+        Facts {
+            seen: true,
+            more_than_time: true,
+            rest_seen,
+            ..Facts::default()
+        }
     }
 
     /// An editor save that moves the event and changes more: one dialog,
@@ -413,19 +592,54 @@ mod tests {
         assert!(q.keeps);
         assert_eq!(ids(&q), ["keep", "go"]);
         assert_eq!(responses(&q)[0].label, "Keep Old Time");
-        assert_eq!(answer(&q, CLOSE_RESPONSE, None, true), None, "Escape throws the whole edit away");
-        assert_eq!(answer(&q, "keep", None, true), Some(Answer { scope: None, notify: Notify::Nobody, keep_time: true }));
-        assert_eq!(answer(&q, "go", None, true), Some(Answer { scope: None, notify: Notify::Guests, keep_time: false }));
+        assert_eq!(
+            answer(&q, CLOSE_RESPONSE, None, true),
+            None,
+            "Escape throws the whole edit away"
+        );
+        assert_eq!(
+            answer(&q, "keep", None, true),
+            Some(Answer {
+                scope: None,
+                notify: Notify::Nobody,
+                keep_time: true
+            })
+        );
+        assert_eq!(
+            answer(&q, "go", None, true),
+            Some(Answer {
+                scope: None,
+                notify: Notify::Guests,
+                keep_time: false
+            })
+        );
     }
 
     #[test]
     fn a_move_with_other_edits_on_a_meeting_asks_about_the_guests_with_a_check() {
         let q = question(Action::Move, &[], &[me(), ann()], move_and_more(true)).unwrap();
         assert!(send_check(&q));
-        assert_eq!(ids(&q), ["keep", "go"], "the buttons choose the time, the check the guests");
-        assert_eq!(answer(&q, "go", None, false).unwrap().notify, Notify::Nobody);
-        assert_eq!(answer(&q, "keep", None, true), Some(Answer { scope: None, notify: Notify::Guests, keep_time: true }));
-        assert_eq!(answer(&q, "keep", None, false).unwrap().notify, Notify::Nobody);
+        assert_eq!(
+            ids(&q),
+            ["keep", "go"],
+            "the buttons choose the time, the check the guests"
+        );
+        assert_eq!(
+            answer(&q, "go", None, false).unwrap().notify,
+            Notify::Nobody
+        );
+        assert_eq!(
+            answer(&q, "keep", None, true),
+            Some(Answer {
+                scope: None,
+                notify: Notify::Guests,
+                keep_time: true
+            })
+        );
+        assert_eq!(
+            answer(&q, "keep", None, false).unwrap().notify,
+            Notify::Nobody
+        );
     }
 
     /// The other edits are a reminder the guests never see: keeping the
@@ -433,7 +647,10 @@ mod tests {
     #[test]
     fn keeping_the_old_time_with_edits_the_guests_do_not_see_mails_nobody() {
         let q = question(Action::Move, &[], &[ann()], move_and_more(false)).unwrap();
-        assert_eq!(answer(&q, "keep", None, true).unwrap().notify, Notify::Nobody);
+        assert_eq!(
+            answer(&q, "keep", None, true).unwrap().notify,
+            Notify::Nobody
+        );
     }
 
     #[test]

@@ -25,13 +25,23 @@ async fn aliases_come_with_their_names_and_signatures() {
     h.fake.with(|s| {
         s.identities = vec![
             identity("I1", "me@example.com", "Me", "-- \nMe", ""),
-            identity("I2", "sales@example.com", "Sales", "", "<p>The <b>Sales</b> team</p>"),
+            identity(
+                "I2",
+                "sales@example.com",
+                "Sales",
+                "",
+                "<p>The <b>Sales</b> team</p>",
+            ),
             identity("I3", "*@example.org", "", "", ""),
         ]
     });
     let listed = h.sync.services().identities.identities().await.unwrap();
     let emails: Vec<&str> = listed.iter().map(|a| a.email.as_str()).collect();
-    assert_eq!(emails, ["me@example.com", "sales@example.com"], "a whole-domain identity is no address");
+    assert_eq!(
+        emails,
+        ["me@example.com", "sales@example.com"],
+        "a whole-domain identity is no address"
+    );
     assert!(listed[0].default && !listed[1].default);
     assert_eq!(listed[0].name.as_deref(), Some("Me"));
     assert_eq!(listed[1].signature, "The Sales team");

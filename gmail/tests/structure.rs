@@ -65,7 +65,10 @@ fn the_part_tree_keeps_inline_text_and_names_every_part_by_path() {
 #[test]
 fn only_the_calendar_text_is_fetched_by_reference() {
     let payload = google_invitation();
-    assert_eq!(text_by_reference(&payload), [("1.3".to_string(), "ref-cal".to_string())]);
+    assert_eq!(
+        text_by_reference(&payload),
+        [("1.3".to_string(), "ref-cal".to_string())]
+    );
     assert_eq!(
         handles(&payload),
         [
@@ -84,7 +87,10 @@ fn a_body_text_sent_by_reference_is_fetched_but_a_named_text_file_is_not() {
              "body": {"size": 5000000, "attachmentId": "ref-notes"}}
         ]
     }));
-    assert_eq!(text_by_reference(&payload), [("1".to_string(), "ref-html".to_string())]);
+    assert_eq!(
+        text_by_reference(&payload),
+        [("1".to_string(), "ref-html".to_string())]
+    );
 }
 
 /// A note in plain text with a forwarded message under it, whose HTML
@@ -117,7 +123,10 @@ fn forwarded() -> MessagePart {
 
 #[test]
 fn text_inside_a_forwarded_message_is_not_fetched() {
-    assert_eq!(text_by_reference(&forwarded()), Vec::<(String, String)>::new());
+    assert_eq!(
+        text_by_reference(&forwarded()),
+        Vec::<(String, String)>::new()
+    );
 }
 
 #[test]

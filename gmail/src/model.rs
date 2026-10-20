@@ -333,7 +333,14 @@ mod reserved_tests {
 
     #[test]
     fn gmails_own_label_names_are_reserved_whatever_their_case() {
-        for name in ["Important", " starred ", "INBOX", "All Mail", "drafts", "Spam"] {
+        for name in [
+            "Important",
+            " starred ",
+            "INBOX",
+            "All Mail",
+            "drafts",
+            "Spam",
+        ] {
             assert!(is_reserved_label_name(name), "{name}");
         }
     }

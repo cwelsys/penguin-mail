@@ -13,13 +13,15 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Local, TimeZone};
 use mailrs_domain::translate::{date_locale, fill, fill_plural, gettext, pgettext};
 use mailrs_domain::{
-    Account, AccountId, Address, Category, EpochMillis, FlagColor, Folder, MailSet, MessageMeta, Role,
-    SmartMailbox, ThreadSummary,
+    Account, AccountId, Address, Category, EpochMillis, FlagColor, Folder, MailSet, MessageMeta,
+    Role, SmartMailbox, ThreadSummary,
 };
 use mailrs_store::threads::ThreadFilter;
 use mailrs_store::{Db, flags, follow_ups, outbox, reminders, threads};
 
 use crate::{Accounts, MailBackend, MovedFrom, SearchQuery, SyncError};
+
+mod browse;
 
 /// Rows in one page of a stored mailbox.
 pub const PAGE: usize = 500;
@@ -303,8 +305,16 @@ impl Mailbox {
     /// What an empty list says: a title, an icon, and for a list that
     /// fills through something the person does, a line saying what.
     pub fn empty(&self) -> Empty {
-        let empty = |title: String, icon| Empty { title, icon, description: String::new() };
-        let with = |title: String, icon, description: String| Empty { title, icon, description };
+        let empty = |title: String, icon| Empty {
+            title,
+            icon,
+            description: String::new(),
+        };
+        let with = |title: String, icon, description: String| Empty {
+            title,
+            icon,
+            description,
+        };
         match self {
             Mailbox::Unified(_)
             | Mailbox::Standard { .. }
@@ -376,7 +386,10 @@ impl Mailbox {
                 account_id,
                 label_id,
                 ..
-            } => Some(ThreadFilter::account(*account_id, MailSet::Mailbox(label_id.clone()))),
+            } => Some(ThreadFilter::account(
+                *account_id,
+                MailSet::Mailbox(label_id.clone()),
+            )),
             Mailbox::Set {
                 account_id, set, ..
             } => Some(ThreadFilter::account(*account_id, set.clone())),
@@ -393,6 +406,13 @@ impl Mailbox {
             | Mailbox::Smart(_) => None,
         }
     }
+}
+
+fn load_notice(account: &str, err: &SyncError) -> String {
+    fill(
+        &gettext("Could not load mail for {account}: {reason}"),
+        &[("account", account), ("reason", &err.to_string())],
+    )
 }
 
 pub fn folder_name(folder: Folder) -> String {
@@ -437,8 +457,11 @@ impl Default for Empty {
 pub struct Scope(Vec<Account>);
 
 impl Scope {
-    pub fn over(accounts: impl IntoIterator<Item = Account>) -> Scope {
-        Scope(accounts.into_iter().collect())
+    /// Those of `accounts` that have mail ([`mailrs_domain::mail_accounts`]).
+    /// A calendar account has none to list or to search, and asking it
+    /// would only add a line saying where its results come from.
+    pub fn of_mail_accounts(accounts: &[Account]) -> Scope {
+        Scope(mailrs_domain::mail_accounts(accounts))
     }
 
     /// The account with this address, ignoring case.
@@ -471,7 +494,8 @@ pub struct View {
     /// The clock the rows read against, in milliseconds since the epoch.
     pub now: EpochMillis,
     /// Most rows to return. `None` asks for one page of a stored mailbox,
-    /// or as much as a Gmail search brings back.
+    /// or as much as a Gmail search brings back. For an explicit paged
+    /// server mailbox this bounds new metadata per page, not the prefix.
     pub limit: Option<usize>,
 }
 
@@ -507,6 +531,9 @@ pub struct Listing {
     pub empty: Empty,
     /// More rows follow this page.
     pub more: bool,
+    /// This page replaces the loaded prefix rather than appending rows.
+    /// Local threading can join messages across server page boundaries.
+    pub replace: bool,
     /// Lines to tell the user: an account whose search failed, or a smart
     /// mailbox nobody has given conditions yet.
     pub notices: Vec<String>,
@@ -591,7 +618,12 @@ struct RemotePage {
 impl RemoteListing {
     /// Whether this is still the search the caller wants, and recent
     /// enough to answer from.
-    fn answers(&self, query: &SearchQuery, accounts: &[AccountId], changes: &[Option<u64>]) -> bool {
+    fn answers(
+        &self,
+        query: &SearchQuery,
+        accounts: &[AccountId],
+        changes: &[Option<u64>],
+    ) -> bool {
         self.query == *query
             && self.accounts == accounts
             && self.changes == changes
@@ -666,6 +698,7 @@ pub struct Mailboxes<A: Accounts> {
     /// The last Gmail search, kept so a folder that reloads a second later
     /// costs nothing.
     remote: Mutex<Option<RemoteListing>>,
+    browsed: Mutex<browse::Browser>,
     unread: Arc<Mutex<HashMap<AccountId, UnreadCounts>>>,
     unread_request: AtomicU64,
     unread_changed: tokio::sync::watch::Sender<()>,
@@ -677,10 +710,17 @@ impl<A: Accounts> Mailboxes<A> {
             accounts,
             db,
             remote: Mutex::new(None),
+            browsed: Mutex::new(browse::Browser::default()),
             unread: Arc::new(Mutex::new(HashMap::new())),
             unread_request: AtomicU64::new(0),
             unread_changed: tokio::sync::watch::channel(()).0,
         }
+    }
+
+    /// A caller's own listing cursors over the same accounts and store.
+    /// A first page from the assistant must not reset a window's next page.
+    pub fn reader(&self) -> Self {
+        Self::new(Arc::clone(&self.accounts), self.db.clone())
     }
 
     /// Throws away the kept Gmail search, so the next listing asks Gmail
@@ -688,6 +728,32 @@ impl<A: Accounts> Mailboxes<A> {
     pub fn forget_remote(&self) {
         *self.remote.lock().expect("remote listing poisoned") = None;
         self.unread.lock().expect("unread counts poisoned").clear();
+    }
+
+    /// Whether this listing needs a server, including an explicit mailbox
+    /// on a service that offers paged browsing. Local mailboxes and other
+    /// providers' labels keep their existing store queries.
+    pub fn is_remote(&self, mailbox: &Mailbox) -> bool {
+        mailbox.is_remote()
+            || match mailbox {
+                Mailbox::Label { account_id, .. } => self.paged_account(*account_id),
+                Mailbox::Standard {
+                    account_id,
+                    which: Standard::Sent | Standard::Drafts,
+                } => self.paged_account(*account_id),
+                _ => false,
+            }
+    }
+
+    /// Unified Sent and Drafts need server pages when an included account
+    /// offers them. Other accounts keep their stored listings.
+    pub fn is_remote_in(&self, mailbox: &Mailbox, scope: &Scope) -> bool {
+        self.is_remote(mailbox)
+            || matches!(mailbox, Mailbox::Unified(Standard::Sent | Standard::Drafts))
+                && scope
+                    .searched(None)
+                    .iter()
+                    .any(|a| self.paged_account(a.id))
     }
 
     /// The page of `mailbox` that follows the rows the caller holds.
@@ -770,10 +836,71 @@ impl<A: Accounts> Mailboxes<A> {
             ..Listing::default()
         };
         match mailbox {
+            Mailbox::Label { account_id, .. } if self.is_remote(mailbox) => {
+                if scope.searched(Some(*account_id)).is_empty() {
+                    return Ok(base);
+                }
+                self.browse(
+                    browse::Browse {
+                        shown: mailbox,
+                        mailbox,
+                        revision: None,
+                    },
+                    scope,
+                    view,
+                    base,
+                    held,
+                    stop,
+                )
+                .await
+            }
+            Mailbox::Standard {
+                account_id,
+                which: which @ (Standard::Sent | Standard::Drafts),
+            } if self.is_remote(mailbox) => {
+                if scope.searched(Some(*account_id)).is_empty() {
+                    return Ok(base);
+                }
+                if let Some(label) = self.standard_label(*account_id, *which) {
+                    self.browse(
+                        browse::Browse {
+                            shown: mailbox,
+                            mailbox: &label,
+                            revision: None,
+                        },
+                        scope,
+                        view,
+                        base,
+                        held,
+                        stop,
+                    )
+                    .await
+                } else {
+                    self.stored(mailbox, view, base, held.last).await
+                }
+            }
+            Mailbox::Unified(Standard::Sent | Standard::Drafts)
+                if scope.searched(None).is_empty() =>
+            {
+                Ok(base)
+            }
+            Mailbox::Unified(which @ (Standard::Sent | Standard::Drafts))
+                if self.is_remote_in(mailbox, scope) =>
+            {
+                self.browse_unified(*which, scope, view, base, held, stop)
+                    .await
+            }
             Mailbox::Folder { account_id, folder } => {
                 let query = SearchQuery::Tree(folder.query());
-                self.remote(&query, *account_id, scope, view, base, Reading { from, stop })
-                    .await
+                self.remote(
+                    &query,
+                    *account_id,
+                    scope,
+                    view,
+                    base,
+                    Reading { from, stop },
+                )
+                .await
             }
             Mailbox::Search { query, account_id } => {
                 let limit = view.limit.unwrap_or(SEARCH_LIMIT);
@@ -820,7 +947,11 @@ impl<A: Accounts> Mailboxes<A> {
         self.unread_changed.subscribe()
     }
 
-    fn server_counts(&self, sidebar: &[Mailbox], refresh: bool) -> HashMap<AccountId, HashMap<MailSet, i64>> {
+    fn server_counts(
+        &self,
+        sidebar: &[Mailbox],
+        refresh: bool,
+    ) -> HashMap<AccountId, HashMap<MailSet, i64>> {
         let ids: std::collections::BTreeSet<_> =
             sidebar.iter().filter_map(Mailbox::account).collect();
         let mut cached = self.unread.lock().expect("unread counts poisoned");
@@ -849,12 +980,19 @@ impl<A: Accounts> Mailboxes<A> {
             // Each account updates on its own; no network await holds up local badges.
             let mut moved = sync.watch_mail_changes();
             let task = tokio::spawn(async move {
-                let answer = sync.services().mail.unread_counts().await.unwrap_or_default();
+                let answer = sync
+                    .services()
+                    .mail
+                    .unread_counts()
+                    .await
+                    .unwrap_or_default();
                 // The wait below runs a minute. An account that stops in
                 // that time must not stay alive, with its connections and
                 // caches, for the sake of this task.
                 drop(sync);
-                let Some(current) = state.upgrade() else { return };
+                let Some(current) = state.upgrade() else {
+                    return;
+                };
                 let saved = {
                     let mut cached = current.lock().expect("unread counts poisoned");
                     if let Some(kept) = cached.get_mut(&id)
@@ -882,21 +1020,26 @@ impl<A: Accounts> Mailboxes<A> {
                     () = tokio::time::sleep(REMOTE_FRESH) => {}
                     Ok(()) = moved.changed() => {}
                 }
-                let Some(current) = state.upgrade() else { return };
+                let Some(current) = state.upgrade() else {
+                    return;
+                };
                 let cached = current.lock().expect("unread counts poisoned");
                 if cached.get(&id).is_some_and(|kept| kept.request == request) {
                     drop(cached);
                     changed.send_replace(());
                 }
             });
-            cached.insert(id, UnreadCounts {
-                at: tokio::time::Instant::now(),
-                changes,
-                counts: counts.get(&id).cloned().unwrap_or_default(),
-                pending: true,
-                request,
-                task: task.abort_handle(),
-            });
+            cached.insert(
+                id,
+                UnreadCounts {
+                    at: tokio::time::Instant::now(),
+                    changes,
+                    counts: counts.get(&id).cloned().unwrap_or_default(),
+                    pending: true,
+                    request,
+                    task: task.abort_handle(),
+                },
+            );
         }
         counts
     }
@@ -910,7 +1053,8 @@ impl<A: Accounts> Mailboxes<A> {
         shown: &Mailbox,
         view: &View,
     ) -> Result<Counts, SyncError> {
-        self.counts_with(sidebar, shown, view, CountMode::Full { refresh: true }).await
+        self.counts_with(sidebar, shown, view, CountMode::Full { refresh: true })
+            .await
     }
 
     /// Reads local mail and cached server counts without starting network work.
@@ -921,7 +1065,8 @@ impl<A: Accounts> Mailboxes<A> {
         shown: &Mailbox,
         view: &View,
     ) -> Result<Counts, SyncError> {
-        self.counts_with(sidebar, shown, view, CountMode::Full { refresh: false }).await
+        self.counts_with(sidebar, shown, view, CountMode::Full { refresh: false })
+            .await
     }
 
     /// What the tray and the Dock show when no window is open: the counts
@@ -931,7 +1076,8 @@ impl<A: Accounts> Mailboxes<A> {
     /// [`Mailboxes::counts`] for the same mailboxes.
     pub async fn inbox_counts(&self, inboxes: &[Mailbox]) -> Result<Counts, SyncError> {
         let shown = Mailbox::Unified(Standard::Inbox);
-        self.counts_with(inboxes, &shown, &View::default(), CountMode::InboxesOnly).await
+        self.counts_with(inboxes, &shown, &View::default(), CountMode::InboxesOnly)
+            .await
     }
 
     async fn counts_with(
@@ -1033,15 +1179,19 @@ impl<A: Accounts> Mailboxes<A> {
                             label_id,
                             ..
                         } => {
-                            let count = labels
-                                .account(*account_id, &MailSet::Mailbox(label_id.clone()));
+                            let count =
+                                labels.account(*account_id, &MailSet::Mailbox(label_id.clone()));
                             if mailbox.counts_unread() {
                                 unread(*account_id, &MailSet::Mailbox(label_id.clone()))
                             } else {
                                 count.threads
                             }
                         }
-                        Mailbox::Folder { .. } | Mailbox::Flag(_) | Mailbox::Vips { .. } if light => continue,
+                        Mailbox::Folder { .. } | Mailbox::Flag(_) | Mailbox::Vips { .. }
+                            if light =>
+                        {
+                            continue;
+                        }
                         Mailbox::Folder { account_id, folder } => {
                             let role = match folder {
                                 Folder::Archive => Role::Archive,
@@ -1099,6 +1249,12 @@ impl<A: Accounts> Mailboxes<A> {
         changed: &[(AccountId, String)],
         view: &View,
     ) -> Result<Option<Changed>, SyncError> {
+        if self.is_remote(mailbox)
+            || matches!(mailbox, Mailbox::Unified(Standard::Sent | Standard::Drafts))
+                && changed.iter().any(|(id, _)| self.paged_account(*id))
+        {
+            return Ok(None);
+        }
         let Some(filter) = self.filter_of(mailbox, view) else {
             return Ok(None);
         };
@@ -1340,10 +1496,7 @@ impl<A: Accounts> Mailboxes<A> {
                 // unlisted would be asked again at once, and an account
                 // whose search keeps failing would keep the loop going.
                 Err(err) => {
-                    listing.notices.push(fill(
-                        &gettext("Could not load mail for {account}: {reason}"),
-                        &[("account", &account.email), ("reason", &err.to_string())],
-                    ));
+                    listing.notices.push(load_notice(&account.email, &err));
                     listing.pages.push(RemotePage {
                         listed: true,
                         ..RemotePage::default()
@@ -1605,7 +1758,11 @@ fn recipients_of(message: &outbox::Queued) -> String {
 /// stays whole. A message the server holds has no bytes here, and its
 /// row takes the list's words as the name.
 fn first_recipient(message: &outbox::Queued) -> Option<Address> {
-    if let Some(found) = message.raw.as_deref().and_then(mailrs_mime::first_recipient) {
+    if let Some(found) = message
+        .raw
+        .as_deref()
+        .and_then(mailrs_mime::first_recipient)
+    {
         return Some(found);
     }
     (!message.recipients.is_empty()).then(|| Address {
@@ -1728,11 +1885,13 @@ pub fn summarize_search(mut hits: Vec<MessageMeta>, grouped: bool) -> Vec<Thread
         return hits.into_iter().map(|hit| row_of(&hit, true)).collect();
     }
     let mut rows: Vec<(ThreadSummary, EpochMillis)> = Vec::new();
+    // A browsed mailbox has no total row cap. Find each conversation by
+    // key rather than scanning the whole loaded prefix for every reply.
+    let mut positions = HashMap::<_, usize>::new();
     for hit in hits {
-        if let Some((row, oldest)) = rows
-            .iter_mut()
-            .find(|(r, _)| r.account_id == hit.account_id && r.id == hit.thread_id)
-        {
+        let key = (hit.account_id, hit.thread_id.clone());
+        if let Some(&at) = positions.get(&key) {
+            let (row, oldest) = &mut rows[at];
             row.message_count += 1;
             row.unread |= hit.is_unread();
             row.starred |= hit.is_flagged();
@@ -1745,6 +1904,7 @@ pub fn summarize_search(mut hits: Vec<MessageMeta>, grouped: bool) -> Vec<Thread
             continue;
         }
         let date = hit.date;
+        positions.insert(key, rows.len());
         rows.push((row_of(&hit, false), date));
     }
     rows.into_iter().map(|(row, _)| row).collect()
@@ -1799,32 +1959,58 @@ mod tests {
             ..Default::default()
         };
         let jane = super::first_recipient(&message).expect("a recipient");
-        assert_eq!((jane.name.as_deref(), jane.email.as_str()), (Some("Doe, Jane"), "jane@example.org"));
+        assert_eq!(
+            (jane.name.as_deref(), jane.email.as_str()),
+            (Some("Doe, Jane"), "jane@example.org")
+        );
         // Held on the server, with no bytes here: the list's words, whole.
-        let held = super::outbox::Queued { recipients: "Theo Brandt".into(), ..Default::default() };
-        assert_eq!(super::first_recipient(&held).and_then(|a| a.name), Some("Theo Brandt".into()));
+        let held = super::outbox::Queued {
+            recipients: "Theo Brandt".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::first_recipient(&held).and_then(|a| a.name),
+            Some("Theo Brandt".into())
+        );
         assert!(super::first_recipient(&super::outbox::Queued::default()).is_none());
     }
 
     #[test]
     fn an_empty_search_says_what_to_try_next() {
-        let search = super::Mailbox::Search { query: "kites".into(), account_id: None };
-        assert_eq!(search.empty().description, "Try other words, or fewer of them.");
+        let search = super::Mailbox::Search {
+            query: "kites".into(),
+            account_id: None,
+        };
+        assert_eq!(
+            search.empty().description,
+            "Try other words, or fewer of them."
+        );
     }
 
     #[test]
     fn empty_reminders_say_how_one_gets_there() {
-        assert!(super::Mailbox::Reminders.empty().description.contains("Remind Me"));
+        assert!(
+            super::Mailbox::Reminders
+                .empty()
+                .description
+                .contains("Remind Me")
+        );
     }
 
     #[test]
     fn an_empty_outbox_shows_the_outbox_tray() {
-        assert_eq!(super::Mailbox::Outbox.empty().icon, "penguin-mail-outgoing-symbolic");
+        assert_eq!(
+            super::Mailbox::Outbox.empty().icon,
+            "penguin-mail-outgoing-symbolic"
+        );
     }
 
     #[test]
     fn the_subtitle_names_the_chosen_category() {
-        assert_eq!(unread_subtitle(6, Some(Category::Primary)), "6 unread · Primary");
+        assert_eq!(
+            unread_subtitle(6, Some(Category::Primary)),
+            "6 unread · Primary"
+        );
         assert_eq!(unread_subtitle(0, Some(Category::Social)), "Social");
     }
 

@@ -53,13 +53,19 @@ fn texts(entry: &VCardEntry) -> Vec<String> {
         .iter()
         .flat_map(|value| match value {
             VCardValue::Component(parts) => parts.clone(),
-            other => other.as_text().map(|t| vec![t.to_string()]).unwrap_or_default(),
+            other => other
+                .as_text()
+                .map(|t| vec![t.to_string()])
+                .unwrap_or_default(),
         })
         .collect()
 }
 
 fn first_text(entry: &VCardEntry) -> Option<String> {
-    texts(entry).into_iter().map(|t| t.trim().to_string()).find(|t| !t.is_empty())
+    texts(entry)
+        .into_iter()
+        .map(|t| t.trim().to_string())
+        .find(|t| !t.is_empty())
 }
 
 /// Whether the line marks itself preferred: `TYPE=pref` in 3.0, `PREF=1`
@@ -67,7 +73,9 @@ fn first_text(entry: &VCardEntry) -> Option<String> {
 fn preferred(entry: &VCardEntry) -> bool {
     let mut line = String::new();
     let _ = entry.write_to(&mut line, true);
-    line.split(':').next().is_some_and(|head| head.to_ascii_uppercase().contains("PREF"))
+    line.split(':')
+        .next()
+        .is_some_and(|head| head.to_ascii_uppercase().contains("PREF"))
 }
 
 fn of(card: &VCard, property: VCardProperty) -> impl Iterator<Item = &VCardEntry> {
@@ -75,7 +83,8 @@ fn of(card: &VCard, property: VCardProperty) -> impl Iterator<Item = &VCardEntry
 }
 
 fn listed(card: &VCard, property: VCardProperty) -> Vec<String> {
-    let (mut first, mut rest): (Vec<&VCardEntry>, Vec<&VCardEntry>) = of(card, property).partition(|e| preferred(e));
+    let (mut first, mut rest): (Vec<&VCardEntry>, Vec<&VCardEntry>) =
+        of(card, property).partition(|e| preferred(e));
     first.append(&mut rest);
     first.into_iter().filter_map(first_text).collect()
 }
@@ -93,9 +102,15 @@ fn photo(card: &VCard) -> Option<Photo> {
                     if encoded.len() > MOST_PHOTO_BYTES / 3 * 4 + 4 {
                         return None;
                     }
-                    Photo::Inline(base64::engine::general_purpose::STANDARD.decode(encoded.trim()).ok()?)
+                    Photo::Inline(
+                        base64::engine::general_purpose::STANDARD
+                            .decode(encoded.trim())
+                            .ok()?,
+                    )
                 }
-                None if text.starts_with("https://") || text.starts_with("http://") => Photo::Uri(text),
+                None if text.starts_with("https://") || text.starts_with("http://") => {
+                    Photo::Uri(text)
+                }
                 None => return None,
             }
         }
@@ -108,18 +123,21 @@ fn photo(card: &VCard) -> Option<Photo> {
 
 pub fn read_card(text: &str) -> Result<Card, DavError> {
     let card = parse(text)?;
-    let name = of(&card, VCardProperty::Fn).next().and_then(first_text).or_else(|| {
-        // N is family;given;additional;prefix;suffix.
-        let parts = texts(of(&card, VCardProperty::N).next()?);
-        let joined = [parts.get(1), parts.first()]
-            .into_iter()
-            .flatten()
-            .filter(|p| !p.is_empty())
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(" ");
-        (!joined.is_empty()).then_some(joined)
-    });
+    let name = of(&card, VCardProperty::Fn)
+        .next()
+        .and_then(first_text)
+        .or_else(|| {
+            // N is family;given;additional;prefix;suffix.
+            let parts = texts(of(&card, VCardProperty::N).next()?);
+            let joined = [parts.get(1), parts.first()]
+                .into_iter()
+                .flatten()
+                .filter(|p| !p.is_empty())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        });
     Ok(Card {
         uid: card.uid().map(str::to_string),
         name,
@@ -132,7 +150,10 @@ pub fn read_card(text: &str) -> Result<Card, DavError> {
 
 /// Text escaped for a vCard value.
 fn escape(text: &str) -> String {
-    text.replace('\\', "\\\\").replace(';', "\\;").replace(',', "\\,").replace('\n', "\\n")
+    text.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
 }
 
 /// The N value for a free-form name: the last word as the family name,
@@ -151,10 +172,22 @@ fn lines_for(fields: &CardFields) -> Vec<(VCardProperty, Vec<String>)> {
         out.push((VCardProperty::N, vec![format!("N:{}", structured(name))]));
     }
     if let Some(emails) = &fields.emails {
-        out.push((VCardProperty::Email, emails.iter().map(|e| format!("EMAIL;TYPE=INTERNET:{}", e.trim())).collect()));
+        out.push((
+            VCardProperty::Email,
+            emails
+                .iter()
+                .map(|e| format!("EMAIL;TYPE=INTERNET:{}", e.trim()))
+                .collect(),
+        ));
     }
     if let Some(phones) = &fields.phones {
-        out.push((VCardProperty::Tel, phones.iter().map(|p| format!("TEL:{}", escape(p))).collect()));
+        out.push((
+            VCardProperty::Tel,
+            phones
+                .iter()
+                .map(|p| format!("TEL:{}", escape(p)))
+                .collect(),
+        ));
     }
     if let Some(org) = &fields.organization {
         out.push((VCardProperty::Org, vec![format!("ORG:{}", escape(org))]));
@@ -163,10 +196,16 @@ fn lines_for(fields: &CardFields) -> Vec<(VCardProperty, Vec<String>)> {
 }
 
 pub fn new_card(uid: &str, fields: &CardFields) -> String {
-    let mut text = format!("BEGIN:VCARD\r\nVERSION:3.0\r\nPRODID:-//Penguin Mail//EN\r\nUID:{uid}\r\n");
+    let mut text =
+        format!("BEGIN:VCARD\r\nVERSION:3.0\r\nPRODID:-//Penguin Mail//EN\r\nUID:{uid}\r\n");
     if fields.name.is_none() {
         // FN is required in every vCard version.
-        let fallback = fields.emails.as_ref().and_then(|e| e.first()).cloned().unwrap_or_default();
+        let fallback = fields
+            .emails
+            .as_ref()
+            .and_then(|e| e.first())
+            .cloned()
+            .unwrap_or_default();
         text.push_str(&format!("FN:{}\r\n", escape(&fallback)));
     }
     for (_, lines) in lines_for(fields) {
@@ -185,8 +224,15 @@ fn entries(lines: &[String], v4: bool) -> Result<Vec<VCardEntry>, DavError> {
         return Ok(Vec::new());
     }
     let version = if v4 { "4.0" } else { "3.0" };
-    let card = parse(&format!("BEGIN:VCARD\r\nVERSION:{version}\r\n{}\r\nEND:VCARD\r\n", lines.join("\r\n")))?;
-    Ok(card.entries.into_iter().filter(|e| e.name != VCardProperty::Version).collect())
+    let card = parse(&format!(
+        "BEGIN:VCARD\r\nVERSION:{version}\r\n{}\r\nEND:VCARD\r\n",
+        lines.join("\r\n")
+    ))?;
+    Ok(card
+        .entries
+        .into_iter()
+        .filter(|e| e.name != VCardProperty::Version)
+        .collect())
 }
 
 pub fn patch_card(existing: &str, fields: &CardFields) -> Result<String, DavError> {
@@ -206,7 +252,11 @@ pub fn patch_card(existing: &str, fields: &CardFields) -> Result<String, DavErro
         }
         let new = entries(&lines, v4)?;
         // The first line of the property keeps its place in the card.
-        let at = card.entries.iter().position(|e| e.name == property).unwrap_or(card.entries.len());
+        let at = card
+            .entries
+            .iter()
+            .position(|e| e.name == property)
+            .unwrap_or(card.entries.len());
         card.entries.retain(|e| e.name != property);
         let at = at.min(card.entries.len());
         for (offset, entry) in new.into_iter().enumerate() {

@@ -30,7 +30,7 @@
       <li>OpenPGP and S/MIME signing and encryption through your own GnuPG</li>
       <li>Remote images blocked until you ask for them</li>
       <li>An assistant that runs on a local model or on Claude, off until you pick one</li>
-      <li>Every control named for screen readers and reachable from the keyboard, in American English, British English, French, German, Spanish, European Portuguese, Traditional Chinese (Taiwan) and Vietnamese</li>
+      <li>Every control named for screen readers and reachable from the keyboard, in American English, British English, French, German, Indonesian, Italian, Japanese, Korean, Polish, Russian, Spanish, European Portuguese, Simplified Chinese, Traditional Chinese (Taiwan), Turkish and Vietnamese</li>
     </ul>
     <p>
       Adding a Gmail or Microsoft account takes one sign-in in your browser.
@@ -109,6 +109,42 @@
 
   <!-- scripts/metainfo.sh writes this list from CHANGELOG.md. -->
   <releases>
+    <release version="1.0.9" date="2026-10-16">
+      <url type="details">https://github.com/c9dev/penguin-mail/releases/tag/v1.0.9</url>
+      <description translate="no">
+        <p>New</p>
+        <ul>
+          <li>Hover over a message link or focus it with the keyboard to see its destination. Messages with potentially deceptive links show a warning.</li>
+          <li>Add a calendar from a CalDAV server, such as Nextcloud, without a mail account: Add Account, then Add a calendar without mail. Remove it before going back to Penguin Mail 1.0.8 or older, which cannot open any of your accounts while it is there.</li>
+          <li>Vietnamese translations, chosen in Preferences.</li>
+          <li>The unread count sits on the app icon in Linux docks that draw badges, such as Dash to Dock, Ubuntu Dock, Dash to Panel and KDE Plasma, matching the tray.</li>
+        </ul>
+        <p>Improved</p>
+        <ul>
+          <li>Choose the assistant model beside your question, start a chat and manage tools from its header, attach files, and move the chat into its own window. The docked assistant shares the mail list's background, with a divider beside the message pane. Window controls follow the open pane. Turn details fold under one row, replies use restrained headings and more readable spacing, and the input grows to four lines.</li>
+          <li>Nested Preferences sections have inset backgrounds and single separators, and server-space rows update when reports arrive.</li>
+          <li>Preferences groups settings by task, with signatures, sender addresses, contacts and server space under each account, and a page list on narrow windows.</li>
+          <li>Reorder accounts by dragging them in Preferences, and choose one default account for all tasks or separate accounts for new messages, replies, forwards, calendar events, assistant actions and startup. Skills and MCP settings expand when you need them.</li>
+        </ul>
+        <p>Fixed</p>
+        <ul>
+          <li>Link previews appear when you hover links inside HTML messages.</li>
+          <li>Rate-limit errors name the account's provider when it is known. Draft dialogs say whether the draft stays in the account or on this computer, and report when the account is not connected.</li>
+          <li>The snap's panel unread count updates without requiring developer mode.</li>
+          <li>The Snap package finds libproxy's backend when it starts, avoiding the missing libpxbackend-1.0.so error.</li>
+          <li>A new-mail notification leaves the notification center once its message is read, archived or deleted, in the window or on another device. A summary of several messages leaves once every one of them has.</li>
+          <li>Mail that arrived while Penguin Mail was closed gets its notifications when the app opens.</li>
+          <li>An account removed and added again shows its calendars at once, rather than half an hour later.</li>
+          <li>Server-space reports update as each account answers, keep newer results when reads overlap, and refresh while the mail window is closed.</li>
+          <li>Switching AI providers keeps web search matched to the selected provider.</li>
+          <li>Files picked with the assistant's Attach button work through Flatpak and in hidden folders. Tool and model switches keep the conversation, model menus reuse recent lists without search-data tooltips, and screen readers hear turn status.</li>
+          <li>Complete Preferences and assistant translations in French, German, Spanish, Vietnamese, and Traditional Chinese.</li>
+          <li>Calendar-file imports point to the Calendar page in Preferences when a calendar needs enabling.</li>
+          <li>Fastmail accounts signed in through the browser report server storage through IMAP when JMAP provides no quota. Gmail signature import appears only for Gmail accounts.</li>
+          <li>JMAP server-space reports recognize Email quotas and use the mail account even when the server lists no quota-primary account. Expansion controls keep their chevrons with custom icon themes.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.8" date="2026-10-13">
       <url type="details">https://github.com/c9dev/penguin-mail/releases/tag/v1.0.8</url>
       <description translate="no">

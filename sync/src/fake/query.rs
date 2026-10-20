@@ -7,8 +7,8 @@
 //! its value as a plain word rather than failing the search.
 
 use mailrs_domain::{EpochMillis, MessageMeta};
-use mailrs_gmail::labels;
 use mailrs_gmail::RemoteLabel;
+use mailrs_gmail::labels;
 
 const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
 
@@ -69,10 +69,7 @@ impl Query {
 
     /// Whether `meta` belongs in this search's results.
     pub fn matches(&self, meta: &MessageMeta, labels: &[RemoteLabel], now: EpochMillis) -> bool {
-        let hidden = [
-            (labels::SPAM, self.spam),
-            (labels::TRASH, self.trash),
-        ];
+        let hidden = [(labels::SPAM, self.spam), (labels::TRASH, self.trash)];
         for (label, asked) in hidden {
             if !asked && !self.anywhere && super::has_label(meta, label) {
                 return false;

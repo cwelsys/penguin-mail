@@ -43,9 +43,12 @@ struct Entry {
 impl Entry {
     fn new(mut event: ChangeEvent) -> Self {
         let ids = match &mut event {
-            ChangeEvent::ThreadsChanged { thread_ids: ids, .. } | ChangeEvent::NewMail { message_ids: ids, .. } => {
-                std::mem::take(ids).into_iter().collect()
+            ChangeEvent::ThreadsChanged {
+                thread_ids: ids, ..
             }
+            | ChangeEvent::NewMail {
+                message_ids: ids, ..
+            } => std::mem::take(ids).into_iter().collect(),
             _ => HashSet::new(),
         };
         Entry { event, ids }
@@ -54,7 +57,13 @@ impl Entry {
     /// The event with the ids it gathered.
     fn into_event(self) -> ChangeEvent {
         let Entry { mut event, ids } = self;
-        if let ChangeEvent::ThreadsChanged { thread_ids: list, .. } | ChangeEvent::NewMail { message_ids: list, .. } = &mut event {
+        if let ChangeEvent::ThreadsChanged {
+            thread_ids: list, ..
+        }
+        | ChangeEvent::NewMail {
+            message_ids: list, ..
+        } = &mut event
+        {
             list.extend(ids);
         }
         event
@@ -70,7 +79,10 @@ pub(crate) struct Outgoing {
 
 impl Outgoing {
     pub(crate) fn new(sender: async_channel::Sender<ChangeEvent>) -> Self {
-        Outgoing { sender, waiting: Arc::default() }
+        Outgoing {
+            sender,
+            waiting: Arc::default(),
+        }
     }
 
     /// Sends `event` now when the channel has room and nothing waits before
@@ -102,7 +114,11 @@ impl Outgoing {
     /// How many events wait in the sender, not yet in the channel.
     #[cfg(test)]
     fn waiting(&self) -> usize {
-        self.waiting.lock().unwrap_or_else(PoisonError::into_inner).events.len()
+        self.waiting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .events
+            .len()
     }
 }
 
@@ -155,13 +171,22 @@ fn merge(events: &mut VecDeque<Entry>, event: ChangeEvent) {
         match (&mut held.event, &event) {
             (
                 ChangeEvent::ThreadsChanged { account_id: a, .. },
-                ChangeEvent::ThreadsChanged { account_id: b, thread_ids: more },
+                ChangeEvent::ThreadsChanged {
+                    account_id: b,
+                    thread_ids: more,
+                },
             )
             | (
                 ChangeEvent::NewMail { account_id: a, .. },
-                ChangeEvent::NewMail { account_id: b, message_ids: more },
+                ChangeEvent::NewMail {
+                    account_id: b,
+                    message_ids: more,
+                },
             ) if a == b => return held.ids.extend(more.iter().cloned()),
-            (ChangeEvent::LabelsChanged { account_id: a }, ChangeEvent::LabelsChanged { account_id: b }) if a == b => {
+            (
+                ChangeEvent::LabelsChanged { account_id: a },
+                ChangeEvent::LabelsChanged { account_id: b },
+            ) if a == b => {
                 return;
             }
             _ => {}
@@ -179,19 +204,29 @@ mod tests {
     use super::*;
 
     fn threads(account_id: i64, id: &str) -> ChangeEvent {
-        ChangeEvent::ThreadsChanged { account_id, thread_ids: vec![id.to_string()] }
+        ChangeEvent::ThreadsChanged {
+            account_id,
+            thread_ids: vec![id.to_string()],
+        }
     }
 
     /// Everything the window reads from `receiver` until it has heard `want`
     /// thread ids of `account`, or times out.
-    async fn heard_threads(receiver: &async_channel::Receiver<ChangeEvent>, account: i64, want: usize) -> BTreeSet<String> {
+    async fn heard_threads(
+        receiver: &async_channel::Receiver<ChangeEvent>,
+        account: i64,
+        want: usize,
+    ) -> BTreeSet<String> {
         let mut heard = BTreeSet::new();
         while heard.len() < want {
             let event = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
                 .await
                 .expect("an event")
                 .unwrap();
-            if let ChangeEvent::ThreadsChanged { account_id, thread_ids } = event
+            if let ChangeEvent::ThreadsChanged {
+                account_id,
+                thread_ids,
+            } = event
                 && account_id == account
             {
                 heard.extend(thread_ids);
@@ -208,7 +243,11 @@ mod tests {
             out.send(threads(1, &format!("t{n}")));
         }
         assert!(receiver.len() <= 4, "the channel holds its bound");
-        assert!(out.waiting() <= 1, "the rest waits merged, not as {} events", out.waiting());
+        assert!(
+            out.waiting() <= 1,
+            "the rest waits merged, not as {} events",
+            out.waiting()
+        );
         let heard = heard_threads(&receiver, 1, 1000).await;
         assert_eq!(heard, (0..1000).map(|n| format!("t{n}")).collect());
     }
@@ -220,23 +259,52 @@ mod tests {
         for n in 0..50 {
             out.send(threads(1, &format!("a{n}")));
             out.send(threads(2, &format!("b{n}")));
-            out.send(ChangeEvent::NewMail { account_id: 1, message_ids: vec![format!("m{n}")] });
-            out.send(ChangeEvent::WriteFailed { account_id: 1, message: format!("failure {n}") });
+            out.send(ChangeEvent::NewMail {
+                account_id: 1,
+                message_ids: vec![format!("m{n}")],
+            });
+            out.send(ChangeEvent::WriteFailed {
+                account_id: 1,
+                message: format!("failure {n}"),
+            });
         }
-        out.send(ChangeEvent::AccountStateChanged { account_id: 1, state: AccountState::Ok });
-        let (mut a, mut b, mut mail, mut failures) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new(), Vec::new());
+        out.send(ChangeEvent::AccountStateChanged {
+            account_id: 1,
+            state: AccountState::Ok,
+        });
+        let (mut a, mut b, mut mail, mut failures) = (
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            Vec::new(),
+        );
         let mut state = false;
-        while !(a.len() == 50 && b.len() == 50 && mail.len() == 50 && failures.len() == 50 && state) {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv()).await.expect("an event").unwrap() {
-                ChangeEvent::ThreadsChanged { account_id: 1, thread_ids } => a.extend(thread_ids),
-                ChangeEvent::ThreadsChanged { account_id: 2, thread_ids } => b.extend(thread_ids),
+        while !(a.len() == 50 && b.len() == 50 && mail.len() == 50 && failures.len() == 50 && state)
+        {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+                .await
+                .expect("an event")
+                .unwrap()
+            {
+                ChangeEvent::ThreadsChanged {
+                    account_id: 1,
+                    thread_ids,
+                } => a.extend(thread_ids),
+                ChangeEvent::ThreadsChanged {
+                    account_id: 2,
+                    thread_ids,
+                } => b.extend(thread_ids),
                 ChangeEvent::NewMail { message_ids, .. } => mail.extend(message_ids),
                 ChangeEvent::WriteFailed { message, .. } => failures.push(message),
                 ChangeEvent::AccountStateChanged { .. } => state = true,
                 other => panic!("unexpected {other:?}"),
             }
         }
-        assert_eq!(failures, (0..50).map(|n| format!("failure {n}")).collect::<Vec<_>>(), "in order");
+        assert_eq!(
+            failures,
+            (0..50).map(|n| format!("failure {n}")).collect::<Vec<_>>(),
+            "in order"
+        );
     }
 
     #[tokio::test]
@@ -249,7 +317,10 @@ mod tests {
         }
         let mut heard = Vec::new();
         while heard.len() < 3 {
-            let event = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv()).await.expect("an event").unwrap();
+            let event = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+                .await
+                .expect("an event")
+                .unwrap();
             if let ChangeEvent::ThreadsChanged { thread_ids, .. } = event {
                 heard.extend(thread_ids);
             }
@@ -265,12 +336,18 @@ mod tests {
         let (sender, receiver) = async_channel::bounded(1);
         let out = Outgoing::new(sender);
         out.send(threads(1, "t0"));
-        let failed = ChangeEvent::WriteFailed { account_id: 1, message: "could not archive".into() };
+        let failed = ChangeEvent::WriteFailed {
+            account_id: 1,
+            message: "could not archive".into(),
+        };
         out.send(failed.clone());
         out.send(failed.clone());
         let mut failures = 0;
         while failures < 2 {
-            let event = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv()).await.expect("an event").unwrap();
+            let event = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+                .await
+                .expect("an event")
+                .unwrap();
             if event == failed {
                 failures += 1;
             }
@@ -282,7 +359,10 @@ mod tests {
         let (sender, receiver) = async_channel::bounded(1);
         let out = Outgoing::new(sender);
         out.send(threads(1, "t0"));
-        out.send(ChangeEvent::WriteFailed { account_id: 1, message: "late".into() });
+        out.send(ChangeEvent::WriteFailed {
+            account_id: 1,
+            message: "late".into(),
+        });
         let (heard, got) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             for _ in 0..2 {
@@ -291,7 +371,10 @@ mod tests {
         });
         let wait = std::time::Duration::from_secs(5);
         assert_eq!(got.recv_timeout(wait).unwrap(), threads(1, "t0"));
-        assert!(matches!(got.recv_timeout(wait), Ok(ChangeEvent::WriteFailed { .. })), "the waiting event goes on its own");
+        assert!(
+            matches!(got.recv_timeout(wait), Ok(ChangeEvent::WriteFailed { .. })),
+            "the waiting event goes on its own"
+        );
     }
 
     /// Each slow-down says the action is still waiting; only the latest
@@ -302,16 +385,39 @@ mod tests {
         let out = Outgoing::new(sender);
         out.send(threads(1, "t0"));
         for n in 0..100 {
-            out.send(ChangeEvent::WaitingOnGmail { account_id: 1, message: format!("wait {n}") });
+            out.send(ChangeEvent::WaitingOnGmail {
+                account_id: 1,
+                message: format!("wait {n}"),
+            });
         }
-        out.send(ChangeEvent::WaitingOnGmail { account_id: 2, message: "other".into() });
+        out.send(ChangeEvent::WaitingOnGmail {
+            account_id: 2,
+            message: "other".into(),
+        });
         assert_eq!(out.waiting(), 2, "one for each account");
         let mut heard = Vec::new();
         while heard.len() < 3 {
-            heard.push(tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv()).await.expect("an event").unwrap());
+            heard.push(
+                tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+                    .await
+                    .expect("an event")
+                    .unwrap(),
+            );
         }
-        assert_eq!(heard[1], ChangeEvent::WaitingOnGmail { account_id: 1, message: "wait 99".into() });
-        assert_eq!(heard[2], ChangeEvent::WaitingOnGmail { account_id: 2, message: "other".into() });
+        assert_eq!(
+            heard[1],
+            ChangeEvent::WaitingOnGmail {
+                account_id: 1,
+                message: "wait 99".into()
+            }
+        );
+        assert_eq!(
+            heard[2],
+            ChangeEvent::WaitingOnGmail {
+                account_id: 2,
+                message: "other".into()
+            }
+        );
     }
 
     #[tokio::test]

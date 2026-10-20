@@ -9,9 +9,9 @@ mod fetch;
 mod writes;
 
 use std::collections::VecDeque;
+use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::ops::RangeInclusive;
 use std::time::Duration;
 
 use mailrs_domain::calendar as model;
@@ -21,9 +21,9 @@ use mailrs_domain::{EpochMillis, Filter, MailSet, MailboxKind, RemoteMailbox, Ro
 use mailrs_gmail::labels as gmail;
 use mailrs_gmail::{
     CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE,
-    CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE,
-    ConnectionsPage, ContactFields, DELETE_SCOPE, DRIVE_FILE_SCOPE, GmailError, Granted,
-    LabelColor, Person, RemoteLabel, SETTINGS_SCOPE, SendAs, limiter, structure,
+    CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE, ConnectionsPage, ContactFields, DELETE_SCOPE,
+    DRIVE_FILE_SCOPE, GmailError, Granted, LabelColor, Person, RemoteLabel, SETTINGS_SCOPE, SendAs,
+    limiter, structure,
 };
 use mailrs_mime::Parts;
 use mailrs_mime::html::html_to_text_with_links;
@@ -31,7 +31,8 @@ use mailrs_mime::html::html_to_text_with_links;
 use super::{
     AutoReplyService, Backfill, CalendarService, Changes, ContactsService, Found, IdentityService,
     KeywordsPage, MailBackend, MailCapabilities, Priority, RawMessage, Relocated, RemoteRef,
-    RulesService, SearchQuery, SendAsAddress, Storage, SyncState, Unapplied, Want, Withheld, priority,
+    RulesService, SearchQuery, SendAsAddress, Storage, SyncState, Unapplied, Want, Withheld,
+    priority,
 };
 use crate::api::{DraftRef, GmailApi, SavedDraft};
 use crate::{BackendError, MailOp};
@@ -72,6 +73,7 @@ const GMAIL: MailCapabilities = MailCapabilities {
     // Gmail keeps these three as its UNREAD, STARRED and MUTE labels.
     keywords: &[keyword::SEEN, keyword::FLAGGED, keyword::MUTED],
     native_search: true,
+    paged_mailboxes: true,
     batch_limit: mailrs_gmail::BATCH_LIMIT,
     renames: false,
     restates: false,
@@ -188,8 +190,13 @@ impl<G: GmailApi> Google<G> {
 /// edition it runs cannot be read with the scopes the app holds, so a
 /// save Google turns down still says why.
 pub fn is_workspace(address: &str) -> bool {
-    let domain = address.trim().rsplit_once('@').map_or("", |(_, domain)| domain);
-    !domain.is_empty() && !domain.eq_ignore_ascii_case("gmail.com") && !domain.eq_ignore_ascii_case("googlemail.com")
+    let domain = address
+        .trim()
+        .rsplit_once('@')
+        .map_or("", |(_, domain)| domain);
+    !domain.is_empty()
+        && !domain.eq_ignore_ascii_case("gmail.com")
+        && !domain.eq_ignore_ascii_case("googlemail.com")
 }
 
 /// What `granted` leaves out, by the scope table CONTEXT.md's Withheld
@@ -226,7 +233,9 @@ impl<G: GmailApi> MailBackend for Google<G> {
             return Ok(None);
         }
         match self.gmail.drive_storage().await {
-            Ok(found) => Ok(found.limit.and_then(|limit| Storage::new(found.usage, limit, None))),
+            Ok(found) => Ok(found
+                .limit
+                .and_then(|limit| Storage::new(found.usage, limit, None))),
             Err(GmailError::MissingScope | GmailError::Http { status: 403, .. }) => Ok(None),
             Err(err) => Err(err.into()),
         }
@@ -292,6 +301,25 @@ impl<G: GmailApi> MailBackend for Google<G> {
         mailbox: Option<&str>,
     ) -> Result<Vec<RemoteRef>, BackendError> {
         self.every_id(mailbox, &fetch::window_query(days)).await
+    }
+
+    async fn mailbox_page(
+        &self,
+        mailbox: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Backfill, BackendError> {
+        let limit = limit.clamp(1, ID_PAGE_SIZE as usize) as u32;
+        match paced(self.gmail.list_labelled(mailbox, "", cursor, limit)).await {
+            Ok(page) => Ok(Backfill {
+                refs: page.messages.into_iter().map(RemoteRef::from).collect(),
+                next: page.next_page_token,
+            }),
+            Err(GmailError::Http { status: 400, .. }) if cursor.is_some() => {
+                Err(BackendError::StateLost)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     async fn inbox_ids(&self) -> Result<Vec<RemoteRef>, BackendError> {
@@ -588,7 +616,9 @@ impl<G: GmailApi> CalendarService for Google<G> {
         create: bool,
         notify: model::Notify,
     ) -> Result<model::Event, BackendError> {
-        paced(self.gmail.put_event(event, etag, create, notify)).await.map_err(calendar_write_error)
+        paced(self.gmail.put_event(event, etag, create, notify))
+            .await
+            .map_err(calendar_write_error)
     }
 
     async fn remove_event(
@@ -598,11 +628,15 @@ impl<G: GmailApi> CalendarService for Google<G> {
         etag: Option<&str>,
         notify: model::Notify,
     ) -> Result<(), BackendError> {
-        paced(self.gmail.remove_event(calendar, id, etag, notify)).await.map_err(calendar_write_error)
+        paced(self.gmail.remove_event(calendar, id, etag, notify))
+            .await
+            .map_err(calendar_write_error)
     }
 
     async fn import_event(&self, event: &model::Event) -> Result<model::Event, BackendError> {
-        paced(self.gmail.import_event(event)).await.map_err(calendar_write_error)
+        paced(self.gmail.import_event(event))
+            .await
+            .map_err(calendar_write_error)
     }
 
     async fn upload_attachment(
@@ -615,7 +649,10 @@ impl<G: GmailApi> CalendarService for Google<G> {
             return Ok(file.clone());
         };
         let path = std::path::Path::new(path);
-        Ok(self.gmail.upload_to_drive(path, &file.title, &file.mime_type, sent).await?)
+        Ok(self
+            .gmail
+            .upload_to_drive(path, &file.title, &file.mime_type, sent)
+            .await?)
     }
 
     async fn share_file(&self, file_id: &str, email: &str) -> Result<(), BackendError> {
@@ -628,7 +665,9 @@ impl<G: GmailApi> CalendarService for Google<G> {
         destination: &str,
         notify: model::Notify,
     ) -> Result<model::Event, BackendError> {
-        paced(self.gmail.move_event(event, destination, notify)).await.map_err(calendar_write_error)
+        paced(self.gmail.move_event(event, destination, notify))
+            .await
+            .map_err(calendar_write_error)
     }
 
     async fn answer_event(
@@ -639,7 +678,9 @@ impl<G: GmailApi> CalendarService for Google<G> {
         answer: Answer,
         note: Option<&str>,
     ) -> Result<model::Event, BackendError> {
-        paced(self.gmail.answer_event(calendar, id, me, answer, note)).await.map_err(calendar_write_error)
+        paced(self.gmail.answer_event(calendar, id, me, answer, note))
+            .await
+            .map_err(calendar_write_error)
     }
 
     async fn edit_list(
@@ -647,7 +688,9 @@ impl<G: GmailApi> CalendarService for Google<G> {
         calendar: &str,
         edit: &model::list::ListEdit,
     ) -> Result<Option<model::Calendar>, BackendError> {
-        paced(self.gmail.edit_calendar_list(calendar, edit)).await.map_err(calendar_write_error)
+        paced(self.gmail.edit_calendar_list(calendar, edit))
+            .await
+            .map_err(calendar_write_error)
     }
 }
 
@@ -755,9 +798,9 @@ mod tests {
     use std::time::Duration;
 
     use mailrs_gmail::{
-        AccountQuota, CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE, CALENDARS_SCOPE, CONTACTS_SCOPE,
-        CONTACTS_WRITE_SCOPE, DELETE_SCOPE, DRIVE_FILE_SCOPE, GMAIL_SCOPE, GmailError, Granted, SETTINGS_SCOPE, SIGN_IN_SCOPES, SendAs,
-        limiter,
+        AccountQuota, CALENDAR_LIST_SCOPE, CALENDAR_LIST_WRITE_SCOPE, CALENDAR_SCOPE,
+        CALENDARS_SCOPE, CONTACTS_SCOPE, CONTACTS_WRITE_SCOPE, DELETE_SCOPE, DRIVE_FILE_SCOPE,
+        GMAIL_SCOPE, GmailError, Granted, SETTINGS_SCOPE, SIGN_IN_SCOPES, SendAs, limiter,
     };
 
     use super::{Google, paced, withheld};
@@ -771,6 +814,40 @@ mod tests {
     fn google() -> (Arc<FakeGmail>, Google<FakeGmail>) {
         let gmail = Arc::new(FakeGmail::new());
         (Arc::clone(&gmail), Google::new(gmail))
+    }
+
+    #[tokio::test]
+    async fn mailbox_pages_keep_gmails_limit_and_restart_expired_cursors() {
+        let (gmail, google) = google();
+        gmail.with(|s| s.page_size = 1000);
+        for n in 0..501 {
+            gmail.seed(crate::fake::meta(
+                &format!("m{n}"),
+                &format!("t{n}"),
+                n,
+                &["SENT"],
+            ));
+        }
+        let first = google.mailbox_page("SENT", None, 1000).await.unwrap();
+        assert_eq!(first.refs.len(), 500);
+        let last = google
+            .mailbox_page("SENT", first.next.as_deref(), 1000)
+            .await
+            .unwrap();
+        assert_eq!(last.refs.len(), 1);
+        assert!(last.next.is_none());
+        assert!(matches!(
+            google.mailbox_page("SENT", Some("expired"), 25).await,
+            Err(BackendError::StateLost)
+        ));
+        gmail.fail_next(GmailError::Http {
+            status: 400,
+            body: "Bad request".into(),
+        });
+        assert!(matches!(
+            google.mailbox_page("SENT", None, 25).await,
+            Err(BackendError::Gmail(GmailError::Http { status: 400, .. }))
+        ));
     }
 
     #[tokio::test]
@@ -831,6 +908,7 @@ mod tests {
                 delete_forever: true,
                 keywords: &["$seen", "$flagged", "$muted"],
                 native_search: true,
+                paged_mailboxes: true,
                 batch_limit: 1000,
                 renames: false,
                 restates: false,
@@ -867,7 +945,11 @@ mod tests {
 
     #[test]
     fn withheld_follows_the_granted_scopes() {
-        assert_eq!(withheld(None), Withheld::NONE, "an unknown grant withholds nothing");
+        assert_eq!(
+            withheld(None),
+            Withheld::NONE,
+            "an unknown grant withholds nothing"
+        );
         let everything = Granted::parse(&SIGN_IN_SCOPES.join(" "));
         assert_eq!(withheld(Some(&everything)), Withheld::NONE);
         let no_calendar = Granted::parse(&format!(
@@ -890,7 +972,10 @@ mod tests {
             !withheld(Some(&delete_only)).delete,
             "mail.google.com covers gmail.modify and is delete's own scope"
         );
-        assert!(withheld(Some(&delete_only)).settings, "settings is asked for on its own");
+        assert!(
+            withheld(Some(&delete_only)).settings,
+            "settings is asked for on its own"
+        );
     }
 
     /// An account that signed in before the five-scope trim may still
@@ -927,7 +1012,11 @@ mod tests {
         ));
         assert_eq!(
             withheld(Some(&unticked_calendar_list)),
-            Withheld { calendar_list: true, change_calendar_list: true, ..Withheld::NONE }
+            Withheld {
+                calendar_list: true,
+                change_calendar_list: true,
+                ..Withheld::NONE
+            }
         );
     }
 
@@ -941,7 +1030,12 @@ mod tests {
         ));
         assert_eq!(
             withheld(Some(&five)),
-            Withheld { calendars: true, change_calendar_list: true, drive: true, ..Withheld::NONE }
+            Withheld {
+                calendars: true,
+                change_calendar_list: true,
+                drive: true,
+                ..Withheld::NONE
+            }
         );
     }
 
@@ -954,6 +1048,12 @@ mod tests {
             "{DELETE_SCOPE} {SETTINGS_SCOPE} {CONTACTS_WRITE_SCOPE} {CALENDAR_SCOPE} {CALENDAR_LIST_WRITE_SCOPE} \
              {CALENDARS_SCOPE}"
         ));
-        assert_eq!(withheld(Some(&no_drive)), Withheld { drive: true, ..Withheld::NONE });
+        assert_eq!(
+            withheld(Some(&no_drive)),
+            Withheld {
+                drive: true,
+                ..Withheld::NONE
+            }
+        );
     }
 }

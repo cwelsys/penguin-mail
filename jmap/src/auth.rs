@@ -40,7 +40,9 @@ impl AuthKind {
     }
 
     pub fn parse(stored: &str) -> Option<AuthKind> {
-        [AuthKind::Basic, AuthKind::Bearer, AuthKind::OAuth].into_iter().find(|k| k.as_str() == stored)
+        [AuthKind::Basic, AuthKind::Bearer, AuthKind::OAuth]
+            .into_iter()
+            .find(|k| k.as_str() == stored)
     }
 }
 
@@ -48,7 +50,10 @@ impl AuthKind {
 impl std::fmt::Debug for Auth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Auth::Basic { user, .. } => f.debug_struct("Basic").field("user", user).finish_non_exhaustive(),
+            Auth::Basic { user, .. } => f
+                .debug_struct("Basic")
+                .field("user", user)
+                .finish_non_exhaustive(),
             Auth::Bearer(_) => f.write_str("Bearer(..)"),
             Auth::OAuth(_) => f.write_str("OAuth(..)"),
         }
@@ -68,14 +73,23 @@ impl Auth {
     /// answered with a 401: OAuth then hands out another token, refreshing
     /// unless another call already did. A password or a fixed token has no
     /// other to give and ignores it.
-    pub(crate) async fn header(&self, refused: Option<&HeaderValue>) -> Result<HeaderValue, JmapError> {
+    pub(crate) async fn header(
+        &self,
+        refused: Option<&HeaderValue>,
+    ) -> Result<HeaderValue, JmapError> {
         let text = match self {
-            Auth::Basic { user, password } => format!("Basic {}", STANDARD.encode(format!("{user}:{password}"))),
+            Auth::Basic { user, password } => {
+                format!("Basic {}", STANDARD.encode(format!("{user}:{password}")))
+            }
             Auth::Bearer(token) => format!("Bearer {token}"),
             Auth::OAuth(session) => {
                 let token = match refused {
                     Some(refused) => {
-                        let refused = refused.to_str().ok().and_then(|h| h.strip_prefix("Bearer ")).unwrap_or_default();
+                        let refused = refused
+                            .to_str()
+                            .ok()
+                            .and_then(|h| h.strip_prefix("Bearer "))
+                            .unwrap_or_default();
                         session.bearer_instead_of(refused).await?
                     }
                     None => session.bearer(false).await?,
@@ -95,7 +109,10 @@ mod tests {
 
     #[tokio::test]
     async fn basic_sends_the_user_and_password_in_base64() {
-        let auth = Auth::Basic { user: "me@example.org".into(), password: "pw".into() };
+        let auth = Auth::Basic {
+            user: "me@example.org".into(),
+            password: "pw".into(),
+        };
         let header = auth.header(None).await.unwrap();
         assert_eq!(header.to_str().unwrap(), "Basic bWVAZXhhbXBsZS5vcmc6cHc=");
         assert!(header.is_sensitive());
@@ -115,9 +132,18 @@ mod tests {
 
     #[test]
     fn debug_shows_neither_password_nor_token() {
-        let basic = format!("{:?}", Auth::Basic { user: "me".into(), password: "hunter2".into() });
+        let basic = format!(
+            "{:?}",
+            Auth::Basic {
+                user: "me".into(),
+                password: "hunter2".into()
+            }
+        );
         let bearer = format!("{:?}", Auth::Bearer("fmu1-secret".into()));
-        assert!(!basic.contains("hunter2") && basic.contains("me"), "{basic}");
+        assert!(
+            !basic.contains("hunter2") && basic.contains("me"),
+            "{basic}"
+        );
         assert!(!bearer.contains("fmu1-secret"), "{bearer}");
     }
 

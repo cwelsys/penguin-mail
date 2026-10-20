@@ -245,12 +245,9 @@ pub fn already_off(text: &str) -> bool {
 /// unsubscribed".
 pub fn off_alone(text: &str) -> bool {
     let said = without(&fold(text));
-    LANGUAGES.iter().any(|words| {
-        words
-            .done_alone
-            .iter()
-            .any(|entry| fold(entry) == said)
-    })
+    LANGUAGES
+        .iter()
+        .any(|words| words.done_alone.iter().any(|entry| fold(entry) == said))
 }
 
 /// Whether two labels say the same once folded, so "Unsubscribed" on a

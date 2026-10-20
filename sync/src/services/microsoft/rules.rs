@@ -20,7 +20,12 @@ fn address_of(recipient: &Recipient) -> Option<String> {
 }
 
 fn recipient(address: &str) -> Recipient {
-    Recipient { email_address: EmailAddress { name: None, address: Some(address.to_string()) } }
+    Recipient {
+        email_address: EmailAddress {
+            name: None,
+            address: Some(address.to_string()),
+        },
+    }
 }
 
 fn is_empty(p: &RulePredicates) -> bool {
@@ -47,12 +52,18 @@ fn too_much(p: &RulePredicates) -> bool {
 /// only a sender and only adds or removes the Other category.
 fn focus_rule(filter: &Filter) -> Option<(String, bool)> {
     let sender = filter.criteria.from.clone()?;
-    let bare = FilterCriteria { from: Some(sender.clone()), ..FilterCriteria::default() };
+    let bare = FilterCriteria {
+        from: Some(sender.clone()),
+        ..FilterCriteria::default()
+    };
     if filter.criteria != bare || filter.action.forward.is_some() {
         return None;
     }
     let other = [MailSet::Category(category::OTHER.into())];
-    match (filter.action.add.as_slice(), filter.action.remove.as_slice()) {
+    match (
+        filter.action.add.as_slice(),
+        filter.action.remove.as_slice(),
+    ) {
         (add, []) if add == other => Some((sender, true)),
         ([], remove) if remove == other => Some((sender, false)),
         _ => None,
@@ -62,11 +73,22 @@ fn focus_rule(filter: &Filter) -> Option<(String, bool)> {
 fn filter_of_override(o: &Override) -> Option<Filter> {
     let sender = o.sender_email_address.address.clone()?;
     let set = vec![MailSet::Category(category::OTHER.into())];
-    let (add, remove) = if o.classify_as == "other" { (set, vec![]) } else { (vec![], set) };
+    let (add, remove) = if o.classify_as == "other" {
+        (set, vec![])
+    } else {
+        (vec![], set)
+    };
     Some(Filter {
         id: Some(format!("{OVERRIDE}{}", o.id)),
-        criteria: FilterCriteria { from: Some(sender), ..FilterCriteria::default() },
-        action: FilterAction { add, remove, forward: None },
+        criteria: FilterCriteria {
+            from: Some(sender),
+            ..FilterCriteria::default()
+        },
+        action: FilterAction {
+            add,
+            remove,
+            forward: None,
+        },
         read_only: false,
         off: false,
     })
@@ -119,7 +141,10 @@ impl<G: GraphApi> Microsoft<G> {
             has_attachment: conditions.has_attachments == Some(true),
             ..FilterCriteria::default()
         };
-        let mut action = FilterAction { forward, ..FilterAction::default() };
+        let mut action = FilterAction {
+            forward,
+            ..FilterAction::default()
+        };
         if let Some(folder) = &actions.move_to_folder {
             action.add.push(self.set_of(folder));
         }
@@ -129,8 +154,19 @@ impl<G: GraphApi> Microsoft<G> {
         if actions.delete == Some(true) {
             action.add.push(MailSet::Role(Role::Trash));
         }
-        action.add.extend(actions.assign_categories.iter().map(|name| MailSet::Mailbox(tag_id(name))));
-        Filter { id: Some(rule.id.clone()), criteria, action, read_only, off: false }
+        action.add.extend(
+            actions
+                .assign_categories
+                .iter()
+                .map(|name| MailSet::Mailbox(tag_id(name))),
+        );
+        Filter {
+            id: Some(rule.id.clone()),
+            criteria,
+            action,
+            read_only,
+            off: false,
+        }
     }
 
     /// The folder a rule moves to for a set, when Outlook can move there.
@@ -144,7 +180,11 @@ impl<G: GraphApi> Microsoft<G> {
 
     fn rule_of(&self, filter: &Filter, sequence: u32) -> Result<MessageRule, BackendError> {
         let c = &filter.criteria;
-        if c.negated_query.is_some() || c.exclude_chats || c.size.is_some() || c.size_comparison.is_some() {
+        if c.negated_query.is_some()
+            || c.exclude_chats
+            || c.size.is_some()
+            || c.size_comparison.is_some()
+        {
             return Err(cannot());
         }
         let conditions = RulePredicates {
@@ -158,13 +198,18 @@ impl<G: GraphApi> Microsoft<G> {
         if is_empty(&conditions) {
             return Err(cannot());
         }
-        let mut actions = RuleActions { stop_processing_rules: Some(false), ..RuleActions::default() };
+        let mut actions = RuleActions {
+            stop_processing_rules: Some(false),
+            ..RuleActions::default()
+        };
         let mut moves: Vec<String> = Vec::new();
         for set in &filter.action.add {
             match set {
                 MailSet::Role(Role::Trash) => actions.delete = Some(true),
                 MailSet::Mailbox(id) if tag_name(id).is_some() => {
-                    actions.assign_categories.extend(tag_name(id).map(str::to_string));
+                    actions
+                        .assign_categories
+                        .extend(tag_name(id).map(str::to_string));
                 }
                 other => moves.push(self.folder_for(other)?),
             }
@@ -208,8 +253,16 @@ impl<G: GraphApi> Microsoft<G> {
 impl<G: GraphApi> RulesService for Microsoft<G> {
     async fn filters(&self) -> Result<Vec<Filter>, BackendError> {
         self.synced().await?;
-        let rules = self.graph().rules().await.map_err(|e| self.service_error(Service::Rules, e))?;
-        let overrides = self.graph().overrides().await.map_err(|e| self.service_error(Service::Rules, e))?;
+        let rules = self
+            .graph()
+            .rules()
+            .await
+            .map_err(|e| self.service_error(Service::Rules, e))?;
+        let overrides = self
+            .graph()
+            .overrides()
+            .await
+            .map_err(|e| self.service_error(Service::Rules, e))?;
         let mut filters: Vec<Filter> = rules.iter().map(|r| self.filter_of(r)).collect();
         filters.extend(overrides.iter().filter_map(filter_of_override));
         Ok(filters)
@@ -225,7 +278,11 @@ impl<G: GraphApi> RulesService for Microsoft<G> {
             return filter_of_override(&made).ok_or_else(cannot);
         }
         self.synced().await?;
-        let held = self.graph().rules().await.map_err(|e| self.service_error(Service::Rules, e))?;
+        let held = self
+            .graph()
+            .rules()
+            .await
+            .map_err(|e| self.service_error(Service::Rules, e))?;
         let sequence = held.iter().map(|r| r.sequence).max().unwrap_or(0) + 1;
         let rule = self.rule_of(filter, sequence)?;
         let made = self

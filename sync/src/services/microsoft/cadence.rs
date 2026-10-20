@@ -32,11 +32,16 @@ impl<G: GraphApi> Microsoft<G> {
         let known = self.known();
         let slow = !known.window_open
             || known.full_check_requested != known.full_check_completed
-            || known.last_slow.is_none_or(|at| at.elapsed() >= OTHERS_EVERY);
+            || known
+                .last_slow
+                .is_none_or(|at| at.elapsed() >= OTHERS_EVERY);
         let inbox = known.roles.get(&Role::Inbox).cloned();
         let due = match slow {
             true => synced,
-            false => synced.into_iter().filter(|f| Some(f) == inbox.as_ref()).collect(),
+            false => synced
+                .into_iter()
+                .filter(|f| Some(f) == inbox.as_ref())
+                .collect(),
         };
         (due, slow, known.full_check_requested)
     }

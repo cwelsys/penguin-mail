@@ -303,11 +303,17 @@ impl Effects for FakeEffects {
     }
 
     fn new_draft(&self, account_id: AccountId) -> Result<Draft, String> {
+        let account = self
+            .desk
+            .accounts()
+            .into_iter()
+            .find(|account| account.id == account_id)
+            .ok_or("Add an account first.")?;
         Ok(Draft::new(
             account_id,
             Address {
                 name: Some("Dana".into()),
-                email: ME.into(),
+                email: account.email,
             },
         ))
     }
@@ -666,12 +672,7 @@ impl Harness {
             }
             let mut services = AccountServices::google(Arc::clone(&gmail));
             edit_second(&gmail, &mut services);
-            let sync = Arc::new(AccountSync::new(
-                id,
-                services,
-                db.clone(),
-                events.clone(),
-            ));
+            let sync = Arc::new(AccountSync::new(id, services, db.clone(), events.clone()));
             fill_store(&sync).await.expect("the second sync runs");
             syncing.insert(id, sync);
             listed.push(Account {
@@ -698,8 +699,16 @@ impl Harness {
             mail: Arc::clone(&mail),
             lists: Arc::new(Mailboxes::new(Arc::clone(&connected), db.clone())),
             gmail: Arc::clone(&settings),
-            calendar: Arc::new(Calendar::new(Arc::clone(&connected), db.clone(), Arc::clone(&calendar_copy))),
-            invitations: Arc::new(Invitations::new(Arc::clone(&connected), db.clone(), calendar_copy)),
+            calendar: Arc::new(Calendar::new(
+                Arc::clone(&connected),
+                db.clone(),
+                Arc::clone(&calendar_copy),
+            )),
+            invitations: Arc::new(Invitations::new(
+                Arc::clone(&connected),
+                db.clone(),
+                calendar_copy,
+            )),
             contacts: Arc::new(ContactBook::new(
                 Arc::clone(&connected),
                 db.clone(),

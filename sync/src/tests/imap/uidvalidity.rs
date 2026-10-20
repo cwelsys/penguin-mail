@@ -13,10 +13,18 @@ use crate::tests::{ImapHarness, imap_harness};
 #[tokio::test]
 async fn a_new_uidvalidity_relists_the_mailbox_and_keeps_ids_and_bodies() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(3));
-    h.imap.deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(2));
-    h.imap.deliver_flagged("INBOX", &message("c", "Ferns", ""), &[], days_ago(1));
-    h.imap.deliver_flagged("Sent", &message("s", "Re: Kites", ""), &["\\Seen"], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(3));
+    h.imap
+        .deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(2));
+    h.imap
+        .deliver_flagged("INBOX", &message("c", "Ferns", ""), &[], days_ago(1));
+    h.imap.deliver_flagged(
+        "Sent",
+        &message("s", "Re: Kites", ""),
+        &["\\Seen"],
+        days_ago(1),
+    );
     h.bootstrap().await;
     h.sync.body("INBOX/1001/1").await.unwrap();
     h.imap.remote_expunge("INBOX", 2);
@@ -24,20 +32,28 @@ async fn a_new_uidvalidity_relists_the_mailbox_and_keeps_ids_and_bodies() {
 
     h.sync.incremental().await.unwrap();
 
-    assert_eq!(h.ids().await, ["INBOX/1001/1", "INBOX/1001/3", "Sent/1002/1"]);
-    assert_eq!(h.location("INBOX/1001/1").await.as_deref(), Some("INBOX/1007/1"));
-    assert_eq!(h.location("INBOX/1001/3").await.as_deref(), Some("INBOX/1007/2"));
+    assert_eq!(
+        h.ids().await,
+        ["INBOX/1001/1", "INBOX/1001/3", "Sent/1002/1"]
+    );
+    assert_eq!(
+        h.location("INBOX/1001/1").await.as_deref(),
+        Some("INBOX/1007/1")
+    );
+    assert_eq!(
+        h.location("INBOX/1001/3").await.as_deref(),
+        Some("INBOX/1007/2")
+    );
     assert_eq!(
         h.location("Sent/1002/1").await.as_deref(),
         Some("Sent/1002/1"),
         "other mailboxes keep their names"
     );
     let account_id = h.account_id;
-    let cached = h
-        .db
-        .read(move |c| bodies::peek_body(c, account_id, "INBOX/1001/1"))
-        .await
-        .unwrap();
+    let cached =
+        h.db.read(move |c| bodies::peek_body(c, account_id, "INBOX/1001/1"))
+            .await
+            .unwrap();
     assert!(cached.is_some(), "the cached body survives");
 
     h.imap.set_flags("INBOX", 1, &["\\Flagged"]);
@@ -63,17 +79,23 @@ async fn a_message_without_a_message_id_comes_back_as_new() {
 #[tokio::test]
 async fn a_relisting_that_fails_runs_again_at_the_next_look() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(2));
-    h.imap.deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(2));
+    h.imap
+        .deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(1));
     h.bootstrap().await;
     h.imap.reset_uidvalidity("INBOX");
-    h.imap.fail_on("headers", ImapError::Network("reset".into()));
+    h.imap
+        .fail_on("headers", ImapError::Network("reset".into()));
 
     assert!(h.sync.incremental().await.is_err());
     h.sync.incremental().await.unwrap();
 
     assert_eq!(h.ids().await, ["INBOX/1001/1", "INBOX/1001/2"]);
-    assert_eq!(h.location("INBOX/1001/2").await.as_deref(), Some("INBOX/1007/2"));
+    assert_eq!(
+        h.location("INBOX/1001/2").await.as_deref(),
+        Some("INBOX/1007/2")
+    );
 }
 
 /// Makes the stored sync state one the adapter cannot read, so the next
@@ -91,7 +113,8 @@ async fn lose_the_place(h: &ImapHarness) {
 async fn listing_the_account_again_passes_over_a_parent_that_holds_no_mail() {
     let h = imap_harness().await;
     h.imap.with(|s| s.mailbox_mut("Projects").no_select = true);
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
     h.bootstrap().await;
     lose_the_place(&h).await;
 
@@ -105,7 +128,8 @@ async fn listing_the_account_again_passes_over_a_parent_that_holds_no_mail() {
 #[tokio::test]
 async fn listing_the_account_again_reads_new_names_back_as_stored_ids() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
     h.bootstrap().await;
     h.imap.reset_uidvalidity("INBOX");
     h.sync.incremental().await.unwrap();
@@ -123,7 +147,8 @@ async fn listing_the_account_again_reads_new_names_back_as_stored_ids() {
 #[tokio::test]
 async fn the_inbox_check_reads_new_names_back_as_stored_ids() {
     let h = imap_harness().await;
-    h.imap.deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
     h.bootstrap().await;
     h.imap.reset_uidvalidity("INBOX");
     h.sync.incremental().await.unwrap();
@@ -170,7 +195,10 @@ async fn a_renamed_mailbox_keeps_its_messages() {
 
     h.sync.rename_label("Projects", "Work").await.unwrap();
 
-    assert_eq!(h.location("INBOX/1001/1").await.as_deref(), Some("Work/1007/1"));
+    assert_eq!(
+        h.location("INBOX/1001/1").await.as_deref(),
+        Some("Work/1007/1")
+    );
     let thread = h.thread_of("INBOX/1001/1").await.unwrap();
     h.sync.ensure_thread(&thread).await.unwrap();
     assert_eq!(h.ids().await, ["INBOX/1001/1"]);
@@ -231,7 +259,10 @@ async fn a_mailbox_renamed_under_a_new_uidvalidity_is_listed_again() {
 
     h.sync.rename_label("Projects", "Work").await.unwrap();
 
-    assert_eq!(h.location("INBOX/1001/1").await.as_deref(), Some("Work/1008/1"));
+    assert_eq!(
+        h.location("INBOX/1001/1").await.as_deref(),
+        Some("Work/1008/1")
+    );
     assert_eq!(h.ids().await, ["INBOX/1001/1"]);
 }
 

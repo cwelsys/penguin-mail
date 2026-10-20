@@ -44,17 +44,28 @@ impl AccountSync {
 
     /// Calls the hold `handle` back. `message_id` and `at` are the copy and
     /// the hour the outbox row keeps for it.
-    pub async fn release_hold(&self, handle: &str, message_id: &str, at: EpochMillis) -> Result<Unheld, SyncError> {
+    pub async fn release_hold(
+        &self,
+        handle: &str,
+        message_id: &str,
+        at: EpochMillis,
+    ) -> Result<Unheld, SyncError> {
         Ok(self.mail.unschedule(handle, message_id, at).await?)
     }
 
     /// Where the hold `handle` stands, with the row's copy and hour.
-    pub async fn settle_hold(&self, handle: &str, message_id: &str, at: EpochMillis) -> Result<Settled, SyncError> {
+    pub async fn settle_hold(
+        &self,
+        handle: &str,
+        message_id: &str,
+        at: EpochMillis,
+    ) -> Result<Settled, SyncError> {
         Ok(self.mail.settle(handle, message_id, at).await?)
     }
 
     /// The copy in Drafts is the draft the message reopens from.
     async fn held_draft(&self, held: &Held) {
-        self.remember_draft(&held.message_id, &held.message_id).await;
+        self.remember_draft(&held.message_id, &held.message_id)
+            .await;
     }
 }

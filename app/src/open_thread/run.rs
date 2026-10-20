@@ -29,7 +29,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mailrs_domain::invitation::{Invitation, Method};
-use mailrs_domain::{AccountId, EpochMillis, FlagColor, MessageBody, MessageMeta, Target, ThreadSummary};
+use mailrs_domain::{
+    AccountId, EpochMillis, FlagColor, MessageBody, MessageMeta, Target, ThreadSummary,
+};
 use mailrs_store::outbox::Queued;
 use mailrs_sync::{Opened, Spot, outbox_id};
 
@@ -42,9 +44,9 @@ use crate::wanted::{Screen, Wanted};
 
 #[cfg(test)]
 mod fake;
+mod receipt;
 #[cfg(test)]
 mod tests;
-mod receipt;
 mod translation;
 
 pub use receipt::ReceiptCard;
@@ -223,7 +225,11 @@ pub trait Effects {
     /// once it has gone out or been deleted.
     fn queued(&self, id: i64) -> Answer<'_, Result<Option<Queued>, String>>;
     /// Whether the receipt `message_id` asks for was answered.
-    fn receipt_answered(&self, account_id: AccountId, message_id: String) -> Answer<'_, Result<bool, String>>;
+    fn receipt_answered(
+        &self,
+        account_id: AccountId,
+        message_id: String,
+    ) -> Answer<'_, Result<bool, String>>;
     /// Sends or declines the receipt and records the answer.
     fn answer_receipt(
         &self,
@@ -607,7 +613,8 @@ impl ThreadRun {
         let Some(wanted) = self.on_screen() else {
             return;
         };
-        let Some(Some(invitation)) = wanted.on_screen(|_| self.desk.invitation_off_calendar()) else {
+        let Some(Some(invitation)) = wanted.on_screen(|_| self.desk.invitation_off_calendar())
+        else {
             return;
         };
         if invitation.cancelled() {
@@ -790,7 +797,8 @@ impl ThreadRun {
     /// Fetches the pictures the bodies name by `cid:`. Their text is on
     /// screen already, and the page waits for these in place.
     async fn images(&self, wanted: &Want<'_>) {
-        let Some(Some(bodies)) = wanted.on_screen(|_| self.thread(OpenThread::wanting_images)) else {
+        let Some(Some(bodies)) = wanted.on_screen(|_| self.thread(OpenThread::wanting_images))
+        else {
             return;
         };
         if bodies.is_empty() {

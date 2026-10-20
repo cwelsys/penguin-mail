@@ -32,9 +32,9 @@ mod rules;
 mod run;
 #[cfg(target_os = "linux")]
 mod webkit;
-pub mod words;
 #[cfg(target_os = "macos")]
 mod wkwebview;
+pub mod words;
 
 #[cfg(test)]
 pub mod fake;

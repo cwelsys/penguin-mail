@@ -52,14 +52,22 @@ fn a_raw_copy_put_again_reads_back_as_the_new_bytes() {
     let (conn, id) = pop3_account(RemoveSetting::Never);
     let long = vec![b'a'; 300_000];
     local_messages::put(&conn, id, "local/1", &long).unwrap();
-    assert_eq!(local_messages::get(&conn, id, "local/1").unwrap(), Some(long));
+    assert_eq!(
+        local_messages::get(&conn, id, "local/1").unwrap(),
+        Some(long)
+    );
     local_messages::put(&conn, id, "local/1", b"short").unwrap();
     assert_eq!(
-        local_messages::get(&conn, id, "local/1").unwrap().as_deref(),
+        local_messages::get(&conn, id, "local/1")
+            .unwrap()
+            .as_deref(),
         Some(&b"short"[..])
     );
     local_messages::put(&conn, id, "local/2", b"").unwrap();
-    assert_eq!(local_messages::get(&conn, id, "local/2").unwrap(), Some(Vec::new()));
+    assert_eq!(
+        local_messages::get(&conn, id, "local/2").unwrap(),
+        Some(Vec::new())
+    );
 }
 
 #[test]
@@ -211,7 +219,8 @@ fn a_failure_goes_once_the_server_stops_listing_it() {
 fn a_uidl_the_server_no_longer_lists_is_forgotten() {
     let (conn, id) = pop3_account(RemoveSetting::Never);
     for n in 0..(pop3::PAGE + 3) {
-        pop3::mark_downloaded(&conn, id, &format!("u{n:04}"), &format!("pop3/u{n:04}"), 10).unwrap();
+        pop3::mark_downloaded(&conn, id, &format!("u{n:04}"), &format!("pop3/u{n:04}"), 10)
+            .unwrap();
     }
     let listed: HashSet<String> = (0..pop3::PAGE).map(|n| format!("u{n:04}")).collect();
     assert_eq!(pop3::forget_gone(&conn, id, &listed).unwrap(), 3);
@@ -288,7 +297,10 @@ fn a_first_check_is_unfinished_until_it_is_marked() {
     let (conn, id) = pop3_account(RemoveSetting::Never);
     assert!(!pop3::first_check_finished(&conn, id).unwrap());
     pop3::mark_downloaded(&conn, id, "u1", "pop3/u1", 10).unwrap();
-    assert!(!pop3::first_check_finished(&conn, id).unwrap(), "a download alone does not finish it");
+    assert!(
+        !pop3::first_check_finished(&conn, id).unwrap(),
+        "a download alone does not finish it"
+    );
     pop3::finish_first_check(&conn, id).unwrap();
     assert!(pop3::first_check_finished(&conn, id).unwrap());
 }

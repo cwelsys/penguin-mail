@@ -10,7 +10,9 @@ use crate::BackendError;
 
 pub(crate) fn backend(err: JmapError) -> BackendError {
     match err {
-        JmapError::Unauthorized | JmapError::BadCredential | JmapError::UnknownClient => BackendError::NeedsReauth,
+        JmapError::Unauthorized | JmapError::BadCredential | JmapError::UnknownClient => {
+            BackendError::NeedsReauth
+        }
         JmapError::Network(detail) => BackendError::Offline(detail),
         // Not a refusal: a retry looks in Sent before it sends again.
         JmapError::SubmitUnknown => BackendError::Offline(JmapError::SubmitUnknown.to_string()),
@@ -18,13 +20,23 @@ pub(crate) fn backend(err: JmapError) -> BackendError {
         JmapError::NotFound => BackendError::NotFound,
         JmapError::CannotCalculateChanges => BackendError::StateLost,
         JmapError::StateMismatch => BackendError::Changed,
-        JmapError::AnswerTooLarge { .. } => BackendError::Refused(gettext("This message is too large to open.")),
+        JmapError::AnswerTooLarge { .. } => {
+            BackendError::Refused(gettext("This message is too large to open."))
+        }
         JmapError::UnknownCapability(_) => BackendError::Unsupported,
-        JmapError::Forbidden(_) => BackendError::Refused(gettext("The server does not allow this.")),
-        JmapError::Method { .. } => BackendError::Refused(gettext("The server refused this request.")),
-        JmapError::Problem { .. } => BackendError::Refused(gettext("The server could not take this request.")),
+        JmapError::Forbidden(_) => {
+            BackendError::Refused(gettext("The server does not allow this."))
+        }
+        JmapError::Method { .. } => {
+            BackendError::Refused(gettext("The server refused this request."))
+        }
+        JmapError::Problem { .. } => {
+            BackendError::Refused(gettext("The server could not take this request."))
+        }
         // What would not parse can quote the answer, addresses and all.
-        JmapError::Decode(_) => BackendError::Refused(gettext("Penguin Mail could not read the server's answer.")),
+        JmapError::Decode(_) => {
+            BackendError::Refused(gettext("Penguin Mail could not read the server's answer."))
+        }
         other => BackendError::Refused(other.to_string()),
     }
 }
@@ -41,8 +53,15 @@ mod tests {
     #[test]
     fn a_server_description_never_reaches_the_refusal_or_the_log() {
         let errors = [
-            JmapError::Method { kind: "unsupportedFilter".into(), description: SAID.into() },
-            JmapError::Problem { status: 400, kind: "notRequest".into(), detail: SAID.into() },
+            JmapError::Method {
+                kind: "unsupportedFilter".into(),
+                description: SAID.into(),
+            },
+            JmapError::Problem {
+                status: 400,
+                kind: "notRequest".into(),
+                detail: SAID.into(),
+            },
             JmapError::Forbidden(SAID.into()),
             JmapError::Forbidden(String::new()),
             JmapError::Decode(SAID.into()),
@@ -50,9 +69,18 @@ mod tests {
         for error in errors {
             let mapped = backend(error);
             let (shown, logged) = (mapped.to_string(), format!("{mapped:?}"));
-            assert!(matches!(mapped, crate::BackendError::Refused(_)), "{logged}");
-            assert!(!shown.contains("ada@example.com") && !logged.contains("ada@example.com"), "{logged}");
-            assert!(!shown.contains("M42") && !logged.contains("unsupportedFilter"), "{logged}");
+            assert!(
+                matches!(mapped, crate::BackendError::Refused(_)),
+                "{logged}"
+            );
+            assert!(
+                !shown.contains("ada@example.com") && !logged.contains("ada@example.com"),
+                "{logged}"
+            );
+            assert!(
+                !shown.contains("M42") && !logged.contains("unsupportedFilter"),
+                "{logged}"
+            );
         }
     }
 }

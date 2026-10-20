@@ -219,7 +219,10 @@ mod tests {
 
     #[test]
     fn debug_output_leaves_out_an_own_clients_secret() {
-        let own = OAuthConfig { client_id: "id.apps.googleusercontent.com".into(), client_secret: "GOCSPX-own".into() };
+        let own = OAuthConfig {
+            client_id: "id.apps.googleusercontent.com".into(),
+            client_secret: "GOCSPX-own".into(),
+        };
         let shown = format!("{own:?}");
         assert!(!shown.contains("GOCSPX-own"), "{shown}");
     }

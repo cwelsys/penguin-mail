@@ -11,8 +11,8 @@ use mail_parser::MessageParser;
 use mail_parser::parsers::MessageStream;
 
 use super::{
-    Described, MAX_DEPTH, Part, Parts, Skim, Spans, Transfer, decoded_size, describe, is_attachment, is_calendar,
-    is_readable, mime_type, numbered, undo_transfer_encoding, unfold,
+    Described, MAX_DEPTH, Part, Parts, Skim, Spans, Transfer, decoded_size, describe,
+    is_attachment, is_calendar, is_readable, mime_type, numbered, undo_transfer_encoding, unfold,
 };
 
 /// How much a scan reads at once.
@@ -29,8 +29,17 @@ const TEXT_KEPT: usize = 8 << 20;
 /// [`super::outline`] of the `len` bytes `source` holds. A part that cannot
 /// be walked from the stream, one with no headers or an enormous header
 /// block, is read whole and walked in memory.
-pub fn outline_from<R: Read + Seek>(source: &mut R, len: u64) -> io::Result<Option<(Parts, Spans)>> {
-    let mut walk = Walk { source, skim: Skim { forwarded: true, spans: Vec::new() } };
+pub fn outline_from<R: Read + Seek>(
+    source: &mut R,
+    len: u64,
+) -> io::Result<Option<(Parts, Spans)>> {
+    let mut walk = Walk {
+        source,
+        skim: Skim {
+            forwarded: true,
+            spans: Vec::new(),
+        },
+    };
     let Some(head) = walk.head(0, len)? else {
         let raw = walk.read(0, len)?;
         return Ok(super::outline(&raw));
@@ -47,7 +56,14 @@ pub fn outline_from<R: Read + Seek>(source: &mut R, len: u64) -> io::Result<Opti
         false => "1".to_string(),
     };
     let root = walk.part(0, len, root_path, 0)?;
-    Ok(Some((Parts { headers, root, incomplete: false }, Spans(walk.skim.spans))))
+    Ok(Some((
+        Parts {
+            headers,
+            root,
+            incomplete: false,
+        },
+        Spans(walk.skim.spans),
+    )))
 }
 
 struct Walk<'r, R> {
@@ -59,7 +75,8 @@ struct Walk<'r, R> {
 impl<R: Read + Seek> Walk<'_, R> {
     /// The bytes from `start` to `end`.
     fn read(&mut self, start: u64, end: u64) -> io::Result<Vec<u8>> {
-        let length = usize::try_from(end.saturating_sub(start)).map_err(|_| io::Error::other("a part longer than memory"))?;
+        let length = usize::try_from(end.saturating_sub(start))
+            .map_err(|_| io::Error::other("a part longer than memory"))?;
         self.source.seek(SeekFrom::Start(start))?;
         let mut bytes = vec![0; length];
         self.source.read_exact(&mut bytes)?;
@@ -107,14 +124,20 @@ impl<R: Read + Seek> Walk<'_, R> {
         let Some(message) = parser.parse_headers(&head) else {
             return self.whole(start, end, path, depth);
         };
-        let Described { mut skimmed, boundary, encoding } = describe(&message);
+        let Described {
+            mut skimmed,
+            boundary,
+            encoding,
+        } = describe(&message);
         let encoding = encoding.as_deref();
         let transfer = Transfer::of(encoding);
         if skimmed.mime_type.starts_with("multipart/") {
             if let (Some(boundary), true) = (boundary, depth < MAX_DEPTH) {
                 let ranges = self.children(body_start, end, boundary.as_bytes())?;
                 for (i, (from, to)) in ranges.into_iter().enumerate() {
-                    skimmed.children.push(self.part(from, to, numbered(&path, i), depth + 1)?);
+                    skimmed
+                        .children
+                        .push(self.part(from, to, numbered(&path, i), depth + 1)?);
                 }
             }
         } else if skimmed.mime_type == "message/rfc822" {
@@ -158,7 +181,12 @@ impl<R: Read + Seek> Walk<'_, R> {
     }
 
     fn note(&mut self, path: &str, start: u64, end: u64, transfer: Transfer, size: u64) {
-        let span = super::Span { start, end, transfer, size };
+        let span = super::Span {
+            start,
+            end,
+            transfer,
+            size,
+        };
         self.skim.spans.push((path.to_string(), span));
     }
 
@@ -198,8 +226,14 @@ impl<R: Read + Seek> Walk<'_, R> {
         };
         let Some(head) = inner else {
             let body = self.read(start, end)?;
-            self.skim
-                .forwarded_message(skimmed, &body, Some(start as usize), encoding, path, depth);
+            self.skim.forwarded_message(
+                skimmed,
+                &body,
+                Some(start as usize),
+                encoding,
+                path,
+                depth,
+            );
             return Ok(());
         };
         let Some(headers) = MessageParser::default().parse_headers(&head) else {
@@ -238,14 +272,17 @@ impl<R: Read + Seek> Walk<'_, R> {
             left -= want as u64;
             for &b in &chunk[..want] {
                 match b {
-                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' if padding == 0 => letters += 1,
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' if padding == 0 => {
+                        letters += 1
+                    }
                     b'=' => padding += 1,
                     b if b.is_ascii_whitespace() => {}
                     _ => return Ok(None),
                 }
             }
         }
-        let whole = letters % 4 != 1 && padding <= 2 && (padding == 0 || (letters + padding) % 4 == 0);
+        let whole =
+            letters % 4 != 1 && padding <= 2 && (padding == 0 || (letters + padding) % 4 == 0);
         Ok(whole.then_some(letters * 3 / 4))
     }
 }
@@ -289,7 +326,13 @@ struct Scan<'r, R> {
 
 impl<'r, R: Read + Seek> Scan<'r, R> {
     fn new(source: &'r mut R, start: u64, end: u64) -> Self {
-        Scan { source, buf: Vec::new(), base: start, pos: start, end }
+        Scan {
+            source,
+            buf: Vec::new(),
+            base: start,
+            pos: start,
+            end,
+        }
     }
 
     fn offset(&self) -> u64 {
@@ -378,7 +421,10 @@ impl<'r, R: Read + Seek> Scan<'r, R> {
         }
         self.fill(1)?;
         let rest = &self.buf[(self.pos - self.base) as usize..];
-        let skipped = rest.iter().position(|c| *c == a || *c == b).unwrap_or(rest.len());
+        let skipped = rest
+            .iter()
+            .position(|c| *c == a || *c == b)
+            .unwrap_or(rest.len());
         let passed = (
             skipped.checked_sub(2).map(|i| rest[i]),
             skipped.checked_sub(1).map(|i| rest[i]),
@@ -489,7 +535,12 @@ mod tests {
     fn same_outline(raw: &[u8]) {
         let from_memory = super::super::outline(raw);
         let from_stream = outline_from(&mut Cursor::new(raw.to_vec()), raw.len() as u64).unwrap();
-        assert_eq!(from_stream, from_memory, "{:?}", String::from_utf8_lossy(&raw[..raw.len().min(600)]));
+        assert_eq!(
+            from_stream,
+            from_memory,
+            "{:?}",
+            String::from_utf8_lossy(&raw[..raw.len().min(600)])
+        );
     }
 
     fn b64(n: usize) -> String {
@@ -562,8 +613,14 @@ mod tests {
             use base64::Engine;
             base64::engine::general_purpose::STANDARD.encode(&inner)
         };
-        same_outline(&wrap("Content-Transfer-Encoding: base64\r\n", encoded.as_bytes()));
-        same_outline(&wrap("", b"From: x@example.com\r\nSubject: inner\r\n\r\nplain inner"));
+        same_outline(&wrap(
+            "Content-Transfer-Encoding: base64\r\n",
+            encoded.as_bytes(),
+        ));
+        same_outline(&wrap(
+            "",
+            b"From: x@example.com\r\nSubject: inner\r\n\r\nplain inner",
+        ));
         same_outline(&wrap("", b"nothing headerlike"));
     }
 
@@ -600,16 +657,25 @@ mod tests {
             let mut raw = String::from("From: a@example.com\r\nSubject: s\r\n");
             let mut depth = 0;
             let mut stack: Vec<String> = Vec::new();
-            let open = |raw: &mut String, stack: &mut Vec<String>, depth: &mut usize, roll: &mut dyn FnMut(u64) -> u64| {
+            let open = |raw: &mut String,
+                        stack: &mut Vec<String>,
+                        depth: &mut usize,
+                        roll: &mut dyn FnMut(u64) -> u64| {
                 let boundary = format!("bd{depth}x{}", roll(3));
-                raw.push_str(&format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"{nl}{nl}"));
+                raw.push_str(&format!(
+                    "Content-Type: multipart/mixed; boundary=\"{boundary}\"{nl}{nl}"
+                ));
                 stack.push(boundary);
                 *depth += 1;
             };
             open(&mut raw, &mut stack, &mut depth, &mut roll);
             for _ in 0..roll(8) {
                 let boundary = stack.last().unwrap().clone();
-                raw.push_str(&format!("{}--{boundary}{}{nl}", if roll(4) == 0 { "pre" } else { "" }, if roll(5) == 0 { "  " } else { "" }));
+                raw.push_str(&format!(
+                    "{}--{boundary}{}{nl}",
+                    if roll(4) == 0 { "pre" } else { "" },
+                    if roll(5) == 0 { "  " } else { "" }
+                ));
                 match roll(7) {
                     0 if stack.len() < 4 => open(&mut raw, &mut stack, &mut depth, &mut roll),
                     1 => raw.push_str(&format!("Content-Type: text/plain{nl}{nl}text {}{nl}", roll(100))),
@@ -632,17 +698,33 @@ mod tests {
             }
             let raw = raw.replace("\r\n\n", "\r\n").into_bytes();
             let from_memory = super::super::outline(&raw);
-            let from_stream = outline_from(&mut Cursor::new(raw.clone()), raw.len() as u64).unwrap();
-            assert_eq!(from_stream, from_memory, "case {case}: {:?}", String::from_utf8_lossy(&raw));
+            let from_stream =
+                outline_from(&mut Cursor::new(raw.clone()), raw.len() as u64).unwrap();
+            assert_eq!(
+                from_stream,
+                from_memory,
+                "case {case}: {:?}",
+                String::from_utf8_lossy(&raw)
+            );
         }
     }
 
     #[test]
     fn a_large_file_is_scanned_in_chunks_and_never_held() {
         let raw = mixed(&b64(40_000_000), "\r\n");
-        let mut source = Counting { inner: Cursor::new(raw.clone()), largest: 0, total: 0 };
-        let (parts, spans) = outline_from(&mut source, raw.len() as u64).unwrap().unwrap();
-        assert!(source.largest <= CHUNK, "one read asked for {} bytes", source.largest);
+        let mut source = Counting {
+            inner: Cursor::new(raw.clone()),
+            largest: 0,
+            total: 0,
+        };
+        let (parts, spans) = outline_from(&mut source, raw.len() as u64)
+            .unwrap()
+            .unwrap();
+        assert!(
+            source.largest <= CHUNK,
+            "one read asked for {} bytes",
+            source.largest
+        );
         let file = parts.find("2").expect("the pdf");
         assert!(file.data.is_none() && file.size > 29_000_000);
         assert_eq!(spans.get("2").map(|s| s.size), Some(file.size as u64));
@@ -673,10 +755,12 @@ mod tests {
                 .into_bytes();
                 raw.resize(raw.len() + pad, b'a');
                 raw.extend_from_slice(
-                    format!("{nl}--b{nl}Content-Type: text/plain{nl}{nl}second{nl}--b--{nl}").as_bytes(),
+                    format!("{nl}--b{nl}Content-Type: text/plain{nl}{nl}second{nl}--b--{nl}")
+                        .as_bytes(),
                 );
                 let from_memory = super::super::outline(&raw);
-                let from_stream = outline_from(&mut Cursor::new(raw.clone()), raw.len() as u64).unwrap();
+                let from_stream =
+                    outline_from(&mut Cursor::new(raw.clone()), raw.len() as u64).unwrap();
                 assert_eq!(from_stream, from_memory, "pad {pad}");
             }
         }
@@ -701,16 +785,31 @@ mod tests {
             "Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\n{text}\r\n--b\r\nContent-Type: text/plain\r\n\r\nsecond\r\n--b--\r\n"
         )
         .into_bytes();
-        let (parts, spans) = outline_from(&mut Cursor::new(raw.clone()), raw.len() as u64).unwrap().unwrap();
+        let (parts, spans) = outline_from(&mut Cursor::new(raw.clone()), raw.len() as u64)
+            .unwrap()
+            .unwrap();
         let first = parts.find("1").expect("the long text");
         let kept = first.data.as_ref().expect("a preview");
-        assert!(kept.len() <= TEXT_KEPT && kept.len() > TEXT_KEPT / 2, "{} bytes kept", kept.len());
+        assert!(
+            kept.len() <= TEXT_KEPT && kept.len() > TEXT_KEPT / 2,
+            "{} bytes kept",
+            kept.len()
+        );
         assert!(text.as_bytes().starts_with(kept));
-        assert_eq!(first.size, text.len() as i64, "the size is the whole part's");
+        assert_eq!(
+            first.size,
+            text.len() as i64,
+            "the size is the whole part's"
+        );
         let span = spans.get("1").expect("its span");
         assert_eq!(span.size, text.len() as u64);
-        let whole = super::super::decode_span(&mut Cursor::new(raw), span).unwrap().expect("the whole part");
+        let whole = super::super::decode_span(&mut Cursor::new(raw), span)
+            .unwrap()
+            .expect("the whole part");
         assert_eq!(whole, text.as_bytes());
-        assert_eq!(parts.find("2").and_then(|p| p.data.clone()), Some(b"second".to_vec()));
+        assert_eq!(
+            parts.find("2").and_then(|p| p.data.clone()),
+            Some(b"second".to_vec())
+        );
     }
 }

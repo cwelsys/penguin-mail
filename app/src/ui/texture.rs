@@ -85,11 +85,19 @@ fn jpeg_size(bytes: &[u8]) -> Option<(u32, u32)> {
 fn tiff_size(bytes: &[u8], big: bool) -> Option<(u32, u32)> {
     let u16_at = |at: usize| {
         let two: [u8; 2] = bytes.get(at..at + 2)?.try_into().ok()?;
-        Some(if big { u16::from_be_bytes(two) } else { u16::from_le_bytes(two) })
+        Some(if big {
+            u16::from_be_bytes(two)
+        } else {
+            u16::from_le_bytes(two)
+        })
     };
     let u32_at = |at: usize| {
         let four: [u8; 4] = bytes.get(at..at + 4)?.try_into().ok()?;
-        Some(if big { u32::from_be_bytes(four) } else { u32::from_le_bytes(four) })
+        Some(if big {
+            u32::from_be_bytes(four)
+        } else {
+            u32::from_le_bytes(four)
+        })
     };
     let directory = usize::try_from(u32_at(4)?).ok()?;
     let entries = usize::from(u16_at(directory)?);

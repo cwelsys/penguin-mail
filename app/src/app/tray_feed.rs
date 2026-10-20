@@ -34,7 +34,8 @@ mod tests {
         move |count| {
             let seen = Arc::clone(&seen);
             Box::pin(async move {
-                tokio::time::sleep(Duration::from_millis(if count % 2 == 0 { 30 } else { 5 })).await;
+                tokio::time::sleep(Duration::from_millis(if count % 2 == 0 { 30 } else { 5 }))
+                    .await;
                 seen.lock().unwrap().push(count);
             })
         }
@@ -57,7 +58,10 @@ mod tests {
         let seen = seen.lock().unwrap();
         assert_eq!(seen.last(), Some(&0), "{seen:?}");
         let before_last = &seen[..seen.len() - 1];
-        assert!(before_last.windows(2).all(|w| w[0] < w[1]), "out of order: {seen:?}");
+        assert!(
+            before_last.windows(2).all(|w| w[0] < w[1]),
+            "out of order: {seen:?}"
+        );
     }
 
     #[tokio::test]

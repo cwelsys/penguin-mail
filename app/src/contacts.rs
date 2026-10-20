@@ -118,7 +118,10 @@ pub fn cue(
             "{account} and {count} more",
             "{account} and {count} more",
             count - 1,
-            &[("account", &names[0].short), ("count", &(count - 1).to_string())],
+            &[
+                ("account", &names[0].short),
+                ("count", &(count - 1).to_string()),
+            ],
         ),
     };
     // A short name that already says everything needs no tooltip.
@@ -366,7 +369,10 @@ mod tests {
         let shown = cue(&[1, 2, 3], Some(2), label);
         assert_eq!(shown.dots, [2, 1, 3]);
         assert_eq!(shown.text, "Work and 2 more");
-        assert_eq!(shown.tooltip.as_deref(), Some("Work, Home, dana@club.example"));
+        assert_eq!(
+            shown.tooltip.as_deref(),
+            Some("Work, Home, dana@club.example")
+        );
         assert_eq!(shown.spoken, "contact in Work, Home, dana@club.example");
     }
 
@@ -448,7 +454,10 @@ mod tests {
             composer: serde_json::to_string(&draft).unwrap(),
             ..Default::default()
         };
-        let all: Vec<String> = queued_recipients(&queued).into_iter().map(|a| a.email).collect();
+        let all: Vec<String> = queued_recipients(&queued)
+            .into_iter()
+            .map(|a| a.email)
+            .collect();
         assert_eq!(all, ["ana@example.pt", "eva@example.pt"]);
         let unreadable = mailrs_store::outbox::Queued {
             composer: "not a draft".into(),
@@ -460,7 +469,10 @@ mod tests {
     #[test]
     fn only_closing_the_offer_turns_it_down() {
         assert!(declines(OfferEnd::Closed));
-        assert!(!declines(OfferEnd::TimedOut), "a person who looked away is asked again");
+        assert!(
+            !declines(OfferEnd::TimedOut),
+            "a person who looked away is asked again"
+        );
         assert!(!declines(OfferEnd::Saved));
     }
 

@@ -89,10 +89,15 @@ pub fn put(conn: &Connection, message: &Queued) -> Result<i64> {
     }
     let by_draft = by_draft.map(|m| m.id);
     let by_hold = match &message.held {
-        Some(handle) if by_draft.is_none() => find_held(conn, message.account_id, handle)?.map(|m| m.id),
+        Some(handle) if by_draft.is_none() => {
+            find_held(conn, message.account_id, handle)?.map(|m| m.id)
+        }
         _ => None,
     };
-    let already = Some(message.id).filter(|id| *id > 0).or(by_draft).or(by_hold);
+    let already = Some(message.id)
+        .filter(|id| *id > 0)
+        .or(by_draft)
+        .or(by_hold);
     if let Some(id) = already {
         let changed = conn.execute(
             "UPDATE outbox SET draft_id = ?2, message_id = ?3, thread_id = ?4, subject = ?5, \
@@ -291,7 +296,10 @@ pub fn try_now(conn: &Connection, now: EpochMillis) -> Result<()> {
 /// heard back from, because it stopped, still makes the next one look in
 /// Sent first.
 pub fn count_try(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("UPDATE outbox SET attempts = attempts + 1 WHERE id = ?1", params![id])?;
+    conn.execute(
+        "UPDATE outbox SET attempts = attempts + 1 WHERE id = ?1",
+        params![id],
+    )?;
     Ok(())
 }
 

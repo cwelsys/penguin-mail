@@ -117,11 +117,10 @@ async fn an_empty_photo_is_recorded_as_none_and_not_asked_again() {
     });
     b.book.refresh(h.account_id).await.unwrap();
     let account_id = h.account_id;
-    let missing = h
-        .db
-        .read(move |c| address_book::missing_photos(c, account_id))
-        .await
-        .unwrap();
+    let missing =
+        h.db.read(move |c| address_book::missing_photos(c, account_id))
+            .await
+            .unwrap();
     assert!(
         missing.is_empty(),
         "the empty photo is recorded, so no refresh asks again"
@@ -341,7 +340,12 @@ async fn a_recipient_already_in_the_sending_accounts_address_book_is_not_new() {
     let h = harness().await;
     let b = book(&h);
     h.fake.with(|s| {
-        s.contacts = vec![person("people/c1", "Mara Okafor", &["mara@example.org"], None)];
+        s.contacts = vec![person(
+            "people/c1",
+            "Mara Okafor",
+            &["mara@example.org"],
+            None,
+        )];
     });
     b.book.refresh(h.account_id).await.unwrap();
 
@@ -409,7 +413,10 @@ async fn save_makes_a_contact_of_each_recipient_on_the_sending_account() {
         .book
         .save_recipients(
             h.account_id,
-            &[to(Some("Ana Lima"), "ana@example.pt"), to(None, "rui@example.pt")],
+            &[
+                to(Some("Ana Lima"), "ana@example.pt"),
+                to(None, "rui@example.pt"),
+            ],
         )
         .await
         .unwrap();
@@ -418,8 +425,12 @@ async fn save_makes_a_contact_of_each_recipient_on_the_sending_account() {
     };
     assert_eq!(saved.saved.len(), 2);
     assert!(saved.failed.is_empty());
-    let made: Vec<(Option<String>, Vec<String>)> =
-        h.fake.with(|s| s.contacts.iter().map(|p| (p.name.clone(), p.emails.clone())).collect());
+    let made: Vec<(Option<String>, Vec<String>)> = h.fake.with(|s| {
+        s.contacts
+            .iter()
+            .map(|p| (p.name.clone(), p.emails.clone()))
+            .collect()
+    });
     assert_eq!(
         made,
         [
@@ -430,11 +441,10 @@ async fn save_makes_a_contact_of_each_recipient_on_the_sending_account() {
     // The address book on this computer has them at once, and neither is
     // offered again.
     let account_id = h.account_id;
-    let held = h
-        .db
-        .read(move |c| address_book::holds(c, account_id, "ana@example.pt"))
-        .await
-        .unwrap();
+    let held =
+        h.db.read(move |c| address_book::holds(c, account_id, "ana@example.pt"))
+            .await
+            .unwrap();
     assert!(held);
     let new = b
         .book

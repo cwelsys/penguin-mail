@@ -102,7 +102,10 @@ impl Session {
             // client cannot read, so it counts as not offered.
             .filter(|account| {
                 capability != CALENDARS
-                    || account.account_capabilities.get(CALENDARS).is_some_and(crate::calendars::fits)
+                    || account
+                        .account_capabilities
+                        .get(CALENDARS)
+                        .is_some_and(crate::calendars::fits)
             })
             .map(|_| id.as_str())
     }
@@ -121,7 +124,10 @@ impl Session {
     pub fn limits(&self) -> Limits {
         let core = self.capabilities.get(CORE);
         let number = |name: &str, fallback: u64| {
-            core.and_then(|c| c.get(name)).and_then(Value::as_u64).filter(|n| *n > 0).unwrap_or(fallback)
+            core.and_then(|c| c.get(name))
+                .and_then(Value::as_u64)
+                .filter(|n| *n > 0)
+                .unwrap_or(fallback)
         };
         let count = |name: &str, fallback: usize| {
             usize::try_from(number(name, fallback as u64)).unwrap_or(fallback)
@@ -131,7 +137,10 @@ impl Session {
             max_size_upload: number("maxSizeUpload", fallback.max_size_upload),
             max_concurrent_upload: count("maxConcurrentUpload", fallback.max_concurrent_upload),
             max_size_request: number("maxSizeRequest", fallback.max_size_request),
-            max_concurrent_requests: count("maxConcurrentRequests", fallback.max_concurrent_requests),
+            max_concurrent_requests: count(
+                "maxConcurrentRequests",
+                fallback.max_concurrent_requests,
+            ),
             max_calls_in_request: count("maxCallsInRequest", fallback.max_calls_in_request),
             max_objects_in_get: count("maxObjectsInGet", fallback.max_objects_in_get),
             max_objects_in_set: count("maxObjectsInSet", fallback.max_objects_in_set),
@@ -141,7 +150,9 @@ impl Session {
     /// The mail account's `maxMailboxesPerEmail`: `None` when the server
     /// sets no limit (null or absent), as Stalwart does.
     pub fn mailboxes_per_email(&self) -> Option<u64> {
-        self.account_capability(MAIL)?.get("maxMailboxesPerEmail")?.as_u64()
+        self.account_capability(MAIL)?
+            .get("maxMailboxesPerEmail")?
+            .as_u64()
     }
 }
 
@@ -173,7 +184,10 @@ mod tests {
     fn a_capability_the_token_lacks_is_not_offered() {
         let session = Session::parse(FASTMAIL.as_bytes()).unwrap();
         assert!(session.offers(SUBMISSION));
-        assert!(!session.offers(VACATION), "Fastmail tokens cannot reach the automatic reply");
+        assert!(
+            !session.offers(VACATION),
+            "Fastmail tokens cannot reach the automatic reply"
+        );
         assert!(!session.offers(SIEVE));
         assert!(!session.offers(CALENDARS));
     }
@@ -181,7 +195,9 @@ mod tests {
     #[test]
     fn a_primary_account_without_the_capability_does_not_count() {
         let mut session = Session::parse(FASTMAIL.as_bytes()).unwrap();
-        session.primary_accounts.insert(CONTACTS.into(), "u1a2b3c4".into());
+        session
+            .primary_accounts
+            .insert(CONTACTS.into(), "u1a2b3c4".into());
         assert_eq!(session.account_for(CONTACTS), None);
     }
 
@@ -197,7 +213,9 @@ mod tests {
     #[test]
     fn missing_limits_fall_back_to_small_ones() {
         let mut session = Session::parse(RFC.as_bytes()).unwrap();
-        session.capabilities.insert(CORE.into(), serde_json::json!({}));
+        session
+            .capabilities
+            .insert(CORE.into(), serde_json::json!({}));
         assert_eq!(session.limits(), Limits::FALLBACK);
     }
 
@@ -211,20 +229,34 @@ mod tests {
 
     #[test]
     fn a_session_that_does_not_fit_does_not_repeat_its_values() {
-        let said = Session::parse(br#"{"username": ["secret@example.org"]}"#).unwrap_err().to_string();
+        let said = Session::parse(br#"{"username": ["secret@example.org"]}"#)
+            .unwrap_err()
+            .to_string();
         assert!(!said.contains("secret@example.org"), "{said}");
     }
 
     #[test]
     fn a_body_that_is_not_a_session_says_so() {
-        assert!(matches!(Session::parse(b"<html>"), Err(JmapError::Decode(_))));
+        assert!(matches!(
+            Session::parse(b"<html>"),
+            Err(JmapError::Decode(_))
+        ));
     }
 
     fn with_calendars(shape: serde_json::Value) -> Session {
         let mut session = Session::parse(FASTMAIL.as_bytes()).unwrap();
-        session.capabilities.insert(CALENDARS.into(), serde_json::json!({}));
-        session.primary_accounts.insert(CALENDARS.into(), "u1a2b3c4".into());
-        session.accounts.get_mut("u1a2b3c4").unwrap().account_capabilities.insert(CALENDARS.into(), shape);
+        session
+            .capabilities
+            .insert(CALENDARS.into(), serde_json::json!({}));
+        session
+            .primary_accounts
+            .insert(CALENDARS.into(), "u1a2b3c4".into());
+        session
+            .accounts
+            .get_mut("u1a2b3c4")
+            .unwrap()
+            .account_capabilities
+            .insert(CALENDARS.into(), shape);
         session
     }
 
@@ -245,6 +277,9 @@ mod tests {
             "maxExpandedQueryDuration": "P366D", "maxParticipantsPerEvent": null, "mayCreateCalendar": true
         }));
         assert!(!session.offers(CALENDARS));
-        assert!(!with_calendars(serde_json::json!({})).offers(CALENDARS), "an empty object names nothing");
+        assert!(
+            !with_calendars(serde_json::json!({})).offers(CALENDARS),
+            "an empty object names nothing"
+        );
     }
 }

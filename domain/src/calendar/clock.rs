@@ -47,7 +47,12 @@ pub fn parse_time(text: &str, locale: Locale) -> Option<NaiveTime> {
         return Some(at);
     }
     let (am, pm) = periods(locale);
-    let words = [(pm, 12), (am, 0), ("PM".to_string(), 12), ("AM".to_string(), 0)];
+    let words = [
+        (pm, 12),
+        (am, 0),
+        ("PM".to_string(), 12),
+        ("AM".to_string(), 0),
+    ];
     words.iter().find_map(|(word, add)| {
         let clock = strip_word(text, word)?;
         let (hour, minute) = clock.split_once(':')?;
@@ -82,7 +87,13 @@ fn periods(locale: Locale) -> (String, String) {
     let word = |hour| {
         fixed_date()
             .and_hms_opt(hour, 0, 0)
-            .map(|at| at.and_utc().format_localized("%p", locale).to_string().trim().to_string())
+            .map(|at| {
+                at.and_utc()
+                    .format_localized("%p", locale)
+                    .to_string()
+                    .trim()
+                    .to_string()
+            })
             .unwrap_or_default()
     };
     let (am, pm) = (word(1), word(13));
@@ -98,7 +109,9 @@ fn periods(locale: Locale) -> (String, String) {
 /// spells the hour with `%I` or `%l`, or defers to the locale's own
 /// 12-hour pattern with `%r`.
 pub fn is_12_hour_pattern(t_fmt: &str) -> bool {
-    ["%I", "%l", "%r", "%p", "%P"].iter().any(|marker| t_fmt.contains(marker))
+    ["%I", "%l", "%r", "%p", "%P"]
+        .iter()
+        .any(|marker| t_fmt.contains(marker))
 }
 
 fn fixed_date() -> NaiveDate {
@@ -118,23 +131,35 @@ mod tests {
     #[test]
     fn a_time_in_the_12_hour_clock_drops_the_leading_zero_and_names_the_period() {
         let at = NaiveTime::from_hms_opt(15, 5, 0).unwrap();
-        assert_eq!(format_time(at, ClockFormat::Hour12, Locale::en_US), "3:05 PM");
+        assert_eq!(
+            format_time(at, ClockFormat::Hour12, Locale::en_US),
+            "3:05 PM"
+        );
     }
 
     #[test]
     fn midnight_in_the_12_hour_clock_reads_twelve_am() {
         let at = NaiveTime::from_hms_opt(0, 5, 0).unwrap();
-        assert_eq!(format_time(at, ClockFormat::Hour12, Locale::en_US), "12:05 AM");
+        assert_eq!(
+            format_time(at, ClockFormat::Hour12, Locale::en_US),
+            "12:05 AM"
+        );
     }
 
     #[test]
     fn a_24_hour_time_reads_back_the_same_time() {
-        assert_eq!(parse_time("15:05", Locale::en_US), NaiveTime::from_hms_opt(15, 5, 0));
+        assert_eq!(
+            parse_time("15:05", Locale::en_US),
+            NaiveTime::from_hms_opt(15, 5, 0)
+        );
     }
 
     #[test]
     fn a_12_hour_time_reads_back_the_same_time() {
-        assert_eq!(parse_time("3:05 PM", Locale::en_US), NaiveTime::from_hms_opt(15, 5, 0));
+        assert_eq!(
+            parse_time("3:05 PM", Locale::en_US),
+            NaiveTime::from_hms_opt(15, 5, 0)
+        );
     }
 
     #[test]
@@ -145,15 +170,29 @@ mod tests {
 
     #[test]
     fn a_locale_without_day_period_words_tells_morning_from_afternoon() {
-        let morning = format_time(NaiveTime::from_hms_opt(3, 0, 0).unwrap(), ClockFormat::Hour12, Locale::pt_PT);
-        let afternoon = format_time(NaiveTime::from_hms_opt(15, 0, 0).unwrap(), ClockFormat::Hour12, Locale::pt_PT);
+        let morning = format_time(
+            NaiveTime::from_hms_opt(3, 0, 0).unwrap(),
+            ClockFormat::Hour12,
+            Locale::pt_PT,
+        );
+        let afternoon = format_time(
+            NaiveTime::from_hms_opt(15, 0, 0).unwrap(),
+            ClockFormat::Hour12,
+            Locale::pt_PT,
+        );
         assert_ne!(morning, afternoon);
         assert_eq!(afternoon, "3:00 PM");
     }
 
     #[test]
     fn every_12_hour_time_reads_back_in_its_own_locale() {
-        for locale in [Locale::en_US, Locale::pt_PT, Locale::de_DE, Locale::el_GR, Locale::ko_KR] {
+        for locale in [
+            Locale::en_US,
+            Locale::pt_PT,
+            Locale::de_DE,
+            Locale::el_GR,
+            Locale::ko_KR,
+        ] {
             for hour in 0..24 {
                 let at = NaiveTime::from_hms_opt(hour, 30, 0).unwrap();
                 let text = format_time(at, ClockFormat::Hour12, locale);

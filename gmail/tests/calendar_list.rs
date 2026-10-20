@@ -73,18 +73,31 @@ async fn a_new_calendar_is_made_then_coloured_on_the_list() {
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
-        .and(path(format!("{CALENDAR}/users/me/calendarList/abc%40group.calendar.google.com")))
+        .and(path(format!(
+            "{CALENDAR}/users/me/calendarList/abc%40group.calendar.google.com"
+        )))
         .and(query_param("colorRgbFormat", "true"))
-        .and(body_json(json!({"backgroundColor": "#16a766", "foregroundColor": "#ffffff"})))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(entry("abc@group.calendar.google.com", "Climbing", "#16a766")),
-        )
+        .and(body_json(
+            json!({"backgroundColor": "#16a766", "foregroundColor": "#ffffff"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(entry(
+            "abc@group.calendar.google.com",
+            "Climbing",
+            "#16a766",
+        )))
         .expect(1)
         .mount(&server)
         .await;
-    let edit = ListEdit::Create { name: "Climbing".into(), color: "#16a766".into(), zone: "Europe/Lisbon".into() };
-    let made = client(&server).edit_calendar_list("new:x", &edit).await.unwrap().unwrap();
+    let edit = ListEdit::Create {
+        name: "Climbing".into(),
+        color: "#16a766".into(),
+        zone: "Europe/Lisbon".into(),
+    };
+    let made = client(&server)
+        .edit_calendar_list("new:x", &edit)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(made.id, "abc@group.calendar.google.com");
     assert_eq!(made.color, "#16a766");
     assert_eq!(made.access, Access::Owner);
@@ -97,7 +110,9 @@ async fn a_new_calendar_without_a_zone_leaves_the_zone_to_google() {
     Mock::given(method("POST"))
         .and(path(format!("{CALENDAR}/calendars")))
         .and(body_json(json!({"summary": "Climbing"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "abc", "summary": "Climbing"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "abc", "summary": "Climbing"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -106,8 +121,15 @@ async fn a_new_calendar_without_a_zone_leaves_the_zone_to_google() {
         .respond_with(ResponseTemplate::new(200).set_body_json(entry("abc", "Climbing", "#3f51b5")))
         .mount(&server)
         .await;
-    let edit = ListEdit::Create { name: "Climbing".into(), color: "#3f51b5".into(), zone: String::new() };
-    client(&server).edit_calendar_list("new:x", &edit).await.unwrap();
+    let edit = ListEdit::Create {
+        name: "Climbing".into(),
+        color: "#3f51b5".into(),
+        zone: String::new(),
+    };
+    client(&server)
+        .edit_calendar_list("new:x", &edit)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -117,13 +139,20 @@ async fn a_dark_colour_goes_out_with_white_text() {
     Mock::given(method("PATCH"))
         .and(path(format!("{CALENDAR}/users/me/calendarList/work")))
         .and(query_param("colorRgbFormat", "true"))
-        .and(body_json(json!({"backgroundColor": "#3f51b5", "foregroundColor": "#ffffff"})))
+        .and(body_json(
+            json!({"backgroundColor": "#3f51b5", "foregroundColor": "#ffffff"}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(entry("work", "Work", "#3f51b5")))
         .expect(1)
         .mount(&server)
         .await;
-    let edit = ListEdit::Recolor { color: "#3f51b5".into() };
-    let answered = client(&server).edit_calendar_list("work", &edit).await.unwrap();
+    let edit = ListEdit::Recolor {
+        color: "#3f51b5".into(),
+    };
+    let answered = client(&server)
+        .edit_calendar_list("work", &edit)
+        .await
+        .unwrap();
     assert_eq!(answered.map(|c| c.color), Some("#3f51b5".into()));
 }
 
@@ -138,7 +167,9 @@ async fn renaming_patches_the_calendar_and_clears_the_list_name() {
     Mock::given(method("PATCH"))
         .and(path(format!("{CALENDAR}/calendars/work")))
         .and(body_json(json!({"summary": "Office"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "work", "summary": "Office"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "work", "summary": "Office"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -149,8 +180,13 @@ async fn renaming_patches_the_calendar_and_clears_the_list_name() {
         .expect(1)
         .mount(&server)
         .await;
-    let edit = ListEdit::Rename { name: "Office".into() };
-    let renamed = client(&server).edit_calendar_list("work", &edit).await.unwrap();
+    let edit = ListEdit::Rename {
+        name: "Office".into(),
+    };
+    let renamed = client(&server)
+        .edit_calendar_list("work", &edit)
+        .await
+        .unwrap();
     assert_eq!(renamed.map(|c| c.name), Some("Office".into()));
 }
 
@@ -162,7 +198,9 @@ async fn a_rename_without_the_list_permission_still_renames() {
     mount_token(&server).await;
     Mock::given(method("PATCH"))
         .and(path(format!("{CALENDAR}/calendars/work")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "work", "summary": "Office"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "work", "summary": "Office"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -174,8 +212,16 @@ async fn a_rename_without_the_list_permission_still_renames() {
         })))
         .mount(&server)
         .await;
-    let edit = ListEdit::Rename { name: "Office".into() };
-    assert_eq!(client(&server).edit_calendar_list("work", &edit).await.unwrap(), None);
+    let edit = ListEdit::Rename {
+        name: "Office".into(),
+    };
+    assert_eq!(
+        client(&server)
+            .edit_calendar_list("work", &edit)
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -183,12 +229,20 @@ async fn unsubscribing_takes_the_calendar_off_the_list() {
     let server = MockServer::start().await;
     mount_token(&server).await;
     Mock::given(method("DELETE"))
-        .and(path(format!("{CALENDAR}/users/me/calendarList/en.portuguese%23holiday%40group.v.calendar.google.com")))
+        .and(path(format!(
+            "{CALENDAR}/users/me/calendarList/en.portuguese%23holiday%40group.v.calendar.google.com"
+        )))
         .respond_with(ResponseTemplate::new(204))
         .expect(1)
         .mount(&server)
         .await;
-    assert_eq!(client(&server).edit_calendar_list(HOLIDAYS, &ListEdit::Unsubscribe).await.unwrap(), None);
+    assert_eq!(
+        client(&server)
+            .edit_calendar_list(HOLIDAYS, &ListEdit::Unsubscribe)
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -201,7 +255,13 @@ async fn deleting_deletes_the_calendar_itself() {
         .expect(1)
         .mount(&server)
         .await;
-    assert_eq!(client(&server).edit_calendar_list("work", &ListEdit::Delete).await.unwrap(), None);
+    assert_eq!(
+        client(&server)
+            .edit_calendar_list("work", &ListEdit::Delete)
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -210,10 +270,15 @@ async fn deleting_a_calendar_already_gone_says_not_found() {
     mount_token(&server).await;
     Mock::given(method("DELETE"))
         .and(path(format!("{CALENDAR}/calendars/work")))
-        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"error": {"code": 404, "message": "Not Found"}})))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"error": {"code": 404, "message": "Not Found"}})),
+        )
         .mount(&server)
         .await;
-    let gone = client(&server).edit_calendar_list("work", &ListEdit::Delete).await;
+    let gone = client(&server)
+        .edit_calendar_list("work", &ListEdit::Delete)
+        .await;
     assert!(matches!(gone, Err(GmailError::NotFound)), "{gone:?}");
 }
 
@@ -224,12 +289,17 @@ async fn hiding_sets_googles_hidden_flag() {
     Mock::given(method("PATCH"))
         .and(path(format!("{CALENDAR}/users/me/calendarList/team")))
         .and(body_json(json!({"hidden": true})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "team", "summary": "Team",
-            "accessRole": "writer", "hidden": true})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "team", "summary": "Team",
+            "accessRole": "writer", "hidden": true})),
+        )
         .expect(1)
         .mount(&server)
         .await;
-    client(&server).edit_calendar_list("team", &ListEdit::Hide { hidden: true }).await.unwrap();
+    client(&server)
+        .edit_calendar_list("team", &ListEdit::Hide { hidden: true })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -239,12 +309,17 @@ async fn showing_again_clears_hidden_and_selects_it() {
     Mock::given(method("PATCH"))
         .and(path(format!("{CALENDAR}/users/me/calendarList/team")))
         .and(body_json(json!({"hidden": false, "selected": true})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "team", "summary": "Team",
-            "accessRole": "writer", "selected": true})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "team", "summary": "Team",
+            "accessRole": "writer", "selected": true})),
+        )
         .expect(1)
         .mount(&server)
         .await;
-    client(&server).edit_calendar_list("team", &ListEdit::Hide { hidden: false }).await.unwrap();
+    client(&server)
+        .edit_calendar_list("team", &ListEdit::Hide { hidden: false })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -253,7 +328,9 @@ async fn subscribing_puts_the_address_on_the_list() {
     mount_token(&server).await;
     Mock::given(method("POST"))
         .and(path(format!("{CALENDAR}/users/me/calendarList")))
-        .and(body_json(json!({"id": "https://example.com/team.ics", "selected": true})))
+        .and(body_json(
+            json!({"id": "https://example.com/team.ics", "selected": true}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": "q8v3@import.calendar.google.com", "summary": "Team fixtures",
             "backgroundColor": "#9e69af", "accessRole": "reader", "selected": true
@@ -261,8 +338,14 @@ async fn subscribing_puts_the_address_on_the_list() {
         .expect(1)
         .mount(&server)
         .await;
-    let edit = ListEdit::Subscribe { url: "https://example.com/team.ics".into() };
-    let added = client(&server).edit_calendar_list("new:x", &edit).await.unwrap().unwrap();
+    let edit = ListEdit::Subscribe {
+        url: "https://example.com/team.ics".into(),
+    };
+    let added = client(&server)
+        .edit_calendar_list("new:x", &edit)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(added.id, "q8v3@import.calendar.google.com");
     assert_eq!(added.access, Access::Reader);
 }
@@ -280,6 +363,10 @@ async fn a_holiday_calendar_goes_on_the_list_by_its_id() {
         .expect(1)
         .mount(&server)
         .await;
-    let added = client(&server).edit_calendar_list(HOLIDAYS, &ListEdit::Add).await.unwrap().unwrap();
+    let added = client(&server)
+        .edit_calendar_list(HOLIDAYS, &ListEdit::Add)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(added.name, "Holidays in Portugal");
 }

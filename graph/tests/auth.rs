@@ -184,5 +184,8 @@ async fn a_token_answer_past_the_cap_is_refused() {
         format!("{}/token", server.uri()),
     );
     let result = client.refresh("old").await;
-    assert!(matches!(result, Err(GraphError::TooLarge { .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(GraphError::TooLarge { .. })),
+        "{result:?}"
+    );
 }

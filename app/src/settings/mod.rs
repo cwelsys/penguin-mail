@@ -9,10 +9,12 @@ use mailrs_domain::calendar::week::WeekStart;
 use mailrs_domain::translate::{fill_plural, gettext, pgettext};
 use serde::{Deserialize, Serialize};
 
+mod accounts;
 mod change;
 mod file;
 pub mod mcp;
 
+pub use accounts::{AccountChoice, AccountDefaults, AccountUse, accounts_for, preferred_calendar};
 pub use change::{AiChange, Change, Effect, Effects, Setting};
 pub use file::{Opened, Saver};
 
@@ -38,8 +40,10 @@ pub struct Settings {
     pub notifications: bool,
     /// Show sender and subject in notifications, not just a count.
     pub notification_previews: bool,
-    /// Address new messages come from; the first account when unset.
+    /// The general default account; each task can follow it or keep its context.
     pub default_account: Option<String>,
+    /// Per-task choices, preserving context unless the person overrides it.
+    pub account_defaults: AccountDefaults,
     /// Markdown signature per account address.
     pub signatures: BTreeMap<String, String>,
     /// How long Undo stays available after Send.
@@ -305,6 +309,10 @@ impl Use {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiSettings {
+    /// Allow reasoning in assistant requests where the provider supports it.
+    pub assistant_reasoning: bool,
+    /// Allow reasoning in email translation requests independently of chats.
+    pub translation_reasoning: bool,
     /// Language of answers, summaries and translations. Empty follows the interface.
     pub language: String,
     /// Invalidates in-flight translations without persisting a request lifetime.
@@ -338,6 +346,8 @@ pub struct AiSettings {
 impl Default for AiSettings {
     fn default() -> Self {
         AiSettings {
+            assistant_reasoning: true,
+            translation_reasoning: false,
             language: String::new(),
             language_revision: 0,
             provider: AiProvider::Off,
@@ -465,6 +475,7 @@ impl Default for Settings {
             notification_previews: true,
             never_translate: Vec::new(),
             default_account: None,
+            account_defaults: AccountDefaults::default(),
             signatures: BTreeMap::new(),
             undo_send: UndoSend::Ten,
             flag_color: mailrs_domain::FlagColor::Red,
@@ -901,18 +912,13 @@ impl Settings {
 
     /// `emails` in the order the user chose; unlisted ones keep theirs, last.
     pub fn ordered<'a>(&self, emails: &[&'a str]) -> Vec<&'a str> {
-        let rank = |email: &str| {
-            self.account_order
-                .iter()
-                .position(|e| e.eq_ignore_ascii_case(email))
-                .unwrap_or(usize::MAX)
-        };
         let mut sorted = emails.to_vec();
-        sorted.sort_by_key(|e| rank(e));
+        sorted.sort_by_key(|e| self.account_rank(e));
         sorted
     }
 
-    /// Moves `email` one place up (`-1`) or down (`1`) among `emails`.
+    /// Moves `email` one place up (`-1`) or down (`1`) among `emails`, the
+    /// accounts the list on screen shows. The others keep their places.
     pub fn move_account(&mut self, emails: &[&str], email: &str, step: isize) {
         let mut order: Vec<String> = self.ordered(emails).iter().map(|e| e.to_string()).collect();
         let Some(at) = order.iter().position(|e| e.eq_ignore_ascii_case(email)) else {
@@ -923,7 +929,7 @@ impl Settings {
             return;
         }
         order.swap(at, to as usize);
-        self.account_order = order;
+        self.place_shown(emails, order);
     }
 
     /// Moves smart mailbox `id` one place up or down.
@@ -1275,7 +1281,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         std::fs::write(&path, "threading = false\n").unwrap();
-        assert!(Settings::load(&path).event_reminders, "a file from before this change");
+        assert!(
+            Settings::load(&path).event_reminders,
+            "a file from before this change"
+        );
         std::fs::write(&path, "event_reminders = false\n").unwrap();
         assert!(!Settings::load(&path).event_reminders);
     }
@@ -1297,6 +1306,19 @@ mod tests {
             Settings::open(&path).settings.assistant_allowed_tools,
             ["mcp:files/files__read"]
         );
+    }
+
+    #[test]
+    fn reasoning_preferences_survive_saving_independently() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "ai": {"assistant_reasoning": false, "translation_reasoning": true}
+        }))
+        .unwrap();
+        let saved = toml::to_string(&settings).unwrap();
+        let restored: Settings = toml::from_str(&saved).unwrap();
+        let restored = serde_json::to_value(restored).unwrap();
+        assert_eq!(restored["ai"]["assistant_reasoning"], false);
+        assert_eq!(restored["ai"]["translation_reasoning"], true);
     }
 
     #[test]
@@ -1469,8 +1491,16 @@ mod tests {
     fn a_window_value_picks_its_row_and_all_mail_is_furthest() {
         let choices = window_choices();
         assert_eq!(nearest_window(&choices, 0), 6);
-        assert_eq!(nearest_window(&choices, -1), 6, "any count below one day is all mail");
-        assert_eq!(nearest_window(&choices, 5), 0, "five days is near two weeks, not all mail");
+        assert_eq!(
+            nearest_window(&choices, -1),
+            6,
+            "any count below one day is all mail"
+        );
+        assert_eq!(
+            nearest_window(&choices, 5),
+            0,
+            "five days is near two weeks, not all mail"
+        );
         assert_eq!(nearest_window(&choices, 800), 4);
         assert_eq!(nearest_window(&choices, 100_000), 5);
     }

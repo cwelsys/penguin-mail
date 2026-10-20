@@ -155,11 +155,12 @@ impl MainWindow {
         });
         for property in ["collapsed", "show-sidebar"] {
             let weak = Rc::downgrade(self);
-            self.split.connect_notify_local(Some(property), move |_, _| {
-                if let Some(win) = weak.upgrade() {
-                    win.place_undo_send();
-                }
-            });
+            self.split
+                .connect_notify_local(Some(property), move |_, _| {
+                    if let Some(win) = weak.upgrade() {
+                        win.place_undo_send();
+                    }
+                });
         }
     }
 
@@ -177,9 +178,10 @@ impl MainWindow {
         }
     }
 
-    /// Stops scheduled sends. Each message ends up in Gmail's Drafts; one
-    /// Gmail could not take opens in a composer instead, since its bytes
-    /// here are the only copy.
+    /// Stops scheduled sends. Each message ends up in the server's Drafts;
+    /// one the server could not take opens in a composer, since its bytes
+    /// here are the only copy. A cancel can cover more than one account,
+    /// so the toast says "the server".
     pub(super) fn cancel_scheduled(
         self: &Rc<Self>,
         view: &Rc<ConversationView>,
@@ -217,7 +219,10 @@ impl MainWindow {
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             let outbox = this.core.outbox();
-            let reheld = this.core.call(async move { outbox.hold_unchanged(id).await }).await;
+            let reheld = this
+                .core
+                .call(async move { outbox.hold_unchanged(id).await })
+                .await;
             if !matches!(reheld, Ok(Reheld::Held)) {
                 this.toast(&gettext(
                     "The server would not take this message back, so Penguin Mail sends it at its hour while it runs.",
@@ -227,7 +232,7 @@ impl MainWindow {
         });
     }
 
-    /// Opens a cancelled message Gmail could not take in a composer, then
+    /// Opens a cancelled message the server could not take in a composer, then
     /// drops it from the table. False when it could not be reopened, which
     /// leaves it waiting in Send Later.
     async fn reopen_cancelled(self: &Rc<Self>, message: &Queued) -> bool {
@@ -323,23 +328,26 @@ fn already_sent_line(count: usize) -> String {
 }
 
 /// What the toast says after Cancel Send: where the messages went. One
-/// Gmail could not take is open in a composer, and one that could not
+/// the server could not take is open in a composer, and one that could not
 /// even be reopened is still waiting.
 fn cancelled_line(in_drafts: usize, reopened: usize, kept: usize) -> String {
     match (in_drafts, reopened, kept) {
-        (_, _, 1..) => gettext(
-            "Gmail is out of reach and Penguin Mail cannot reopen a message, so it stays in Send Later.",
+        (_, _, 1..) => fill_plural(
+            "The server is out of reach and Penguin Mail cannot reopen a message, so it stays in Send Later.",
+            "The server is out of reach and Penguin Mail cannot reopen messages, so they stay in Send Later.",
+            kept,
+            &[],
         ),
-        (0, 1, 0) => {
-            gettext("Won't be sent. Gmail is out of reach, so the message is open for you to save.")
-        }
+        (0, 1, 0) => gettext(
+            "Won't be sent. The server is out of reach, so the message is open for you to save.",
+        ),
         (0, _, 0) => gettext(
-            "Won't be sent. Gmail is out of reach, so the messages are open for you to save.",
+            "Won't be sent. The server is out of reach, so the messages are open for you to save.",
         ),
         (1, 0, 0) => gettext("Won't be sent. The message is in Drafts."),
         (_, 0, 0) => gettext("Won't be sent. The messages are in Drafts."),
         _ => gettext(
-            "Won't be sent. Some are in Drafts, and the ones Gmail could not take are open for you to save.",
+            "Won't be sent. Some are in Drafts, and the ones the server could not take are open for you to save.",
         ),
     }
 }
@@ -361,7 +369,18 @@ mod tests {
         assert!(cancelled_line(0, 1, 0).contains("open for you to save"));
         assert!(cancelled_line(0, 2, 0).contains("messages are open"));
         assert!(cancelled_line(1, 1, 0).contains("Some are in Drafts"));
-        assert!(cancelled_line(0, 0, 1).contains("stays in Send Later"));
+        assert_eq!(
+            cancelled_line(0, 0, 1),
+            "The server is out of reach and Penguin Mail cannot reopen a message, so it stays in Send Later."
+        );
+        assert_eq!(
+            cancelled_line(0, 0, 2),
+            "The server is out of reach and Penguin Mail cannot reopen messages, so they stay in Send Later."
+        );
+        assert!(!cancelled_line(0, 1, 0).contains("Gmail"));
+        assert!(!cancelled_line(0, 0, 1).contains("Gmail"));
+        assert!(!cancelled_line(0, 0, 2).contains("Gmail"));
+        assert!(!cancelled_line(1, 1, 0).contains("Gmail"));
     }
 
     #[test]
@@ -372,8 +391,14 @@ mod tests {
 
     #[test]
     fn a_cancel_that_came_too_late_says_only_that() {
-        let cancelled = Cancelled { already_sent: 1, ..Cancelled::default() };
-        assert_eq!(cancel_lines(&cancelled, 0), ["1 message had already gone out."]);
+        let cancelled = Cancelled {
+            already_sent: 1,
+            ..Cancelled::default()
+        };
+        assert_eq!(
+            cancel_lines(&cancelled, 0),
+            ["1 message had already gone out."]
+        );
     }
 
     #[test]
@@ -418,8 +443,14 @@ mod tests {
 
     #[test]
     fn a_held_message_the_server_did_not_answer_for_does_not_blame_gmail() {
-        let cancelled = Cancelled { still_held: 1, ..Cancelled::default() };
+        let cancelled = Cancelled {
+            still_held: 1,
+            ..Cancelled::default()
+        };
         let lines = cancel_lines(&cancelled, 0);
-        assert!(lines.iter().all(|line| !line.contains("Gmail")), "{lines:?}");
+        assert!(
+            lines.iter().all(|line| !line.contains("Gmail")),
+            "{lines:?}"
+        );
     }
 }

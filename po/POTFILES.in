@@ -86,6 +86,7 @@ app/src/ui/contact_card.rs
 app/src/ui/contacts_prefs.rs
 app/src/ui/copied.rs
 app/src/ui/conversation.rs
+app/src/ui/link_preview.rs
 app/src/ui/find.rs
 app/src/ui/hide_my_email.rs
 app/src/ui/ics_file.rs
@@ -97,6 +98,8 @@ app/src/ui/moving.rs
 app/src/ui/permission.rs
 app/src/ui/pgp.rs
 app/src/ui/preferences.rs
+app/src/ui/preferences/dialog.rs
+app/src/ui/preferences/accounts.rs
 app/src/ui/sender_prefs.rs
 app/src/ui/queued.rs
 app/src/ui/rules.rs
@@ -195,3 +198,7 @@ sync/src/services/microsoft/settings.rs
 sync/src/services/microsoft/writes.rs
 sync/src/settings.rs
 sync/src/switch.rs
+app/src/ui/preferences/space.rs
+app/src/ui/assistant/controls.rs
+app/src/ui/assistant/files.rs
+sync/src/account/space.rs

@@ -30,7 +30,10 @@ impl<I: ImapApi, S: Submit> Imap<I, S> {
     }
 
     /// The messages as they arrived, in order.
-    pub(super) async fn raw_messages(&self, names: &[String]) -> Result<Vec<RawMessage>, BackendError> {
+    pub(super) async fn raw_messages(
+        &self,
+        names: &[String],
+    ) -> Result<Vec<RawMessage>, BackendError> {
         let mut raws = Vec::with_capacity(names.len());
         for name in names {
             let at = self.current(name).await?;

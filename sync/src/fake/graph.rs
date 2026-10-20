@@ -14,9 +14,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, PoisonError};
 
 use mailrs_graph::{
-    AutomaticReplies, ContactFolder, DeltaPage, GraphCalendar, GraphContact, GraphError,
-    GraphEvent, Granted, Listing, MailFolder, MasterCategory, Me, Message, MessageBody,
-    MessageRule, Override, Page, Response, SCOPES, Write,
+    AutomaticReplies, ContactFolder, DeltaPage, Granted, GraphCalendar, GraphContact, GraphError,
+    GraphEvent, Listing, MailFolder, MasterCategory, Me, Message, MessageBody, MessageRule,
+    Override, Page, Response, SCOPES, Write,
 };
 use serde_json::Value;
 
@@ -90,7 +90,11 @@ pub struct Answered {
 #[derive(Debug, Clone)]
 pub enum Pending {
     Listing(Listing),
-    View { calendar: String, start: String, end: String },
+    View {
+        calendar: String,
+        start: String,
+        end: String,
+    },
 }
 
 /// A file being uploaded onto a draft.
@@ -212,7 +216,13 @@ impl FakeGraph {
             ("archive", "Archive"),
         ] {
             let id = format!("AAMk-{name}");
-            state.folders.insert(id.clone(), FakeFolder { name: shown.into(), parent: None });
+            state.folders.insert(
+                id.clone(),
+                FakeFolder {
+                    name: shown.into(),
+                    parent: None,
+                },
+            );
             state.well_known.insert(name.into(), id);
         }
         state.calendars.push(GraphCalendar {
@@ -223,10 +233,13 @@ impl FakeGraph {
             is_default_calendar: true,
             ..GraphCalendar::default()
         });
-        state
-            .contact_folders
-            .push(ContactFolder { id: "contacts-1".into(), display_name: "Contacts".into() });
-        FakeGraph { state: Mutex::new(state) }
+        state.contact_folders.push(ContactFolder {
+            id: "contacts-1".into(),
+            display_name: "Contacts".into(),
+        });
+        FakeGraph {
+            state: Mutex::new(state),
+        }
     }
 
     pub fn with<R>(&self, f: impl FnOnce(&mut GraphState) -> R) -> R {
@@ -242,7 +255,10 @@ impl FakeGraph {
             let id = s.new_id("folder");
             s.folders.insert(
                 id.clone(),
-                FakeFolder { name: name.into(), parent: parent.map(str::to_string) },
+                FakeFolder {
+                    name: name.into(),
+                    parent: parent.map(str::to_string),
+                },
             );
             id
         })
@@ -251,7 +267,11 @@ impl FakeGraph {
     pub fn add_category(&self, name: &str, color: &str) {
         self.with(|s| {
             let id = s.new_id("category");
-            s.categories.push(MasterCategory { id, display_name: name.into(), color: color.into() });
+            s.categories.push(MasterCategory {
+                id,
+                display_name: name.into(),
+                color: color.into(),
+            });
         });
     }
 
@@ -314,7 +334,10 @@ fn log_page<T>(
     removed: impl Fn(&str) -> T,
 ) -> (Vec<T>, Option<usize>) {
     let mut ids: Vec<&str> = Vec::new();
-    for entry in log.iter().filter(|e| e.place == place && e.seq > since && e.seq <= now) {
+    for entry in log
+        .iter()
+        .filter(|e| e.place == place && e.seq > since && e.seq <= now)
+    {
         ids.retain(|id| *id != entry.id);
         ids.push(&entry.id);
     }
@@ -350,7 +373,8 @@ impl Round<'_> {
         let (since, offset, starting) = match link_text {
             None => (self.now, 0, true),
             Some(text) => {
-                let (kind, place, seq, offset) = read_link(text).ok_or(GraphError::SyncStateLost)?;
+                let (kind, place, seq, offset) =
+                    read_link(text).ok_or(GraphError::SyncStateLost)?;
                 if place != self.place || seq < self.expired_before {
                     return Err(GraphError::SyncStateLost);
                 }
@@ -359,20 +383,28 @@ impl Round<'_> {
         };
         if starting {
             let all = start();
-            let page: Vec<T> =
-                all.iter().skip(offset).take(mailrs_graph::PAGE_SIZE as usize).cloned().collect();
+            let page: Vec<T> = all
+                .iter()
+                .skip(offset)
+                .take(mailrs_graph::PAGE_SIZE as usize)
+                .cloned()
+                .collect();
             let more = offset + page.len() < all.len();
             return Ok(DeltaPage {
-                next_link: more.then(|| link("start", self.place, since, Some(offset + page.len()))),
+                next_link: more
+                    .then(|| link("start", self.place, since, Some(offset + page.len()))),
                 delta_link: (!more).then(|| link("delta", self.place, since, None)),
                 value: page,
             });
         }
-        let (value, next) =
-            log_page(self.log, self.place, since, offset, self.now, present, removed);
+        let (value, next) = log_page(
+            self.log, self.place, since, offset, self.now, present, removed,
+        );
         Ok(DeltaPage {
             next_link: next.map(|o| link("delta", self.place, since, Some(o))),
-            delta_link: next.is_none().then(|| link("delta", self.place, self.now, None)),
+            delta_link: next
+                .is_none()
+                .then(|| link("delta", self.place, self.now, None)),
             value,
         })
     }
@@ -403,7 +435,12 @@ impl GraphApi for FakeGraph {
         self.with(mail::categories)
     }
 
-    async fn message_delta(&self, folder: &str, link: Option<&str>, received_since: &str) -> Answer<DeltaPage<Message>> {
+    async fn message_delta(
+        &self,
+        folder: &str,
+        link: Option<&str>,
+        received_since: Option<&str>,
+    ) -> Answer<DeltaPage<Message>> {
         let page = self.with(|s| mail::message_delta(s, folder, link, received_since));
         if let Some((into, mail)) = self.with(|s| s.deliver_after_delta.take()) {
             self.deliver(&into, mail);
@@ -463,7 +500,14 @@ impl GraphApi for FakeGraph {
         self.with(|s| mail::create_draft(s, draft))
     }
 
-    async fn upload_session(&self, message: &str, name: &str, size: u64, is_inline: bool, content_id: Option<&str>) -> Answer<String> {
+    async fn upload_session(
+        &self,
+        message: &str,
+        name: &str,
+        size: u64,
+        is_inline: bool,
+        content_id: Option<&str>,
+    ) -> Answer<String> {
         self.with(|s| mail::upload_session(s, message, name, size, is_inline, content_id))
     }
 
@@ -479,12 +523,17 @@ impl GraphApi for FakeGraph {
         self.with(|s| mail::delete_message(s, id))
     }
 
-
     async fn calendars(&self) -> Answer<Vec<GraphCalendar>> {
         self.with(calendar::calendars)
     }
 
-    async fn calendar_view_delta(&self, calendar: &str, link: Option<&str>, start: &str, end: &str) -> Answer<DeltaPage<GraphEvent>> {
+    async fn calendar_view_delta(
+        &self,
+        calendar: &str,
+        link: Option<&str>,
+        start: &str,
+        end: &str,
+    ) -> Answer<DeltaPage<GraphEvent>> {
         self.with(|s| calendar::calendar_view_delta(s, calendar, link, start, end))
     }
 
@@ -524,7 +573,13 @@ impl GraphApi for FakeGraph {
         self.with(|s| calendar::respond(s, id, response, comment))
     }
 
-    async fn calendar_view_of(&self, calendar: &str, start: &str, end: &str, link: Option<&str>) -> Answer<Page<GraphEvent>> {
+    async fn calendar_view_of(
+        &self,
+        calendar: &str,
+        start: &str,
+        end: &str,
+        link: Option<&str>,
+    ) -> Answer<Page<GraphEvent>> {
         self.with(|s| calendar::calendar_view_of(s, calendar, start, end, link))
     }
 
@@ -540,7 +595,6 @@ impl GraphApi for FakeGraph {
         self.with(|s| calendar::delete_calendar(s, id))
     }
 
-
     async fn contact_folders(&self) -> Answer<Vec<ContactFolder>> {
         self.with(contacts::contact_folders)
     }
@@ -549,7 +603,11 @@ impl GraphApi for FakeGraph {
         self.with(contacts::default_contact_folder)
     }
 
-    async fn contact_delta(&self, folder: &str, link: Option<&str>) -> Answer<DeltaPage<GraphContact>> {
+    async fn contact_delta(
+        &self,
+        folder: &str,
+        link: Option<&str>,
+    ) -> Answer<DeltaPage<GraphContact>> {
         self.with(|s| contacts::contact_delta(s, folder, link))
     }
 
@@ -568,7 +626,6 @@ impl GraphApi for FakeGraph {
     async fn update_contact(&self, id: &str, body: &Value) -> Answer<GraphContact> {
         self.with(|s| contacts::update_contact(s, id, body))
     }
-
 
     async fn rules(&self) -> Answer<Vec<MessageRule>> {
         self.with(settings::rules)
@@ -613,8 +670,16 @@ mod tests {
     #[tokio::test]
     async fn a_refused_area_answers_its_error_and_the_rest_work() {
         let fake = FakeGraph::new();
-        fake.refuse(Area::Calendar, GraphError::AccessDenied { code: "ErrorAccessDenied".into() });
-        assert!(matches!(fake.calendars().await, Err(GraphError::AccessDenied { .. })));
+        fake.refuse(
+            Area::Calendar,
+            GraphError::AccessDenied {
+                code: "ErrorAccessDenied".into(),
+            },
+        );
+        assert!(matches!(
+            fake.calendars().await,
+            Err(GraphError::AccessDenied { .. })
+        ));
         assert!(fake.categories().await.is_ok());
     }
 

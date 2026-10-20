@@ -2,7 +2,7 @@
 
 use mailrs_graph::{
     Attendee, DateTimeZone, DeltaPage, GraphCalendar, GraphError, GraphEvent, ItemBody, Location,
-    PatternedRecurrence, Page, Removed, Response, ResponseStatus, nearest_color,
+    Page, PatternedRecurrence, Removed, Response, ResponseStatus, nearest_color,
 };
 use serde_json::Value;
 
@@ -33,7 +33,11 @@ impl FakeGraph {
 
 fn log(s: &mut GraphState, calendar: &str, id: &str) {
     let seq = s.next_seq();
-    s.event_log.push(Logged { seq, place: calendar.to_string(), id: id.to_string() });
+    s.event_log.push(Logged {
+        seq,
+        place: calendar.to_string(),
+        id: id.to_string(),
+    });
 }
 
 /// A moment Graph wrote: RFC 3339, or a bare local time that the fake's
@@ -53,9 +57,15 @@ fn starts(event: &GraphEvent) -> Option<i64> {
 
 /// Whether `event` overlaps the window. An event with no times counts.
 fn within(event: &GraphEvent, start: &str, end: &str) -> bool {
-    let (Some(from), Some(to)) = (instant(start), instant(end)) else { return true };
+    let (Some(from), Some(to)) = (instant(start), instant(end)) else {
+        return true;
+    };
     let begins = starts(event);
-    let ends = event.end.as_ref().and_then(|t| instant(&t.date_time)).or(begins);
+    let ends = event
+        .end
+        .as_ref()
+        .and_then(|t| instant(&t.date_time))
+        .or(begins);
     match (begins, ends) {
         (Some(b), Some(e)) => b < to && e >= from,
         _ => true,
@@ -69,7 +79,9 @@ fn is_master(event: &GraphEvent) -> bool {
 fn removed_event(id: &str) -> GraphEvent {
     GraphEvent {
         id: id.to_string(),
-        removed: Some(Removed { reason: Some("deleted".into()) }),
+        removed: Some(Removed {
+            reason: Some("deleted".into()),
+        }),
         ..GraphEvent::default()
     }
 }
@@ -104,7 +116,9 @@ fn read_body(event: &mut GraphEvent, body: &Value) {
         event.show_as = Some(show_as.into());
     }
     if let Some(place) = body["location"]["displayName"].as_str() {
-        event.location = Some(Location { display_name: place.into() });
+        event.location = Some(Location {
+            display_name: place.into(),
+        });
     }
     if let Some(text) = field::<ItemBody>(body, "body") {
         event.body = Some(text);
@@ -138,7 +152,13 @@ pub(super) fn calendar_view_delta(
         return Err(GraphError::NotFound);
     }
     let s = &*s;
-    Round { log: &s.event_log, expired_before: s.expired_before, now: s.seq, place: calendar }.run(
+    Round {
+        log: &s.event_log,
+        expired_before: s.expired_before,
+        now: s.seq,
+        place: calendar,
+    }
+    .run(
         link_text,
         || {
             s.events
@@ -147,7 +167,12 @@ pub(super) fn calendar_view_delta(
                 .map(|(_, e)| as_delta(e))
                 .collect()
         },
-        |id| s.events.get(id).filter(|(c, _)| c == calendar).map(|(_, e)| as_delta(e)),
+        |id| {
+            s.events
+                .get(id)
+                .filter(|(c, _)| c == calendar)
+                .map(|(_, e)| as_delta(e))
+        },
         removed_event,
     )
 }
@@ -158,7 +183,10 @@ pub(super) fn calendar_view_delta(
 /// plain calendar view does not.
 fn as_delta(event: &GraphEvent) -> GraphEvent {
     match event.kind.as_deref() {
-        Some("exception") => GraphEvent { original_start: None, ..event.clone() },
+        Some("exception") => GraphEvent {
+            original_start: None,
+            ..event.clone()
+        },
         _ => event.clone(),
     }
 }
@@ -168,7 +196,12 @@ pub(super) fn event(s: &mut GraphState, id: &str) -> Answer<GraphEvent> {
     event_of(s, id).cloned()
 }
 
-pub(super) fn instances(s: &mut GraphState, series: &str, start: &str, end: &str) -> Answer<Vec<GraphEvent>> {
+pub(super) fn instances(
+    s: &mut GraphState,
+    series: &str,
+    start: &str,
+    end: &str,
+) -> Answer<Vec<GraphEvent>> {
     s.refuses(Area::Calendar)?;
     Ok(s.events
         .values()
@@ -180,7 +213,10 @@ pub(super) fn instances(s: &mut GraphState, series: &str, start: &str, end: &str
 
 /// What Graph's `GET /events/{id}?$select=id,originalStart,originalStartTimeZone`
 /// answers for each id, logged so a test can count the lookups.
-pub(super) fn original_starts(s: &mut GraphState, ids: &[String]) -> Answer<Vec<Answer<GraphEvent>>> {
+pub(super) fn original_starts(
+    s: &mut GraphState,
+    ids: &[String],
+) -> Answer<Vec<Answer<GraphEvent>>> {
     s.refuses(Area::Calendar)?;
     s.start_lookups.push(ids.to_vec());
     Ok(ids
@@ -200,11 +236,16 @@ pub(super) fn original_starts(s: &mut GraphState, ids: &[String]) -> Answer<Vec<
 /// request of twenty, as Graph takes them.
 pub(super) fn events(s: &mut GraphState, ids: &[String]) -> Answer<Vec<Answer<GraphEvent>>> {
     s.refuses(Area::Calendar)?;
-    s.master_reads.extend(ids.chunks(20).map(<[String]>::to_vec));
+    s.master_reads
+        .extend(ids.chunks(20).map(<[String]>::to_vec));
     Ok(ids.iter().map(|id| event_of(s, id).cloned()).collect())
 }
 
-pub(super) fn events_by_uid(s: &mut GraphState, calendar: &str, uid: &str) -> Answer<Vec<GraphEvent>> {
+pub(super) fn events_by_uid(
+    s: &mut GraphState,
+    calendar: &str,
+    uid: &str,
+) -> Answer<Vec<GraphEvent>> {
     s.refuses(Area::Calendar)?;
     if !s.calendars.iter().any(|c| c.id == calendar) {
         return Err(GraphError::NotFound);
@@ -224,7 +265,10 @@ pub(super) fn create_event(s: &mut GraphState, calendar: &str, body: &Value) -> 
     }
     s.event_bodies.push(body.clone());
     let transaction = body["transactionId"].as_str();
-    if let Some(made) = transaction.and_then(|t| s.transactions.get(t)).and_then(|id| s.events.get(id)) {
+    if let Some(made) = transaction
+        .and_then(|t| s.transactions.get(t))
+        .and_then(|id| s.events.get(id))
+    {
         return Ok(made.1.clone());
     }
     let id = s.new_id("event");
@@ -233,7 +277,9 @@ pub(super) fn create_event(s: &mut GraphState, calendar: &str, body: &Value) -> 
         ical_uid: Some(format!("{id}@fake.outlook")),
         kind: Some("singleInstance".into()),
         is_organizer: true,
-        response_status: Some(ResponseStatus { response: "organizer".into() }),
+        response_status: Some(ResponseStatus {
+            response: "organizer".into(),
+        }),
         ..GraphEvent::default()
     };
     read_body(&mut event, body);
@@ -241,7 +287,8 @@ pub(super) fn create_event(s: &mut GraphState, calendar: &str, body: &Value) -> 
     if let Some(t) = transaction {
         s.transactions.insert(t.to_string(), id.clone());
     }
-    s.events.insert(id.clone(), (calendar.to_string(), event.clone()));
+    s.events
+        .insert(id.clone(), (calendar.to_string(), event.clone()));
     log(s, calendar, &id);
     Ok(event)
 }
@@ -254,14 +301,20 @@ fn check_etag(event: &GraphEvent, etag: Option<&str>) -> Answer<()> {
     }
 }
 
-pub(super) fn update_event(s: &mut GraphState, id: &str, body: &Value, etag: Option<&str>) -> Answer<GraphEvent> {
+pub(super) fn update_event(
+    s: &mut GraphState,
+    id: &str,
+    body: &Value,
+    etag: Option<&str>,
+) -> Answer<GraphEvent> {
     s.refuses(Area::Calendar)?;
     let (calendar, mut event) = s.events.get(id).cloned().ok_or(GraphError::NotFound)?;
     check_etag(&event, etag)?;
     s.event_bodies.push(body.clone());
     read_body(&mut event, body);
     tagged(s, &mut event);
-    s.events.insert(id.to_string(), (calendar.clone(), event.clone()));
+    s.events
+        .insert(id.to_string(), (calendar.clone(), event.clone()));
     log(s, &calendar, id);
     Ok(event)
 }
@@ -275,7 +328,12 @@ pub(super) fn delete_event(s: &mut GraphState, id: &str, etag: Option<&str>) -> 
     Ok(())
 }
 
-pub(super) fn respond(s: &mut GraphState, id: &str, response: Response, comment: Option<&str>) -> Answer<()> {
+pub(super) fn respond(
+    s: &mut GraphState,
+    id: &str,
+    response: Response,
+    comment: Option<&str>,
+) -> Answer<()> {
     s.refuses(Area::Calendar)?;
     let (calendar, event) = s.events.get_mut(id).ok_or(GraphError::NotFound)?;
     let text = match response {
@@ -283,7 +341,9 @@ pub(super) fn respond(s: &mut GraphState, id: &str, response: Response, comment:
         Response::Tentative => "tentativelyAccepted",
         Response::Decline => "declined",
     };
-    event.response_status = Some(ResponseStatus { response: text.into() });
+    event.response_status = Some(ResponseStatus {
+        response: text.into(),
+    });
     let calendar = calendar.clone();
     s.responses.push(Answered {
         event: id.to_string(),
@@ -304,16 +364,36 @@ pub(super) fn calendar_view_of(
     s.refuses(Area::Calendar)?;
     let (calendar, start, end, offset, slot) = match link_text {
         Some(text) => {
-            let (kind, place, _, offset) = read_link(text).ok_or_else(|| GraphError::Decode("bad link".into()))?;
-            let slot: usize = place.parse().map_err(|_| GraphError::Decode("bad link".into()))?;
+            let (kind, place, _, offset) =
+                read_link(text).ok_or_else(|| GraphError::Decode("bad link".into()))?;
+            let slot: usize = place
+                .parse()
+                .map_err(|_| GraphError::Decode("bad link".into()))?;
             match (kind.as_str(), s.pending.get(slot)) {
-                ("view", Some(Pending::View { calendar, start, end })) => {
-                    (calendar.clone(), start.clone(), end.clone(), offset, Some(slot))
-                }
+                (
+                    "view",
+                    Some(Pending::View {
+                        calendar,
+                        start,
+                        end,
+                    }),
+                ) => (
+                    calendar.clone(),
+                    start.clone(),
+                    end.clone(),
+                    offset,
+                    Some(slot),
+                ),
                 _ => return Err(GraphError::Decode("bad link".into())),
             }
         }
-        None => (calendar.to_string(), start.to_string(), end.to_string(), 0, None),
+        None => (
+            calendar.to_string(),
+            start.to_string(),
+            end.to_string(),
+            0,
+            None,
+        ),
     };
     if !s.calendars.iter().any(|c| c.id == calendar) {
         return Err(GraphError::NotFound);
@@ -325,12 +405,21 @@ pub(super) fn calendar_view_of(
         .map(|(_, e)| e)
         .collect();
     found.sort_by_key(|e| starts(e));
-    let value: Vec<GraphEvent> = found.iter().skip(offset).take(VIEW_PAGE).map(|e| (*e).clone()).collect();
+    let value: Vec<GraphEvent> = found
+        .iter()
+        .skip(offset)
+        .take(VIEW_PAGE)
+        .map(|e| (*e).clone())
+        .collect();
     let more = offset + value.len() < found.len();
     let next_link = if more {
         let slot = match slot {
             Some(slot) => slot.to_string(),
-            None => s.remember(Pending::View { calendar, start, end }),
+            None => s.remember(Pending::View {
+                calendar,
+                start,
+                end,
+            }),
         };
         Some(link("view", &slot, 0, Some(offset + value.len())))
     } else {
@@ -355,7 +444,11 @@ pub(super) fn create_calendar(s: &mut GraphState, name: &str, hex: &str) -> Answ
 
 pub(super) fn update_calendar(s: &mut GraphState, id: &str, body: &Value) -> Answer<GraphCalendar> {
     s.refuses(Area::Calendar)?;
-    let calendar = s.calendars.iter_mut().find(|c| c.id == id).ok_or(GraphError::NotFound)?;
+    let calendar = s
+        .calendars
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or(GraphError::NotFound)?;
     if let Some(name) = body["name"].as_str() {
         calendar.name = name.into();
     }
@@ -373,13 +466,22 @@ pub(super) fn update_calendar(s: &mut GraphState, id: &str, body: &Value) -> Ans
 
 pub(super) fn delete_calendar(s: &mut GraphState, id: &str) -> Answer<()> {
     s.refuses(Area::Calendar)?;
-    let at = s.calendars.iter().position(|c| c.id == id).ok_or(GraphError::NotFound)?;
+    let at = s
+        .calendars
+        .iter()
+        .position(|c| c.id == id)
+        .ok_or(GraphError::NotFound)?;
     // Outlook keeps the default calendar for good.
     if s.calendars[at].is_default_calendar {
         return Err(GraphError::Conflict);
     }
     s.calendars.remove(at);
-    let doomed: Vec<String> = s.events.iter().filter(|(_, (c, _))| c == id).map(|(k, _)| k.clone()).collect();
+    let doomed: Vec<String> = s
+        .events
+        .iter()
+        .filter(|(_, (c, _))| c == id)
+        .map(|(k, _)| k.clone())
+        .collect();
     for event in doomed {
         s.events.remove(&event);
         log(s, id, &event);
@@ -409,21 +511,44 @@ mod tests {
     #[tokio::test]
     async fn a_change_against_an_old_etag_is_refused() {
         let fake = FakeGraph::new();
-        let made = fake.create_event("cal-1", &serde_json::json!({"subject": "A"})).await.unwrap();
+        let made = fake
+            .create_event("cal-1", &serde_json::json!({"subject": "A"}))
+            .await
+            .unwrap();
         let old = made.etag.clone();
-        fake.update_event(&made.id, &serde_json::json!({"subject": "B"}), old.as_deref()).await.unwrap();
-        let stale = fake.update_event(&made.id, &serde_json::json!({"subject": "C"}), old.as_deref()).await;
+        fake.update_event(
+            &made.id,
+            &serde_json::json!({"subject": "B"}),
+            old.as_deref(),
+        )
+        .await
+        .unwrap();
+        let stale = fake
+            .update_event(
+                &made.id,
+                &serde_json::json!({"subject": "C"}),
+                old.as_deref(),
+            )
+            .await;
         assert!(matches!(stale, Err(GraphError::PreconditionFailed)));
     }
 
     #[tokio::test]
     async fn an_answer_keeps_its_comment() {
         let fake = FakeGraph::new();
-        let made = fake.create_event("cal-1", &serde_json::json!({"subject": "A"})).await.unwrap();
-        fake.respond(&made.id, Response::Decline, Some("Away")).await.unwrap();
+        let made = fake
+            .create_event("cal-1", &serde_json::json!({"subject": "A"}))
+            .await
+            .unwrap();
+        fake.respond(&made.id, Response::Decline, Some("Away"))
+            .await
+            .unwrap();
         let held = fake.event(&made.id).await.unwrap();
         assert_eq!(held.response_status.unwrap().response, "declined");
-        assert_eq!(fake.with(|s| s.responses[0].comment.clone()), Some("Away".to_string()));
+        assert_eq!(
+            fake.with(|s| s.responses[0].comment.clone()),
+            Some("Away".to_string())
+        );
     }
 
     #[tokio::test]
@@ -436,9 +561,15 @@ mod tests {
             fake.create_event("cal-1", &body).await.unwrap();
         }
         let (start, end) = ("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z");
-        let first = fake.calendar_view_of("cal-1", start, end, None).await.unwrap();
+        let first = fake
+            .calendar_view_of("cal-1", start, end, None)
+            .await
+            .unwrap();
         assert_eq!(first.value.len(), 100);
-        let second = fake.calendar_view_of("cal-1", start, end, first.next_link.as_deref()).await.unwrap();
+        let second = fake
+            .calendar_view_of("cal-1", start, end, first.next_link.as_deref())
+            .await
+            .unwrap();
         assert_eq!(second.value.len(), 20);
         assert!(second.next_link.is_none());
     }
@@ -449,15 +580,26 @@ mod tests {
         let made = fake.create_calendar("Work", "#87d28e").await.unwrap();
         assert_eq!(made.color.as_deref(), Some("lightGreen"));
         let renamed = fake
-            .update_calendar(&made.id, &serde_json::json!({"name": "Job", "color": "#f19696"}))
+            .update_calendar(
+                &made.id,
+                &serde_json::json!({"name": "Job", "color": "#f19696"}),
+            )
             .await
             .unwrap();
-        assert_eq!((renamed.name.as_str(), renamed.color.as_deref()), ("Job", Some("lightRed")));
-        fake.create_event(&made.id, &serde_json::json!({"subject": "A"})).await.unwrap();
+        assert_eq!(
+            (renamed.name.as_str(), renamed.color.as_deref()),
+            ("Job", Some("lightRed"))
+        );
+        fake.create_event(&made.id, &serde_json::json!({"subject": "A"}))
+            .await
+            .unwrap();
         fake.delete_calendar(&made.id).await.unwrap();
         assert_eq!(fake.calendars().await.unwrap().len(), 1);
         assert_eq!(fake.with(|s| s.events.len()), 0, "its events go with it");
-        assert!(matches!(fake.delete_calendar(&made.id).await, Err(GraphError::NotFound)));
+        assert!(matches!(
+            fake.delete_calendar(&made.id).await,
+            Err(GraphError::NotFound)
+        ));
     }
 
     #[tokio::test]
@@ -476,10 +618,18 @@ mod tests {
             .unwrap();
         assert_eq!(master.kind.as_deref(), Some("seriesMaster"));
         let page = fake
-            .calendar_view_delta("cal-1", None, "2026-09-01T00:00:00Z", "2026-12-01T00:00:00Z")
+            .calendar_view_delta(
+                "cal-1",
+                None,
+                "2026-09-01T00:00:00Z",
+                "2026-12-01T00:00:00Z",
+            )
             .await
             .unwrap();
-        assert_eq!(page.value.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [master.id.as_str()]);
+        assert_eq!(
+            page.value.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            [master.id.as_str()]
+        );
     }
 
     #[tokio::test]
@@ -496,7 +646,12 @@ mod tests {
             },
         );
         let page = fake
-            .calendar_view_delta("cal-1", None, "2026-09-01T00:00:00Z", "2026-12-01T00:00:00Z")
+            .calendar_view_delta(
+                "cal-1",
+                None,
+                "2026-09-01T00:00:00Z",
+                "2026-12-01T00:00:00Z",
+            )
             .await
             .unwrap();
         assert_eq!(page.value[0].original_start, None);

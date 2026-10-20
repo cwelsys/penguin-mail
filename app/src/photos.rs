@@ -47,7 +47,8 @@ const MOST_PIXELS: u64 = 4096 * 4096;
 /// Whether a photo GDK decodes in this process says it is small enough
 /// to decode. A file whose header cannot be read is refused too.
 pub(crate) fn fits(bytes: &[u8]) -> bool {
-    texture::declared_size(bytes).is_some_and(|(width, height)| u64::from(width) * u64::from(height) <= MOST_PIXELS)
+    texture::declared_size(bytes)
+        .is_some_and(|(width, height)| u64::from(width) * u64::from(height) <= MOST_PIXELS)
 }
 
 impl Weighed for gdk::Texture {
@@ -148,7 +149,10 @@ fn read_textures(files: Vec<(String, PathBuf)>) -> LocalBoxFuture<'static, Answe
         .await
         else {
             // A slow disk or a dead worker says nothing about the photos.
-            return asked.into_iter().map(|address| (address, Reply::Failed)).collect();
+            return asked
+                .into_iter()
+                .map(|address| (address, Reply::Failed))
+                .collect();
         };
         let mut answers = Vec::with_capacity(read.len());
         for (address, face) in read {
@@ -228,7 +232,10 @@ fn read_uris(files: Vec<(String, PathBuf)>) -> LocalBoxFuture<'static, Answers<R
         })
         .await
         else {
-            return asked.into_iter().map(|address| (address, Reply::Failed)).collect();
+            return asked
+                .into_iter()
+                .map(|address| (address, Reply::Failed))
+                .collect();
         };
         let mut answers = Vec::with_capacity(read.len());
         for (address, page) in read {
@@ -237,7 +244,9 @@ fn read_uris(files: Vec<(String, PathBuf)>) -> LocalBoxFuture<'static, Answers<R
                 Page::Elsewhere(bytes) => {
                     let size = bytes.len();
                     match texture::off_thread(texture::WAIT, move || {
-                        let small = gdk::Texture::from_bytes(&bytes).ok().and_then(|t| shrunk_uri(&t, size));
+                        let small = gdk::Texture::from_bytes(&bytes)
+                            .ok()
+                            .and_then(|t| shrunk_uri(&t, size));
                         small.or_else(|| Some(uri_of("image/jpeg", &bytes)))
                     })
                     .await
@@ -378,7 +387,11 @@ impl<V: Weighed + 'static> Shelf<V> {
         if state.missing.contains(&key) || state.reading.contains(&key) {
             return None;
         }
-        if state.failed.get(&key).is_some_and(|(retry, _)| Instant::now() < *retry) {
+        if state
+            .failed
+            .get(&key)
+            .is_some_and(|(retry, _)| Instant::now() < *retry)
+        {
             return None;
         }
         let path = state.files.get(&key)?.clone();
@@ -731,7 +744,11 @@ mod tests {
         let uri = shrunk_uri(&texture, 3 * 1024 * 1024).expect("smaller than the original");
         assert!(uri.starts_with("data:image/png;base64,"));
         assert!(uri.len() < URI_BYTES / 8, "{} bytes", uri.len());
-        assert_eq!(shrunk_uri(&texture, 10), None, "never larger than the original");
+        assert_eq!(
+            shrunk_uri(&texture, 10),
+            None,
+            "never larger than the original"
+        );
     }
 
     #[test]

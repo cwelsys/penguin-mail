@@ -62,11 +62,36 @@ struct Env {
 impl Env {
     fn of(band: Band) -> Env {
         match band {
-            Band::Idle => Env { x: 20.0, top: 66.0, w: 124.0, look: (0.0, 0.0) },
-            Band::Stamped | Band::Error => Env { x: 150.0, top: 62.0, w: 140.0, look: (0.0, 1.0) },
-            Band::Browser | Band::Lookup => Env { x: 52.0, top: 66.0, w: 124.0, look: (4.0, -1.0) },
-            Band::Unreachable => Env { x: 52.0, top: 66.0, w: 124.0, look: (0.0, 1.0) },
-            Band::Success => Env { x: 154.0, top: 92.0, w: 132.0, look: (0.0, 0.0) },
+            Band::Idle => Env {
+                x: 20.0,
+                top: 66.0,
+                w: 124.0,
+                look: (0.0, 0.0),
+            },
+            Band::Stamped | Band::Error => Env {
+                x: 150.0,
+                top: 62.0,
+                w: 140.0,
+                look: (0.0, 1.0),
+            },
+            Band::Browser | Band::Lookup => Env {
+                x: 52.0,
+                top: 66.0,
+                w: 124.0,
+                look: (4.0, -1.0),
+            },
+            Band::Unreachable => Env {
+                x: 52.0,
+                top: 66.0,
+                w: 124.0,
+                look: (0.0, 1.0),
+            },
+            Band::Success => Env {
+                x: 154.0,
+                top: 92.0,
+                w: 132.0,
+                look: (0.0, 0.0),
+            },
         }
     }
 
@@ -105,7 +130,11 @@ fn along((p0, p1, p2): (Point, Point, Point), t: f32) -> Point {
 /// The dashed path to the browser window, drawn in the art.
 fn to_browser() -> (Point, Point, Point) {
     let e = Env::of(Band::Browser);
-    ((e.x + e.w + 12.0, e.top + 50.0), (e.x + e.w + 64.0, e.top + 2.0), (286.0, 104.0))
+    (
+        (e.x + e.w + 12.0, e.top + 50.0),
+        (e.x + e.w + 64.0, e.top + 2.0),
+        (286.0, 104.0),
+    )
 }
 
 /// The two lookup lines: to the upper server, and to the lower one that
@@ -113,15 +142,27 @@ fn to_browser() -> (Point, Point, Point) {
 fn to_servers() -> [(Point, Point, Point); 2] {
     let e = Env::of(Band::Lookup);
     [
-        ((e.x + e.w + 12.0, e.top + 44.0), (e.x + e.w + 70.0, e.top + 4.0), (300.0, 70.0)),
-        ((e.x + e.w + 12.0, e.top + 64.0), (e.x + e.w + 70.0, e.top + 96.0), (300.0, 136.0)),
+        (
+            (e.x + e.w + 12.0, e.top + 44.0),
+            (e.x + e.w + 70.0, e.top + 4.0),
+            (300.0, 70.0),
+        ),
+        (
+            (e.x + e.w + 12.0, e.top + 64.0),
+            (e.x + e.w + 70.0, e.top + 96.0),
+            (300.0, 136.0),
+        ),
     ]
 }
 
 /// The arc the letters glide along into the open envelope.
 fn letter_arc() -> (Point, Point, Point) {
     let e = Env::of(Band::Success);
-    ((430.0, 150.0), (420.0, 50.0), (e.x + e.w / 2.0 + 44.0, e.top - 30.0))
+    (
+        (430.0, 150.0),
+        (420.0, 50.0),
+        (e.x + e.w / 2.0 + 44.0, e.top - 30.0),
+    )
 }
 
 /// The ease-in-out the lookup dots run with.
@@ -399,7 +440,12 @@ fn draw_stamp(
     let inset = sw * 0.14;
     let tile = gsk::PathBuilder::new();
     tile.add_rounded_rect(&gsk::RoundedRect::from_rect(
-        graphene::Rect::new(-sw / 2.0 + inset, -sh / 2.0 + inset, sw - 2.0 * inset, sh - 2.0 * inset),
+        graphene::Rect::new(
+            -sw / 2.0 + inset,
+            -sh / 2.0 + inset,
+            sw - 2.0 * inset,
+            sh - 2.0 * inset,
+        ),
         2.0,
     ));
     snapshot.append_fill(&tile.to_path(), gsk::FillRule::Winding, &hex(stamp.colour));
@@ -421,7 +467,10 @@ fn draw_initial(snapshot: &gtk::Snapshot, letter: char, size: f32, baseline: f32
     let (_, logical) = layout.pixel_extents();
     let base = layout.baseline() as f32 / pango::SCALE as f32;
     snapshot.save();
-    snapshot.translate(&graphene::Point::new(-(logical.width() as f32) / 2.0, baseline - base));
+    snapshot.translate(&graphene::Point::new(
+        -(logical.width() as f32) / 2.0,
+        baseline - base,
+    ));
     snapshot.append_layout(&layout, &rgba(CREAM, 1.0));
     snapshot.restore();
 }
@@ -542,7 +591,10 @@ mod art_imp {
             // centred across the band and sitting on its bottom edge,
             // where the pages below meet it.
             let scale = fitted_scale(width as f32, self.scale.get().max(1.0));
-            let (art_w, art_h) = ((ART_W * scale).round() as i32, (ART_H * scale).round() as i32);
+            let (art_w, art_h) = (
+                (ART_W * scale).round() as i32,
+                (ART_H * scale).round() as i32,
+            );
             let x = (width - art_w) / 2;
             let y = height - art_h;
             let mut child = self.obj().first_child();
@@ -579,7 +631,9 @@ fn animations_on() -> bool {
 
 impl Marks {
     fn new(scale: f32) -> Marks {
-        let marks: Marks = glib::Object::builder().property("can-target", false).build();
+        let marks: Marks = glib::Object::builder()
+            .property("can-target", false)
+            .build();
         marks.imp().scale.set(scale);
         marks.imp().swap.set(1.0);
         marks.imp().flight.set(1.0);
@@ -770,7 +824,11 @@ impl PostBand {
         if old != stamp {
             imp.old_stamp.set(old);
             imp.stamp.set(stamp);
-            if old.is_some() && stamp.is_some() && before.is_some() && imp.flight_from.get().is_none() {
+            if old.is_some()
+                && stamp.is_some()
+                && before.is_some()
+                && imp.flight_from.get().is_none()
+            {
                 self.run(150, adw::Easing::EaseOutCubic, |imp, v| imp.swap.set(v));
             } else {
                 imp.swap.set(1.0);
@@ -875,8 +933,7 @@ fn load_poses(poses: &gtk::Stack, scale: f32, factor: i32) {
         let drawn = super::texture::off_thread(super::texture::WAIT, move || {
             Band::ALL.map(|band| {
                 let path = format!("/io/github/c9dev/PenguinMail/band/{}.svg", band.name());
-                match gtk::gdk_pixbuf::Pixbuf::from_resource_at_scale(&path, width, height, true)
-                {
+                match gtk::gdk_pixbuf::Pixbuf::from_resource_at_scale(&path, width, height, true) {
                     #[allow(deprecated)]
                     Ok(pixbuf) => Some(gdk::Texture::for_pixbuf(&pixbuf)),
                     Err(err) => {

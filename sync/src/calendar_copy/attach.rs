@@ -47,13 +47,21 @@ impl<A: Accounts> CalendarCopy<A> {
         file: Attachment,
         sent: Arc<AtomicU64>,
     ) -> Result<Permitted<Attachment>, SyncError> {
-        let services = self.accounts.services(account_id).ok_or(SyncError::UnknownAccount(account_id))?;
+        let services = self
+            .accounts
+            .services(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?;
         if services.withheld().drive {
             return Ok(Permitted::NeedsPermission);
         }
-        let calendar = services.calendar.ok_or(SyncError::Backend(BackendError::Unsupported))?;
+        let calendar = services
+            .calendar
+            .ok_or(SyncError::Backend(BackendError::Unsupported))?;
         match calendar.upload_attachment(&file, sent).await {
-            Ok(done) => Ok(Permitted::Done(Attachment { share: file.share.or(Some(true)), ..done })),
+            Ok(done) => Ok(Permitted::Done(Attachment {
+                share: file.share.or(Some(true)),
+                ..done
+            })),
             Err(BackendError::NeedsPermission) => Ok(Permitted::NeedsPermission),
             Err(err) => Err(err.into()),
         }
@@ -62,24 +70,42 @@ impl<A: Accounts> CalendarCopy<A> {
     /// Queues again, quietly, each event holding a file that waited for
     /// Drive access, once the account has granted it, so the next walk of
     /// the queue uploads the file.
-    pub(super) async fn retry_waiting_for_access(&self, account_id: AccountId) -> Result<(), SyncError> {
+    pub(super) async fn retry_waiting_for_access(
+        &self,
+        account_id: AccountId,
+    ) -> Result<(), SyncError> {
         if self.drive_withheld(account_id)? {
             return Ok(());
         }
         self.db
             .write(move |c| {
                 for (calendar, id) in store::waiting_for_access(c, account_id)? {
-                    let Some(mut event) = store::event(c, account_id, &calendar, &id)? else { continue };
+                    let Some(mut event) = store::event(c, account_id, &calendar, &id)? else {
+                        continue;
+                    };
                     for file in event.attachments.iter_mut().flatten() {
                         if file.problem == Some(UploadProblem::NeedsAccess) {
                             file.problem = None;
                         }
                     }
                     event.pending = true;
-                    store::save_events(c, account_id, std::slice::from_ref(&event), crate::now_millis())?;
+                    store::save_events(
+                        c,
+                        account_id,
+                        std::slice::from_ref(&event),
+                        crate::now_millis(),
+                    )?;
                     // The guests heard of the event when it went out; the
                     // file joining it is no news worth a second mail.
-                    store::enqueue_after(c, account_id, store::ChangeKind::Save, &event, None, None, Notify::Nobody)?;
+                    store::enqueue_after(
+                        c,
+                        account_id,
+                        store::ChangeKind::Save,
+                        &event,
+                        None,
+                        None,
+                        Notify::Nobody,
+                    )?;
                 }
                 Ok(())
             })
@@ -106,18 +132,28 @@ impl<A: Accounts> CalendarCopy<A> {
         let withheld = self.drive_withheld(change.account_id)?;
         let mut left_out = Vec::new();
         let mut failed = None;
-        for file in files.iter_mut().filter(|file| file.waiting.is_some() && file.problem.is_none()) {
+        for file in files
+            .iter_mut()
+            .filter(|file| file.waiting.is_some() && file.problem.is_none())
+        {
             if withheld {
                 file.problem = Some(UploadProblem::NeedsAccess);
                 continue;
             }
             match calendar.upload_attachment(file, Arc::default()).await {
-                Ok(done) => *file = Attachment { share: file.share.or(Some(true)), ..done },
+                Ok(done) => {
+                    *file = Attachment {
+                        share: file.share.or(Some(true)),
+                        ..done
+                    }
+                }
                 Err(BackendError::FileMissing(_) | BackendError::Gmail(GmailError::File(_))) => {
                     file.problem = Some(UploadProblem::NotFound);
                     left_out.push(file.title.clone());
                 }
-                Err(BackendError::NeedsPermission) => file.problem = Some(UploadProblem::NeedsAccess),
+                Err(BackendError::NeedsPermission) => {
+                    file.problem = Some(UploadProblem::NeedsAccess)
+                }
                 Err(err) if err.is_transient() || matches!(err, BackendError::NeedsReauth) => {
                     failed = Some(err);
                     break;
@@ -145,9 +181,17 @@ impl<A: Accounts> CalendarCopy<A> {
     /// Makes each guest a reader of every file in `files` the app uploaded
     /// and may share, and notes who got it. A refusal leaves that guest
     /// for the next save.
-    async fn share(&self, calendar: &AnyCalendar, files: &mut [Attachment], guests: &[calendar::Guest]) {
+    async fn share(
+        &self,
+        calendar: &AnyCalendar,
+        files: &mut [Attachment],
+        guests: &[calendar::Guest],
+    ) {
         for file in files.iter_mut() {
-            let wanted: Vec<String> = calendar::to_share(file, guests).into_iter().map(str::to_string).collect();
+            let wanted: Vec<String> = calendar::to_share(file, guests)
+                .into_iter()
+                .map(str::to_string)
+                .collect();
             for email in wanted {
                 match calendar.share_file(&file.file_id, &email).await {
                     Ok(()) => file.shared_with.push(email),
@@ -163,6 +207,11 @@ impl<A: Accounts> CalendarCopy<A> {
     }
 
     fn drive_withheld(&self, account_id: AccountId) -> Result<bool, SyncError> {
-        Ok(self.accounts.services(account_id).ok_or(SyncError::UnknownAccount(account_id))?.withheld().drive)
+        Ok(self
+            .accounts
+            .services(account_id)
+            .ok_or(SyncError::UnknownAccount(account_id))?
+            .withheld()
+            .drive)
     }
 }

@@ -64,7 +64,11 @@ pub fn head(raw: &[u8]) -> Head {
 }
 
 fn unfold(value: &str) -> String {
-    value.replace("\r\n", "").replace('\n', "").trim().to_string()
+    value
+        .replace("\r\n", "")
+        .replace('\n', "")
+        .trim()
+        .to_string()
 }
 
 impl Head {
@@ -94,7 +98,11 @@ impl Head {
         let mut recipients: Vec<String> = self
             .headers
             .iter()
-            .filter(|(name, _)| ["To", "Cc", "Bcc"].iter().any(|h| name.eq_ignore_ascii_case(h)))
+            .filter(|(name, _)| {
+                ["To", "Cc", "Bcc"]
+                    .iter()
+                    .any(|h| name.eq_ignore_ascii_case(h))
+            })
             .flat_map(|(_, value)| parse_address_list(value))
             .map(|a| a.email)
             .collect();
@@ -118,7 +126,10 @@ pub fn without_header<'a>(raw: &'a [u8], name: &str) -> Cow<'a, [u8]> {
     let named = |line: &[u8]| {
         line.len() > name.len()
             && line[..name.len()].eq_ignore_ascii_case(name.as_bytes())
-            && line[name.len()..].iter().find(|b| !matches!(b, b' ' | b'\t')) == Some(&b':')
+            && line[name.len()..]
+                .iter()
+                .find(|b| !matches!(b, b' ' | b'\t'))
+                == Some(&b':')
     };
     let mut skipping = false;
     let mut out: Option<Vec<u8>> = None;
@@ -167,7 +178,12 @@ mod tests {
             let full = crate::parts(raw).unwrap_or_default();
             let head = head(raw);
             for name in ["From", "To", "Cc", "Bcc", "Message-ID", "Subject"] {
-                assert_eq!(head.header(name), full.header(name), "{name} in {:?}", String::from_utf8_lossy(raw));
+                assert_eq!(
+                    head.header(name),
+                    full.header(name),
+                    "{name} in {:?}",
+                    String::from_utf8_lossy(raw)
+                );
             }
         }
     }
@@ -178,7 +194,12 @@ mod tests {
         assert_eq!(env.from.as_deref(), Some("ann@example.com"));
         assert_eq!(
             env.recipients,
-            ["bob@example.com", "cy@example.com", "dee@example.com", "eve@example.com"]
+            [
+                "bob@example.com",
+                "cy@example.com",
+                "dee@example.com",
+                "eve@example.com"
+            ]
         );
         assert_eq!(head(MESSAGES[5]).envelope().from, None);
         assert_eq!(head(MESSAGES[7]).envelope(), Envelope::default());
@@ -192,7 +213,10 @@ mod tests {
         let group = head(MESSAGES[3]).envelope();
         // Groups read as parse_address_list reads them, as before this module.
         let old = crate::parts(MESSAGES[3]).unwrap();
-        let mut expected: Vec<String> = parse_address_list(old.header("To").unwrap()).into_iter().map(|a| a.email).collect();
+        let mut expected: Vec<String> = parse_address_list(old.header("To").unwrap())
+            .into_iter()
+            .map(|a| a.email)
+            .collect();
         expected.sort();
         assert_eq!(group.recipients, expected);
     }
@@ -220,13 +244,19 @@ mod tests {
 
     #[test]
     fn a_message_without_the_header_is_borrowed() {
-        assert!(matches!(without_header(MESSAGES[0], "Bcc"), Cow::Borrowed(_)));
+        assert!(matches!(
+            without_header(MESSAGES[0], "Bcc"),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]
     fn a_body_line_that_says_bcc_stays() {
         let raw = b"To: a@example.com\r\nBcc: b@example.com\r\n\r\nBcc: not a header\r\n";
-        assert_eq!(&*without_header(raw, "bcc"), b"To: a@example.com\r\n\r\nBcc: not a header\r\n");
+        assert_eq!(
+            &*without_header(raw, "bcc"),
+            b"To: a@example.com\r\n\r\nBcc: not a header\r\n"
+        );
     }
 
     #[test]
@@ -238,7 +268,10 @@ mod tests {
     #[test]
     fn blanks_before_the_colon_still_name_the_header() {
         let raw = b"To: a@example.com\r\nBcc : b@example.com\r\nBcc\t:c@example.com\r\nBcc \t : d@example.com\r\nSubject: s\r\n\r\nx";
-        assert_eq!(&*without_header(raw, "Bcc"), b"To: a@example.com\r\nSubject: s\r\n\r\nx");
+        assert_eq!(
+            &*without_header(raw, "Bcc"),
+            b"To: a@example.com\r\nSubject: s\r\n\r\nx"
+        );
     }
 
     #[test]

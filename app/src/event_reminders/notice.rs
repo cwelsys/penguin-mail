@@ -71,7 +71,13 @@ where
         buttons.push(Button::Join);
     }
     buttons.push(Button::Snooze);
-    Notice { id: notification_id(&due.key), title, body, buttons, target: target(&due.key) }
+    Notice {
+        id: notification_id(&due.key),
+        title,
+        body,
+        buttons,
+        target: target(&due.key),
+    }
 }
 
 /// "In 10 minutes, 14:00 to 15:00", "Started 5 minutes ago, 14:00 to
@@ -87,7 +93,10 @@ where
         let day = chrono::DateTime::from_timestamp_millis(due.occurrence.start)
             .map(|at| at.date_naive())
             .unwrap_or(today);
-        return fill(&gettext("{when}, all day"), &[("when", &day_words(day.max(today), today, zone))]);
+        return fill(
+            &gettext("{when}, all day"),
+            &[("when", &day_words(day.max(today), today, zone))],
+        );
     }
     let ahead = (due.starts - now + MINUTE - 1).div_euclid(MINUTE);
     let when = if ahead <= 0 {
@@ -103,16 +112,30 @@ where
             )
         }
     } else if ahead < 60 {
-        fill_plural("In {count} minute", "In {count} minutes", ahead as usize, &[("count", &ahead.to_string())])
+        fill_plural(
+            "In {count} minute",
+            "In {count} minutes",
+            ahead as usize,
+            &[("count", &ahead.to_string())],
+        )
     } else if ahead % 60 == 0 && ahead < 24 * 60 {
         let hours = ahead / 60;
-        fill_plural("In {count} hour", "In {count} hours", hours as usize, &[("count", &hours.to_string())])
+        fill_plural(
+            "In {count} hour",
+            "In {count} hours",
+            hours as usize,
+            &[("count", &hours.to_string())],
+        )
     } else {
         day_words(date_in(due.starts, zone), today, zone)
     };
     fill(
         &gettext("{when}, {start} to {end}"),
-        &[("when", &when), ("start", &time_in(due.starts, zone)), ("end", &time_in(due.ends, zone))],
+        &[
+            ("when", &when),
+            ("start", &time_in(due.starts, zone)),
+            ("end", &time_in(due.ends, zone)),
+        ],
     )
 }
 
@@ -132,7 +155,10 @@ pub fn joinable(link: &str) -> bool {
 }
 
 fn date_in<Z: TimeZone>(at: EpochMillis, zone: &Z) -> NaiveDate {
-    zone.timestamp_millis_opt(at).single().map(|t| t.date_naive()).unwrap_or_default()
+    zone.timestamp_millis_opt(at)
+        .single()
+        .map(|t| t.date_naive())
+        .unwrap_or_default()
 }
 
 fn time_in<Z: TimeZone>(at: EpochMillis, zone: &Z) -> String
@@ -156,7 +182,10 @@ where
         _ => day
             .and_hms_opt(12, 0, 0)
             .and_then(|noon| zone.from_local_datetime(&noon).earliest())
-            .map(|noon| noon.format_localized(&gettext("%A %-d %B"), date_locale()).to_string())
+            .map(|noon| {
+                noon.format_localized(&gettext("%A %-d %B"), date_locale())
+                    .to_string()
+            })
             .unwrap_or_default(),
     }
 }
@@ -187,8 +216,19 @@ mod tests {
             ..Event::default()
         };
         Due {
-            key: Key { account_id: 1, calendar: "work".into(), event: "review".into(), start, minutes: 10 },
-            occurrence: mailrs_domain::calendar::Occurrence { account_id: 1, event: Arc::new(event), start, end },
+            key: Key {
+                account_id: 1,
+                calendar: "work".into(),
+                event: "review".into(),
+                start,
+                minutes: 10,
+            },
+            occurrence: mailrs_domain::calendar::Occurrence {
+                account_id: 1,
+                event: Arc::new(event),
+                start,
+                end,
+            },
             starts: start,
             ends: end,
         }
@@ -205,14 +245,20 @@ mod tests {
         assert_eq!(words(TWO_PM - HOUR), "In 1 hour, 14:00 to 15:00");
         assert_eq!(words(TWO_PM - 90 * MIN), "Today, 14:00 to 15:00");
         assert_eq!(words(TWO_PM - DAY), "Tomorrow, 14:00 to 15:00");
-        assert_eq!(words(TWO_PM - 3 * DAY), "Wednesday 23 September, 14:00 to 15:00");
+        assert_eq!(
+            words(TWO_PM - 3 * DAY),
+            "Wednesday 23 September, 14:00 to 15:00"
+        );
     }
 
     #[test]
     fn a_late_reminder_says_how_long_ago_the_event_started() {
         assert_eq!(words(TWO_PM + 20_000), "Now, 14:00 to 15:00");
         assert_eq!(words(TWO_PM + MIN), "Started 1 minute ago, 14:00 to 15:00");
-        assert_eq!(words(TWO_PM + 20 * MIN), "Started 20 minutes ago, 14:00 to 15:00");
+        assert_eq!(
+            words(TWO_PM + 20 * MIN),
+            "Started 20 minutes ago, 14:00 to 15:00"
+        );
     }
 
     #[test]
@@ -221,16 +267,28 @@ mod tests {
         let mut offsite = due("Offsite", 1_790_204_400_000, 1_790_204_400_000 + DAY);
         offsite.occurrence.start = 1_790_208_000_000;
         offsite.occurrence.end = 1_790_208_000_000 + DAY;
-        offsite.occurrence.event = Arc::new(Event { all_day: true, ..(*offsite.occurrence.event).clone() });
+        offsite.occurrence.event = Arc::new(Event {
+            all_day: true,
+            ..(*offsite.occurrence.event).clone()
+        });
         // 17:00 on Wednesday.
-        assert_eq!(when_words(&offsite, 1_790_179_200_000, &Lisbon), "Tomorrow, all day");
-        assert_eq!(when_words(&offsite, 1_790_204_400_000 + HOUR, &Lisbon), "Today, all day");
+        assert_eq!(
+            when_words(&offsite, 1_790_179_200_000, &Lisbon),
+            "Tomorrow, all day"
+        );
+        assert_eq!(
+            when_words(&offsite, 1_790_204_400_000 + HOUR, &Lisbon),
+            "Today, all day"
+        );
     }
 
     #[test]
     fn the_body_puts_the_place_under_the_time() {
         let mut lunch = due("Lunch with Ana", TWO_PM, TWO_PM + HOUR);
-        lunch.occurrence.event = Arc::new(Event { place: "Café Império".into(), ..(*lunch.occurrence.event).clone() });
+        lunch.occurrence.event = Arc::new(Event {
+            place: "Café Império".into(),
+            ..(*lunch.occurrence.event).clone()
+        });
         let shown = notice(&lunch, TWO_PM - 10 * MIN, &Lisbon);
         assert_eq!(shown.title, "Lunch with Ana");
         assert_eq!(shown.body, "In 10 minutes, 14:00 to 15:00\nCafé Império");
@@ -239,19 +297,28 @@ mod tests {
 
     #[test]
     fn an_event_with_no_title_still_says_something() {
-        assert_eq!(notice(&due("  ", TWO_PM, TWO_PM + HOUR), TWO_PM, &Lisbon).title, "(no title)");
+        assert_eq!(
+            notice(&due("  ", TWO_PM, TWO_PM + HOUR), TWO_PM, &Lisbon).title,
+            "(no title)"
+        );
     }
 
     #[test]
     fn join_shows_only_with_a_call_link() {
         let plain = due("Review", TWO_PM, TWO_PM + HOUR);
-        assert_eq!(notice(&plain, TWO_PM, &Lisbon).buttons, vec![Button::Snooze]);
+        assert_eq!(
+            notice(&plain, TWO_PM, &Lisbon).buttons,
+            vec![Button::Snooze]
+        );
         let mut call = plain.clone();
         call.occurrence.event = Arc::new(Event {
             conference: Some("https://meet.google.com/abc-defg-hij".into()),
             ..(*call.occurrence.event).clone()
         });
-        assert_eq!(notice(&call, TWO_PM, &Lisbon).buttons, vec![Button::Join, Button::Snooze]);
+        assert_eq!(
+            notice(&call, TWO_PM, &Lisbon).buttons,
+            vec![Button::Join, Button::Snooze]
+        );
         let mut odd = plain;
         odd.occurrence.event = Arc::new(Event {
             conference: Some("javascript:alert(1)".into()),

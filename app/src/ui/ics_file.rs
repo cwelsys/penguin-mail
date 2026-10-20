@@ -10,9 +10,9 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
+use mailrs_domain::AccountId;
 use mailrs_domain::invitation::{self, Invitation, Method};
 use mailrs_domain::translate::gettext;
-use mailrs_domain::AccountId;
 use mailrs_sync::Permitted;
 
 use crate::app::App;
@@ -29,7 +29,10 @@ pub fn events_of(text: &str) -> Vec<Invitation> {
     invitation::read_all(text)
         .into_iter()
         .map(|event| match event.method {
-            Method::Request => Invitation { method: Method::Publish, ..event },
+            Method::Request => Invitation {
+                method: Method::Publish,
+                ..event
+            },
             _ => event,
         })
         .collect()
@@ -118,16 +121,20 @@ fn show_events(
         let card_slot = Rc::clone(&card_slot);
         let window = window.downgrade();
         move |action| {
-            let (Some(app), Some(toasts), Some(card)) =
-                (weak_app.upgrade(), weak_toasts.upgrade(), card_slot.borrow().clone())
-            else {
+            let (Some(app), Some(toasts), Some(card)) = (
+                weak_app.upgrade(),
+                weak_toasts.upgrade(),
+                card_slot.borrow().clone(),
+            ) else {
                 return;
             };
             let toast = |text: &str| toasts.add_toast(crate::ui::toast(text));
             match action {
                 Action::Import(events, target) => import(&app, &card, &toasts, events, target),
                 Action::ShowInCalendar => {
-                    if let Some(Some(spot)) = card.with_showing(|showing| showing.on_calendar.clone()) {
+                    if let Some(Some(spot)) =
+                        card.with_showing(|showing| showing.on_calendar.clone())
+                    {
                         app.show_window().show_spot(&spot);
                         if let Some(window) = window.upgrade() {
                             window.close();
@@ -190,7 +197,7 @@ fn show_events(
         let note = gtk::Label::builder()
             .label(gettext(
                 "No account here has a calendar Penguin Mail can add to. Add an account with \
-                 a calendar, or turn one on in Preferences, under Contacts & Calendar, then \
+                 a calendar, or turn one on in Preferences, under Calendar, then \
                  open the file again.",
             ))
             .wrap(true)
@@ -209,14 +216,21 @@ fn show_events(
 /// Puts the writable calendars of every calendar account into the card's
 /// picker, each account's own first. The address follows a calendar's
 /// name only when there is more than one account to tell apart.
-fn offer_calendars(app: &Rc<App>, card: &Rc<EventCard>, uid: String, accounts: Vec<(AccountId, String)>) {
+fn offer_calendars(
+    app: &Rc<App>,
+    card: &Rc<EventCard>,
+    uid: String,
+    accounts: Vec<(AccountId, String)>,
+) {
     let (calendar, core) = (app.core.calendar(), Rc::clone(&app.core));
     let (card, several) = (Rc::downgrade(card), accounts.len() > 1);
     glib::spawn_future_local(async move {
         let mut targets: Vec<AddTo> = Vec::new();
         for (account_id, email) in accounts {
             let calendar = Arc::clone(&calendar);
-            let listed = core.call(async move { calendar.calendars(account_id).await }).await;
+            let listed = core
+                .call(async move { calendar.calendars(account_id).await })
+                .await;
             if let Ok(Permitted::Done(list)) = listed {
                 let label = several.then_some(email.as_str());
                 targets.extend(crate::ui::invitation::targets_of(account_id, list, label));
@@ -249,7 +263,11 @@ fn import(
     glib::spawn_future_local(async move {
         let account_id = target.account_id;
         let done = core
-            .call(async move { calendar.import(account_id, Some(&target.calendar), &events).await })
+            .call(async move {
+                calendar
+                    .import(account_id, Some(&target.calendar), &events)
+                    .await
+            })
             .await;
         let (Some(card), Some(toasts)) = (card.upgrade(), toasts.upgrade()) else {
             return;
@@ -262,7 +280,9 @@ fn import(
             Ok(Permitted::Done(added)) => {
                 card.set_added(&uid, &added.calendar, &added.spots);
                 if added.skipped > 0 {
-                    say(&gettext("Some events were left out, since they have no id or start time"));
+                    say(&gettext(
+                        "Some events were left out, since they have no id or start time",
+                    ));
                 }
                 // The main window reads its calendar from the copy the
                 // import just wrote to.

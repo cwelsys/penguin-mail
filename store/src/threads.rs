@@ -1011,6 +1011,64 @@ pub fn get_thread(
         .optional()?)
 }
 
+/// Adds the local flag colors and invitation marks to server-listed rows.
+/// The rows keep their server-scoped counts and membership; batches only
+/// look up decorations by account and the row's thread or message key.
+pub fn decorate_rows(
+    conn: &Connection,
+    account_id: AccountId,
+    rows: &mut [ThreadSummary],
+) -> Result<()> {
+    for messages in [false, true] {
+        let keys: Vec<String> = rows
+            .iter()
+            .filter(|r| r.account_id == account_id && r.message_id.is_some() == messages)
+            .map(|r| r.message_id.as_ref().unwrap_or(&r.id).clone())
+            .collect();
+        let mut decorated = std::collections::HashMap::new();
+        for batch in keys.chunks(200) {
+            let mut sql = Sql::default();
+            let (columns, table, alias, read): (
+                _,
+                _,
+                _,
+                fn(&Row<'_>) -> rusqlite::Result<ThreadSummary>,
+            ) = if messages {
+                (MESSAGE_COLUMNS, "messages", "m", to_message_row)
+            } else {
+                (COLUMNS, "threads", "t", to_summary)
+            };
+            sql.push(&format!(
+                "SELECT {columns} FROM {table} {alias} WHERE {alias}.account_id = "
+            ))
+            .bind(account_id)
+            .push(&format!(" AND {alias}.id IN ("))
+            .bind_list(batch)
+            .push(")");
+            let mut stmt = conn.prepare_cached(&sql.text)?;
+            for row in stmt.query_map(params_from_iter(&sql.params), read)? {
+                let row = row?;
+                decorated.insert(
+                    row.message_id.unwrap_or(row.id),
+                    (row.flag_color, row.invitation),
+                );
+            }
+        }
+        for row in rows
+            .iter_mut()
+            .filter(|r| r.account_id == account_id && r.message_id.is_some() == messages)
+        {
+            if let Some(&(color, invitation)) =
+                decorated.get(row.message_id.as_ref().unwrap_or(&row.id))
+            {
+                row.flag_color = color;
+                row.invitation = invitation;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The messages among `ids` whose thread is muted, each with its thread,
 /// in the order given. Each id costs two key lookups, so new mail asks
 /// this at every look without reading the rest of the store.
@@ -1026,7 +1084,9 @@ pub fn in_muted_threads(
     )?;
     let mut muted = Vec::new();
     for id in ids {
-        let thread: Option<String> = stmt.query_row(params![account_id, id], |row| row.get(0)).optional()?;
+        let thread: Option<String> = stmt
+            .query_row(params![account_id, id], |row| row.get(0))
+            .optional()?;
         if let Some(thread) = thread {
             muted.push((id.clone(), thread));
         }
@@ -1537,7 +1597,9 @@ mod walk_tests {
             ThreadFilter::everything().with_flag(FlagColor::Red),
             ThreadFilter::unified(set("INBOX")).from_senders(sender()),
             ThreadFilter::everything().from_senders(sender()),
-            ThreadFilter::everything().in_account(a).from_senders(sender()),
+            ThreadFilter::everything()
+                .in_account(a)
+                .from_senders(sender()),
             ThreadFilter::unified(set("INBOX")).with_threads(vec![
                 "t3".into(),
                 "t10".into(),

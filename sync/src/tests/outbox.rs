@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mailrs_domain::{Attachment, MailSet, Membership, MessageBody, Role, Target};
-use mailrs_gmail::labels;
 use mailrs_gmail::GmailError;
+use mailrs_gmail::labels;
 use mailrs_store::messages::Change;
 use mailrs_store::outbox::{self, Queued};
 use mailrs_store::{drafts, messages};
@@ -52,7 +52,9 @@ async fn a_saved_draft_shows_its_own_words_in_the_fake() {
         )
         .await
         .unwrap();
-    let snippet = h.fake.with(|s| s.messages[&saved.message_id].snippet.clone());
+    let snippet = h
+        .fake
+        .with(|s| s.messages[&saved.message_id].snippet.clone());
     assert_eq!(snippet, "Here are the maps.");
 }
 
@@ -192,7 +194,11 @@ async fn a_draft_sent_elsewhere_stops_answering_for_its_message() {
     });
     let (account_id, message_id) = (h.account_id, saved.message_id.clone());
     h.db.write(move |c| {
-        let change = Change::of(&message_id, Membership::Mailbox(labels::DRAFT.into()), false);
+        let change = Change::of(
+            &message_id,
+            Membership::Mailbox(labels::DRAFT.into()),
+            false,
+        );
         messages::apply(c, account_id, &[change]).map(drop)
     })
     .await
@@ -323,7 +329,8 @@ async fn search_returns_newest_first_without_storing() {
 async fn attachments_and_identity_come_from_gmail() {
     let h = harness().await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.bodies.insert(
             "m1".into(),
             MessageBody {
@@ -341,7 +348,10 @@ async fn attachments_and_identity_come_from_gmail() {
         s.attachments
             .insert(("m1".into(), "a1".into()), vec![1, 2, 3]);
     });
-    assert_eq!(h.sync.attachment("m1", &attachment_path(0)).await.unwrap(), vec![1, 2, 3]);
+    assert_eq!(
+        h.sync.attachment("m1", &attachment_path(0)).await.unwrap(),
+        vec![1, 2, 3]
+    );
     assert!(matches!(
         h.sync.attachment("m1", "9").await,
         Err(crate::SyncError::Backend(crate::BackendError::NotFound))
@@ -383,7 +393,11 @@ async fn the_automatic_reply_and_signature_pass_through() {
     let h = harness().await;
     h.fake.with(|s| s.signature = Some("Me\nExample Co".into()));
     assert_eq!(
-        settings(&h).signature(h.account_id).await.unwrap().as_deref(),
+        settings(&h)
+            .signature(h.account_id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("Me\nExample Co")
     );
     let auto_reply = h
@@ -429,7 +443,10 @@ async fn filters_pass_through_and_a_gone_filter_deletes_quietly() {
     let h = harness().await;
     let settings = settings(&h);
     let created = settings
-        .add_rule(h.account_id, mailrs_domain::Filter::block("pest@example.com"))
+        .add_rule(
+            h.account_id,
+            mailrs_domain::Filter::block("pest@example.com"),
+        )
         .await
         .unwrap()
         .done()
@@ -447,7 +464,10 @@ async fn filters_pass_through_and_a_gone_filter_deletes_quietly() {
         settings.delete_rule(h.account_id, &id).await.unwrap(),
         Permitted::Done(())
     );
-    assert_eq!(settings.rules(h.account_id).await.unwrap().done(), Some(vec![]));
+    assert_eq!(
+        settings.rules(h.account_id).await.unwrap().done(),
+        Some(vec![])
+    );
 }
 
 // ---- The outbox: what waits here, and what goes to the person ------------
@@ -862,12 +882,28 @@ async fn cancelling_a_message_another_caller_is_sending_leaves_it_be() {
         panic!("Send Later keeps a message it could not hand to Gmail");
     };
     let now = now_millis();
-    h.db.write(move |c| outbox::claim(c, offline, now, now - 1)).await.unwrap().expect("the sender claims it");
+    h.db.write(move |c| outbox::claim(c, offline, now, now - 1))
+        .await
+        .unwrap()
+        .expect("the sender claims it");
     let drafts_before = h.fake.with(|s| s.drafts.len());
-    let cancelled = outbox.cancel_scheduled(&[Target::thread(h.account_id, outbox_row(offline))]).await.unwrap();
+    let cancelled = outbox
+        .cancel_scheduled(&[Target::thread(h.account_id, outbox_row(offline))])
+        .await
+        .unwrap();
     assert_eq!((cancelled.in_drafts, cancelled.already_sent), (0, 1));
-    assert_eq!(h.fake.with(|s| s.drafts.len()), drafts_before, "no draft of mail on its way out");
-    assert!(h.db.read(move |c| outbox::find(c, offline)).await.unwrap().is_some(), "the sender keeps its row");
+    assert_eq!(
+        h.fake.with(|s| s.drafts.len()),
+        drafts_before,
+        "no draft of mail on its way out"
+    );
+    assert!(
+        h.db.read(move |c| outbox::find(c, offline))
+            .await
+            .unwrap()
+            .is_some(),
+        "the sender keeps its row"
+    );
 }
 
 #[tokio::test]
@@ -1163,9 +1199,20 @@ async fn a_message_that_falls_due_during_a_switch_waits_for_it() {
 
     let drained = outbox.send_due(now_millis()).await.unwrap();
     assert!(!drained.changed, "nothing happened to it");
-    assert!(h.fake.with(|s| s.sent.is_empty()), "nothing went out while the switch ran");
-    let row = h.db.read(move |c| outbox::find(c, id)).await.unwrap().unwrap();
-    assert_eq!((row.attempts, row.problem), (0, None), "no failed try is counted");
+    assert!(
+        h.fake.with(|s| s.sent.is_empty()),
+        "nothing went out while the switch ran"
+    );
+    let row =
+        h.db.read(move |c| outbox::find(c, id))
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        (row.attempts, row.problem),
+        (0, None),
+        "no failed try is counted"
+    );
 
     drop(held);
     let drained = outbox.send_due(now_millis()).await.unwrap();
@@ -1178,7 +1225,10 @@ async fn a_message_sent_during_a_switch_waits_for_the_switch_to_end() {
     let outbox = std::sync::Arc::new(queue(&h));
     let held = outbox.hold(h.account_id).await;
     let posting = tokio::spawn({
-        let (outbox, message) = (std::sync::Arc::clone(&outbox), message(h.account_id, "Report"));
+        let (outbox, message) = (
+            std::sync::Arc::clone(&outbox),
+            message(h.account_id, "Report"),
+        );
         async move { outbox.post(message).await }
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

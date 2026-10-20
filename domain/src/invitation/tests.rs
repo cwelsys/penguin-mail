@@ -724,7 +724,10 @@ fn a_name_that_would_end_a_parameter_is_quoted() {
 /// 20 October 2026 09:00 to 09:15 UTC.
 fn standup_on_calendar() -> crate::calendar::Occurrence {
     use crate::calendar::{Event, Guest as CalendarGuest, Occurrence as Held};
-    let start = chrono::Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap().timestamp_millis();
+    let start = chrono::Utc
+        .with_ymd_and_hms(2026, 10, 20, 9, 0, 0)
+        .unwrap()
+        .timestamp_millis();
     Held {
         account_id: 1,
         event: std::sync::Arc::new(Event {
@@ -742,7 +745,11 @@ fn standup_on_calendar() -> crate::calendar::Occurrence {
                     organizer: true,
                     ..CalendarGuest::default()
                 },
-                CalendarGuest { email: "me@example.com".into(), me: true, ..CalendarGuest::default() },
+                CalendarGuest {
+                    email: "me@example.com".into(),
+                    me: true,
+                    ..CalendarGuest::default()
+                },
             ],
             ..Event::default()
         }),
@@ -755,12 +762,27 @@ fn standup_on_calendar() -> crate::calendar::Occurrence {
 fn an_occurrence_on_the_calendar_reads_as_an_invitation_to_it() {
     let found = standup_on_calendar();
     let invitation = from_occurrence(&found, 3);
-    assert_eq!((invitation.uid.as_str(), invitation.sequence), ("standup@google.com", 3));
-    assert_eq!(invitation.when, Some(When::At { starts_at: found.start, ends_at: Some(found.end) }));
-    assert_eq!(invitation.organizer.as_ref().map(|o| o.email.as_str()), Some("priya@example.com"));
+    assert_eq!(
+        (invitation.uid.as_str(), invitation.sequence),
+        ("standup@google.com", 3)
+    );
+    assert_eq!(
+        invitation.when,
+        Some(When::At {
+            starts_at: found.start,
+            ends_at: Some(found.end)
+        })
+    );
+    assert_eq!(
+        invitation.organizer.as_ref().map(|o| o.email.as_str()),
+        Some("priya@example.com")
+    );
     assert_eq!(
         invitation.occurrence,
-        Some(Occurrence { written: ":20261020T090000Z".into(), at: Some(found.start) })
+        Some(Occurrence {
+            written: ":20261020T090000Z".into(),
+            at: Some(found.start)
+        })
     );
 }
 
@@ -768,7 +790,10 @@ fn an_occurrence_on_the_calendar_reads_as_an_invitation_to_it() {
 fn a_one_off_event_on_the_calendar_names_no_occurrence() {
     let found = standup_on_calendar();
     let one_off = crate::calendar::Occurrence {
-        event: std::sync::Arc::new(crate::calendar::Event { rules: Vec::new(), ..(*found.event).clone() }),
+        event: std::sync::Arc::new(crate::calendar::Event {
+            rules: Vec::new(),
+            ..(*found.event).clone()
+        }),
         ..found
     };
     assert_eq!(from_occurrence(&one_off, 0).occurrence, None);
@@ -785,8 +810,17 @@ fn a_reply_with_a_note_carries_it_as_a_comment() {
         Some("Running late, one; two"),
         1_780_000_000_000,
     );
-    assert!(properties(&object).contains(&r"COMMENT:Running late\, one\; two".to_string()), "{object}");
-    let plain = reply(&invitation, &me(), Answer::Maybe, Scope::Series, 1_780_000_000_000);
+    assert!(
+        properties(&object).contains(&r"COMMENT:Running late\, one\; two".to_string()),
+        "{object}"
+    );
+    let plain = reply(
+        &invitation,
+        &me(),
+        Answer::Maybe,
+        Scope::Series,
+        1_780_000_000_000,
+    );
     assert!(!plain.contains("COMMENT"));
 }
 
@@ -871,7 +905,10 @@ fn an_event_from_a_file_keeps_its_uid_zone_and_rules() {
         "SUMMARY",
         "RRULE:FREQ=WEEKLY;COUNT=4\r\nEXDATE;TZID=Europe/Lisbon:20261112T083000\r\nSUMMARY",
     );
-    let event = read(&text).unwrap().to_event("primary", "UTC").expect("an event");
+    let event = read(&text)
+        .unwrap()
+        .to_event("primary", "UTC")
+        .expect("an event");
     assert_eq!(event.uid, "ticket-4471@rail.example");
     assert_eq!(event.calendar, "primary");
     assert_eq!(event.zone, "Europe/Lisbon");
@@ -879,7 +916,10 @@ fn an_event_from_a_file_keeps_its_uid_zone_and_rules() {
     assert_eq!(event.place, "Santa Apolonia");
     assert_eq!(
         event.rules,
-        ["RRULE:FREQ=WEEKLY;COUNT=4", "EXDATE;TZID=Europe/Lisbon:20261112T083000"]
+        [
+            "RRULE:FREQ=WEEKLY;COUNT=4",
+            "EXDATE;TZID=Europe/Lisbon:20261112T083000"
+        ]
     );
     assert_eq!(event.end - event.start, 3 * 3_600_000);
     assert!(!event.all_day);
@@ -891,17 +931,26 @@ fn an_outlook_skipped_day_is_named_in_an_iana_zone() {
         "UID:",
         "RRULE:FREQ=WEEKLY;COUNT=4\r\nEXDATE;TZID=W. Europe Standard Time:20260312T100000\r\nUID:",
     );
-    let event = read(&text).unwrap().to_event("primary", "UTC").expect("an event");
+    let event = read(&text)
+        .unwrap()
+        .to_event("primary", "UTC")
+        .expect("an event");
     assert_eq!(
         event.rules,
-        ["RRULE:FREQ=WEEKLY;COUNT=4", "EXDATE;TZID=Europe/Berlin:20260312T100000"]
+        [
+            "RRULE:FREQ=WEEKLY;COUNT=4",
+            "EXDATE;TZID=Europe/Berlin:20260312T100000"
+        ]
     );
 }
 
 #[test]
 fn a_floating_time_takes_the_calendars_zone() {
     let text = ticket(None).replace(";TZID=Europe/Lisbon", "");
-    let event = read(&text).unwrap().to_event("primary", "America/New_York").unwrap();
+    let event = read(&text)
+        .unwrap()
+        .to_event("primary", "America/New_York")
+        .unwrap();
     assert_eq!(event.zone, "America/New_York");
 }
 
@@ -921,7 +970,9 @@ fn an_all_day_event_from_a_file_ends_the_day_after_its_last_day() {
     assert!(event.all_day);
     assert_eq!(event.end - event.start, 3 * 24 * 3_600_000);
     assert_eq!(
-        chrono::DateTime::from_timestamp_millis(event.start).unwrap().date_naive(),
+        chrono::DateTime::from_timestamp_millis(event.start)
+            .unwrap()
+            .date_naive(),
         chrono::NaiveDate::from_ymd_opt(2026, 11, 10).unwrap()
     );
 }

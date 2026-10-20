@@ -53,7 +53,10 @@ pub(super) fn sent_message(h: &Harness) -> String {
 }
 
 fn invitations(h: &Harness) -> Invitations<Connected> {
-    let connected = Arc::new(Connected(HashMap::from([(h.account_id, Arc::clone(&h.sync))])));
+    let connected = Arc::new(Connected(HashMap::from([(
+        h.account_id,
+        Arc::clone(&h.sync),
+    )])));
     let copy = Arc::new(CalendarCopy::new(Arc::clone(&connected), h.db.clone()));
     Invitations::new(connected, h.db.clone(), copy)
 }
@@ -230,7 +233,15 @@ async fn an_answer_reaches_the_calendar_and_comes_back_on_reopening() {
         .unwrap();
 
     let sent = invitations
-        .answer(h.account_id, &invitation, &me(), Answer::Maybe, Scope::Series, None, MARCH_2026)
+        .answer(
+            h.account_id,
+            &invitation,
+            &me(),
+            Answer::Maybe,
+            Scope::Series,
+            None,
+            MARCH_2026,
+        )
         .await
         .unwrap();
     assert_eq!(sent.told, Told::Calendar);
@@ -238,7 +249,12 @@ async fn an_answer_reaches_the_calendar_and_comes_back_on_reopening() {
     send_queue(&h).await;
     assert_eq!(
         h.fake.with(|s| s.answered_events.clone()),
-        [("primary".to_string(), "design-review".to_string(), Answer::Maybe, None)],
+        [(
+            "primary".to_string(),
+            "design-review".to_string(),
+            Answer::Maybe,
+            None
+        )],
         "the calendar holds the answer"
     );
     assert!(
@@ -273,34 +289,41 @@ async fn an_answer_from_the_calendar_marks_the_copy_and_the_card_and_waits_to_go
         start: 1_000,
         end: 2_000,
         guests: vec![
-            Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
-            Guest { email: "priya@example.com".into(), organizer: true, ..Guest::default() },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            },
+            Guest {
+                email: "priya@example.com".into(),
+                organizer: true,
+                ..Guest::default()
+            },
         ],
         ..Event::default()
     });
-    h.db
-        .write({
-            let event = (*event).clone();
-            let account_id = h.account_id;
-            move |c| {
-                let calendar = mailrs_domain::calendar::Calendar {
-                    id: "primary".into(),
-                    name: "primary".into(),
-                    color: "#3584e4".into(),
-                    access: mailrs_domain::calendar::Access::Owner,
-                    zone: "UTC".into(),
-                    primary: true,
-                    shown: true,
-                    hidden: false,
-                    reminders: Vec::new(),
-                    all_day_reminders: None,
-                };
-                calendar_store::save_calendars(c, account_id, std::slice::from_ref(&calendar))?;
-                calendar_store::save_events(c, account_id, std::slice::from_ref(&event), 1_000)
-            }
-        })
-        .await
-        .unwrap();
+    h.db.write({
+        let event = (*event).clone();
+        let account_id = h.account_id;
+        move |c| {
+            let calendar = mailrs_domain::calendar::Calendar {
+                id: "primary".into(),
+                name: "primary".into(),
+                color: "#3584e4".into(),
+                access: mailrs_domain::calendar::Access::Owner,
+                zone: "UTC".into(),
+                primary: true,
+                shown: true,
+                hidden: false,
+                reminders: Vec::new(),
+                all_day_reminders: None,
+            };
+            calendar_store::save_calendars(c, account_id, std::slice::from_ref(&calendar))?;
+            calendar_store::save_events(c, account_id, std::slice::from_ref(&event), 1_000)
+        }
+    })
+    .await
+    .unwrap();
     let occurrence = mailrs_domain::calendar::Occurrence {
         account_id: h.account_id,
         event: Arc::clone(&event),
@@ -309,28 +332,35 @@ async fn an_answer_from_the_calendar_marks_the_copy_and_the_card_and_waits_to_go
     };
 
     let done = invitations
-        .answer_event(h.account_id, &occurrence, Answer::Yes, RepeatScope::All, None)
+        .answer_event(
+            h.account_id,
+            &occurrence,
+            Answer::Yes,
+            RepeatScope::All,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(done, Permitted::Done(()));
 
-    let queued = h
-        .db
-        .read({
+    let queued =
+        h.db.read({
             let account_id = h.account_id;
             move |c| calendar_store::queued(c, account_id)
         })
         .await
         .unwrap();
     assert_eq!(
-        queued.iter().map(|q| (q.kind, q.event.as_str())).collect::<Vec<_>>(),
+        queued
+            .iter()
+            .map(|q| (q.kind, q.event.as_str()))
+            .collect::<Vec<_>>(),
         [(calendar_store::ChangeKind::Answer, "series-1")],
         "the answer waits in the calendar's queue"
     );
 
-    let stored = h
-        .db
-        .read({
+    let stored =
+        h.db.read({
             let account_id = h.account_id;
             move |c| calendar_store::event(c, account_id, "primary", "series-1")
         })
@@ -348,7 +378,11 @@ async fn an_answer_from_the_calendar_marks_the_copy_and_the_card_and_waits_to_go
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(reopened.answer, Some(Answer::Yes), "the invitation card shows it too");
+    assert_eq!(
+        reopened.answer,
+        Some(Answer::Yes),
+        "the invitation card shows it too"
+    );
 }
 
 #[tokio::test]
@@ -386,7 +420,10 @@ async fn a_message_is_answered_from_the_invitation_it_carries() {
     assert_eq!(invitation.summary, "Design review");
     assert_eq!(sent.told, Told::Calendar);
     send_queue(&h).await;
-    assert_eq!(h.fake.with(|s| s.answered_events.last().map(|a| a.2)), Some(Answer::Yes));
+    assert_eq!(
+        h.fake.with(|s| s.answered_events.last().map(|a| a.2)),
+        Some(Answer::Yes)
+    );
     let reopened = invitations
         .open(h.account_id, "m1", &invite(0, "20260310T090000Z"), 2_000)
         .await
@@ -573,7 +610,15 @@ async fn a_missing_calendar_permission_still_reaches_the_organizer() {
     let invitation = read(&invite(0, "20260310T090000Z"));
 
     let sent = invitations
-        .answer(h.account_id, &invitation, &me(), Answer::No, Scope::Series, None, MARCH_2026)
+        .answer(
+            h.account_id,
+            &invitation,
+            &me(),
+            Answer::No,
+            Scope::Series,
+            None,
+            MARCH_2026,
+        )
         .await
         .unwrap();
     assert_eq!(sent.told, Told::Organizer);
@@ -606,11 +651,18 @@ const CLASH: (i64, i64) = (1_773_138_600_000, 1_773_142_200_000);
 #[tokio::test]
 async fn an_invitation_over_something_else_says_what() {
     let h = harness().await;
-    let crit = Ev { uid: "crit@x".into(), title: "Design crit".into(), ..on_copy("crit", CLASH.0) };
+    let crit = Ev {
+        uid: "crit@x".into(),
+        title: "Design crit".into(),
+        ..on_copy("crit", CLASH.0)
+    };
     read_copy_at(&h, vec![crit], MARCH_2026).await;
 
     assert_eq!(
-        invitations(&h).busy(h.account_id, &read(&at_ten())).await.unwrap(),
+        invitations(&h)
+            .busy(h.account_id, &read(&at_ten()))
+            .await
+            .unwrap(),
         vec!["Design crit".to_string()]
     );
 }
@@ -619,7 +671,11 @@ async fn an_invitation_over_something_else_says_what() {
 async fn an_hour_with_nothing_in_it_says_nothing() {
     let h = harness().await;
     let next_day = CLASH.0 + 86_400_000;
-    let crit = Ev { uid: "crit@x".into(), title: "Design crit".into(), ..on_copy("crit", next_day) };
+    let crit = Ev {
+        uid: "crit@x".into(),
+        title: "Design crit".into(),
+        ..on_copy("crit", next_day)
+    };
     read_copy_at(&h, vec![crit], MARCH_2026).await;
     assert!(
         invitations(&h)
@@ -633,18 +689,20 @@ async fn an_hour_with_nothing_in_it_says_nothing() {
 #[tokio::test]
 async fn the_copy_answers_a_clash_with_no_call_to_google() {
     let h = harness().await;
-    h.fake.with(|s| s.calendars = vec![mailrs_domain::calendar::Calendar {
-        id: "primary".into(),
-        name: "Personal".into(),
-        color: String::new(),
-        access: mailrs_domain::calendar::Access::Owner,
-        zone: "UTC".into(),
-        primary: true,
-        shown: true,
-        hidden: false,
-        reminders: Vec::new(),
-        all_day_reminders: None,
-    }]);
+    h.fake.with(|s| {
+        s.calendars = vec![mailrs_domain::calendar::Calendar {
+            id: "primary".into(),
+            name: "Personal".into(),
+            color: String::new(),
+            access: mailrs_domain::calendar::Access::Owner,
+            zone: "UTC".into(),
+            primary: true,
+            shown: true,
+            hidden: false,
+            reminders: Vec::new(),
+            all_day_reminders: None,
+        }]
+    });
     h.fake.put_calendar_event(mailrs_domain::calendar::Event {
         calendar: "primary".into(),
         id: "clash".into(),
@@ -656,7 +714,10 @@ async fn the_copy_answers_a_clash_with_no_call_to_google() {
         ..mailrs_domain::calendar::Event::default()
     });
     let copy = crate::calendar_copy::CalendarCopy::new(
-        Arc::new(Connected(HashMap::from([(h.account_id, Arc::clone(&h.sync))]))),
+        Arc::new(Connected(HashMap::from([(
+            h.account_id,
+            Arc::clone(&h.sync),
+        )]))),
         h.db.clone(),
     );
     copy.refresh(h.account_id, CLASH.0).await.unwrap();
@@ -664,7 +725,10 @@ async fn the_copy_answers_a_clash_with_no_call_to_google() {
     let before = h.fake.usage().calls_to("calendar.events.list");
 
     assert_eq!(
-        invitations.busy(h.account_id, &read(&at_ten())).await.unwrap(),
+        invitations
+            .busy(h.account_id, &read(&at_ten()))
+            .await
+            .unwrap(),
         vec!["Design crit".to_string()]
     );
     assert_eq!(
@@ -719,14 +783,26 @@ async fn the_calendar_hears_which_occurrence_an_answer_is_for() {
     let invitations = invitations(&h);
     let invitation = read(&one_of_a_series());
 
-    for (scope, named) in [(Scope::Occurrence, "design-review_20260310T090000Z"), (Scope::Series, "design-review")] {
+    for (scope, named) in [
+        (Scope::Occurrence, "design-review_20260310T090000Z"),
+        (Scope::Series, "design-review"),
+    ] {
         invitations
-            .answer(h.account_id, &invitation, &me(), Answer::Yes, scope, None, MARCH_2026)
+            .answer(
+                h.account_id,
+                &invitation,
+                &me(),
+                Answer::Yes,
+                scope,
+                None,
+                MARCH_2026,
+            )
             .await
             .unwrap();
         send_queue(&h).await;
         assert_eq!(
-            h.fake.with(|s| s.answered_events.last().map(|a| a.1.clone())),
+            h.fake
+                .with(|s| s.answered_events.last().map(|a| a.1.clone())),
             Some(named.to_string())
         );
     }
@@ -859,7 +935,10 @@ async fn a_series_the_calendar_cannot_give_leaves_the_card_alone() {
 async fn a_calendar_never_read_is_read_before_the_series_line() {
     let h = harness().await;
     h.fake.with(|s| s.calendars = vec![primary()]);
-    h.fake.put_calendar_event(Ev { rules: vec!["RRULE:FREQ=WEEKLY".into()], ..on_copy("design-review", OCCURRENCE) });
+    h.fake.put_calendar_event(Ev {
+        rules: vec!["RRULE:FREQ=WEEKLY".into()],
+        ..on_copy("design-review", OCCURRENCE)
+    });
     assert_eq!(
         invitations(&h)
             .series(h.account_id, &read(&one_of_a_series()), OCCURRENCE)
@@ -875,7 +954,10 @@ async fn a_calendar_the_account_withholds_gives_no_series_line() {
     let h = harness().await;
     h.fake.withhold(mailrs_gmail::CALENDAR_SCOPE);
     h.fake.with(|s| s.calendars = vec![primary()]);
-    h.fake.put_calendar_event(Ev { rules: vec!["RRULE:FREQ=WEEKLY".into()], ..on_copy("design-review", OCCURRENCE) });
+    h.fake.put_calendar_event(Ev {
+        rules: vec!["RRULE:FREQ=WEEKLY".into()],
+        ..on_copy("design-review", OCCURRENCE)
+    });
     assert_eq!(
         invitations(&h)
             .series(h.account_id, &read(&one_of_a_series()), OCCURRENCE)
@@ -907,15 +989,24 @@ async fn a_google_calendar_invitation_shows_its_card_from_the_raw_message() {
     let h = harness().await;
     let ics = invite(0, "20260310T090000Z");
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "t1", 1, &["INBOX"]));
         s.raws.insert("m1".into(), google_invitation(&ics));
     });
     h.sync.ensure_thread("t1").await.unwrap();
     let body = h.sync.body("m1").await.unwrap();
     assert_eq!(body.calendar.as_deref(), Some(ics.as_str()));
-    let files: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    let files: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(files, ["invite.ics"]);
-    assert_eq!(h.fake.with(|s| s.usage.calls_to("users.messages.attachments.get")), 0);
+    assert_eq!(
+        h.fake
+            .with(|s| s.usage.calls_to("users.messages.attachments.get")),
+        0
+    );
 }
 
 /// Over the limit the same invitation arrives as Gmail's part tree, whose
@@ -934,9 +1025,16 @@ async fn an_invitation_over_the_limit_still_shows_its_card() {
     h.sync.ensure_thread("t1").await.unwrap();
     let body = h.sync.body("m1").await.unwrap();
     assert_eq!(body.calendar.as_deref(), Some(ics.as_str()));
-    let files: Vec<&str> = body.attachments.iter().map(|a| a.filename.as_str()).collect();
+    let files: Vec<&str> = body
+        .attachments
+        .iter()
+        .map(|a| a.filename.as_str())
+        .collect();
     assert_eq!(files, ["invite.ics"]);
-    assert_eq!(h.fake.with(|s| (s.structure_fetches, s.raw_fetches)), (1, 0));
+    assert_eq!(
+        h.fake.with(|s| (s.structure_fetches, s.raw_fetches)),
+        (1, 0)
+    );
 }
 
 /// Google Calendar's invitation as Gmail's `format=raw` sends it: the
@@ -1027,7 +1125,10 @@ fn on_copy(id: &str, start: i64) -> Ev {
 
 /// A weekly series of the fixture meeting, four weeks from `first`.
 fn weekly(first: i64) -> Ev {
-    Ev { rules: vec!["RRULE:FREQ=WEEKLY;COUNT=4".into()], ..on_copy("series", first) }
+    Ev {
+        rules: vec!["RRULE:FREQ=WEEKLY;COUNT=4".into()],
+        ..on_copy("series", first)
+    }
 }
 
 /// Puts `events` on the fake's primary calendar and reads them into the
@@ -1057,7 +1158,11 @@ const MARCH_2026: i64 = 1_772_323_200_000;
 /// `rules` as its repeat, on the fake's primary calendar and read into
 /// the copy on 1 March, as the app's timer would.
 async fn design_review_on_calendar(h: &Harness, rules: &[&str]) {
-    let organizer = Guest { email: "priya@example.com".into(), organizer: true, ..Guest::default() };
+    let organizer = Guest {
+        email: "priya@example.com".into(),
+        organizer: true,
+        ..Guest::default()
+    };
     let event = Ev {
         guests: vec![me_guest(), organizer],
         rules: rules.iter().map(|r| r.to_string()).collect(),
@@ -1077,12 +1182,21 @@ async fn send_queue(h: &Harness) {
 }
 
 fn spot(h: &Harness, id: &str, start: i64) -> Option<Spot> {
-    Some(Spot { account_id: h.account_id, calendar: "primary".into(), id: id.into(), start, outdated: None })
+    Some(Spot {
+        account_id: h.account_id,
+        calendar: "primary".into(),
+        id: id.into(),
+        start,
+        outdated: None,
+    })
 }
 
 /// An invitation to the one occurrence of the fixture series on 10 March.
 fn to_the_tenth() -> Invitation {
-    read(&invite(0, "20300310T090000Z").replace("SEQUENCE:0", "SEQUENCE:0\r\nRECURRENCE-ID:20300310T090000Z"))
+    read(
+        &invite(0, "20300310T090000Z")
+            .replace("SEQUENCE:0", "SEQUENCE:0\r\nRECURRENCE-ID:20300310T090000Z"),
+    )
 }
 
 #[tokio::test]
@@ -1124,7 +1238,9 @@ async fn an_invitation_on_a_hidden_calendar_has_no_spot() {
     let h = harness().await;
     read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
     let account = h.account_id;
-    h.db.write(move |c| copy_store::set_shown(c, account, "primary", false)).await.unwrap();
+    h.db.write(move |c| copy_store::set_shown(c, account, "primary", false))
+        .await
+        .unwrap();
     let found = invitations(&h)
         .on_calendar(h.account_id, &read(&invite(0, "20300310T090000Z")), MARCH)
         .await
@@ -1136,7 +1252,10 @@ async fn an_invitation_on_a_hidden_calendar_has_no_spot() {
 async fn an_invitation_to_one_occurrence_opens_that_one() {
     let h = harness().await;
     read_copy(&h, vec![weekly(TENTH - WEEK)]).await;
-    let found = invitations(&h).on_calendar(h.account_id, &to_the_tenth(), MARCH).await.unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &to_the_tenth(), MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, spot(&h, "series", TENTH));
 }
 
@@ -1149,7 +1268,10 @@ async fn an_invitation_to_a_moved_occurrence_opens_where_it_went() {
         ..on_copy("series_moved", TENTH + 2 * HOUR)
     };
     read_copy(&h, vec![weekly(TENTH - WEEK), moved]).await;
-    let found = invitations(&h).on_calendar(h.account_id, &to_the_tenth(), MARCH).await.unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &to_the_tenth(), MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, spot(&h, "series_moved", TENTH + 2 * HOUR));
 }
 
@@ -1160,7 +1282,10 @@ async fn a_whole_series_opens_its_next_occurrence() {
     read_copy(&h, vec![weekly(TENTH - 2 * WEEK)]).await;
     let invitation = read(&invite(0, "20300224T090000Z"));
     let the_day_before = TENTH - 24 * HOUR;
-    let found = invitations(&h).on_calendar(h.account_id, &invitation, the_day_before).await.unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &invitation, the_day_before)
+        .await
+        .unwrap();
     assert_eq!(found, spot(&h, "series", TENTH));
 }
 
@@ -1200,9 +1325,19 @@ async fn a_file_that_moved_the_event_names_the_time_the_copy_keeps() {
     let h = harness().await;
     read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
     let file = published(0, "20300312T090000Z", "20300312T100000Z");
-    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap().unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &file, MARCH)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!((found.id.as_str(), found.start), ("ev1", TENTH));
-    assert_eq!(found.outdated, Some(When::At { starts_at: TENTH, ends_at: Some(TENTH + HOUR) }));
+    assert_eq!(
+        found.outdated,
+        Some(When::At {
+            starts_at: TENTH,
+            ends_at: Some(TENTH + HOUR)
+        })
+    );
 }
 
 #[tokio::test]
@@ -1210,7 +1345,11 @@ async fn a_file_that_only_changes_the_end_is_a_move_too() {
     let h = harness().await;
     read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
     let file = published(0, "20300310T090000Z", "20300310T110000Z");
-    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap().unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &file, MARCH)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(found.outdated.is_some());
 }
 
@@ -1219,16 +1358,29 @@ async fn a_file_at_the_time_the_copy_keeps_is_in_step() {
     let h = harness().await;
     read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
     let file = published(0, "20300310T090000Z", "20300310T100000Z");
-    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &file, MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, spot(&h, "ev1", TENTH));
 }
 
 #[tokio::test]
 async fn a_copy_newer_than_the_file_is_kept() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { sequence: 2, ..on_copy("ev1", TENTH) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            sequence: 2,
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
     let file = published(1, "20300312T090000Z", "20300312T100000Z");
-    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &file, MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, spot(&h, "ev1", TENTH));
 }
 
@@ -1248,7 +1400,11 @@ async fn a_file_is_not_set_against_a_series() {
     let h = harness().await;
     read_copy(&h, vec![weekly(TENTH - WEEK)]).await;
     let file = published(0, "20300312T090000Z", "20300312T100000Z");
-    let found = invitations(&h).on_calendar(h.account_id, &file, MARCH).await.unwrap().unwrap();
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &file, MARCH)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(found.outdated, None);
 }
 
@@ -1291,8 +1447,7 @@ async fn store_message(h: &Harness, message_id: &str, thread_id: &str) {
         meta: Box::new(message),
         generation: 1,
     };
-    h.db
-        .write(move |c| messages::apply(c, account_id, &[upsert]).map(drop))
+    h.db.write(move |c| messages::apply(c, account_id, &[upsert]).map(drop))
         .await
         .unwrap();
 }
@@ -1300,8 +1455,18 @@ async fn store_message(h: &Harness, message_id: &str, thread_id: &str) {
 #[tokio::test]
 async fn an_unanswered_invitation_waits_for_an_answer() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, vec![waiting(&h, "ev1", TENTH)]);
 }
 
@@ -1317,7 +1482,10 @@ async fn an_answered_invitation_does_not_wait() {
         }],
     )
     .await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, Vec::new());
 }
 
@@ -1325,7 +1493,10 @@ async fn an_answered_invitation_does_not_wait() {
 async fn an_event_the_account_is_not_a_guest_of_does_not_wait() {
     let h = harness().await;
     read_copy(&h, vec![on_copy("ev1", TENTH)]).await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, Vec::new());
 }
 
@@ -1341,17 +1512,32 @@ async fn a_cancelled_invitation_does_not_wait() {
         }],
     )
     .await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, Vec::new());
 }
 
 #[tokio::test]
 async fn a_hidden_calendar_has_nothing_waiting() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
     let account = h.account_id;
-    h.db.write(move |c| copy_store::set_shown(c, account, "primary", false)).await.unwrap();
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    h.db.write(move |c| copy_store::set_shown(c, account, "primary", false))
+        .await
+        .unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, Vec::new());
 }
 
@@ -1367,20 +1553,33 @@ async fn an_unanswered_series_waits_only_once_at_its_nearest_occurrence() {
         }],
     )
     .await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, vec![waiting(&h, "series", TENTH - WEEK)]);
 }
 
 #[tokio::test]
 async fn waiting_for_answer_links_to_the_message_the_invitation_arrived_in() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
     invitations(&h)
         .open(h.account_id, "m1", &invite(0, "20300310T090000Z"), MARCH)
         .await
         .unwrap();
     store_message(&h, "m1", "t1").await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(
         found,
         vec![Waiting {
@@ -1393,29 +1592,59 @@ async fn waiting_for_answer_links_to_the_message_the_invitation_arrived_in() {
 #[tokio::test]
 async fn the_mail_an_invitation_arrived_in_is_found_by_its_uid() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
     invitations(&h)
         .open(h.account_id, "m1", &invite(0, "20300310T090000Z"), MARCH)
         .await
         .unwrap();
     store_message(&h, "m1", "t1").await;
-    let thread = invitations(&h).mail_thread(h.account_id, UID).await.unwrap();
+    let thread = invitations(&h)
+        .mail_thread(h.account_id, UID)
+        .await
+        .unwrap();
     assert_eq!(thread.as_deref(), Some("t1"));
 }
 
 #[tokio::test]
 async fn an_event_no_mail_brought_has_no_mail_to_open() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
-    let thread = invitations(&h).mail_thread(h.account_id, UID).await.unwrap();
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
+    let thread = invitations(&h)
+        .mail_thread(h.account_id, UID)
+        .await
+        .unwrap();
     assert_eq!(thread, None);
 }
 
 #[tokio::test]
 async fn waiting_for_answer_keeps_the_row_with_no_mail_to_open() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, vec![waiting(&h, "ev1", TENTH)]);
 }
 
@@ -1441,60 +1670,130 @@ async fn an_invitation_behind_a_crowded_calendar_still_waits() {
         vec![
             daily("a", MARCH),
             daily("b", MARCH + HOUR),
-            Ev { guests: vec![me_guest()], ..on_copy("ev1", far) },
+            Ev {
+                guests: vec![me_guest()],
+                ..on_copy("ev1", far)
+            },
         ],
     )
     .await;
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, vec![waiting(&h, "ev1", far)]);
 }
 
 #[tokio::test]
 async fn an_answer_on_the_card_stops_the_event_waiting() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..on_copy("ev1", TENTH) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..on_copy("ev1", TENTH)
+        }],
+    )
+    .await;
     let invitation = read(&invite(0, "20300310T090000Z"));
 
     let sent = invitations(&h)
-        .answer(h.account_id, &invitation, &me(), Answer::Yes, Scope::Series, None, MARCH)
+        .answer(
+            h.account_id,
+            &invitation,
+            &me(),
+            Answer::Yes,
+            Scope::Series,
+            None,
+            MARCH,
+        )
         .await
         .unwrap();
 
     assert_eq!(sent.told, Told::Calendar);
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, Vec::new());
 }
 
 #[tokio::test]
 async fn an_answer_to_one_occurrence_leaves_the_rest_of_the_series_waiting() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..weekly(TENTH - WEEK) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..weekly(TENTH - WEEK)
+        }],
+    )
+    .await;
 
     invitations(&h)
-        .answer(h.account_id, &to_the_tenth(), &me(), Answer::Yes, Scope::Occurrence, None, MARCH)
+        .answer(
+            h.account_id,
+            &to_the_tenth(),
+            &me(),
+            Answer::Yes,
+            Scope::Occurrence,
+            None,
+            MARCH,
+        )
         .await
         .unwrap();
 
-    let found = invitations(&h).waiting_for_answer(&[h.account_id], MARCH).await.unwrap();
+    let found = invitations(&h)
+        .waiting_for_answer(&[h.account_id], MARCH)
+        .await
+        .unwrap();
     assert_eq!(found, vec![waiting(&h, "series", TENTH - WEEK)]);
 }
 
 #[tokio::test]
 async fn an_answer_to_an_occurrence_the_copy_lacks_goes_by_mail() {
     let h = harness().await;
-    read_copy(&h, vec![Ev { guests: vec![me_guest()], ..weekly(TENTH - WEEK) }]).await;
+    read_copy(
+        &h,
+        vec![Ev {
+            guests: vec![me_guest()],
+            ..weekly(TENTH - WEEK)
+        }],
+    )
+    .await;
     // An occurrence the organizer added on the 13th, which the copy has
     // not read yet.
-    let added = read(&invite(0, "20300313T090000Z").replace("SEQUENCE:0", "SEQUENCE:0\r\nRECURRENCE-ID:20300313T090000Z"));
+    let added = read(
+        &invite(0, "20300313T090000Z")
+            .replace("SEQUENCE:0", "SEQUENCE:0\r\nRECURRENCE-ID:20300313T090000Z"),
+    );
 
     let sent = invitations(&h)
-        .answer(h.account_id, &added, &me(), Answer::Yes, Scope::Occurrence, None, MARCH)
+        .answer(
+            h.account_id,
+            &added,
+            &me(),
+            Answer::Yes,
+            Scope::Occurrence,
+            None,
+            MARCH,
+        )
         .await
         .unwrap();
 
-    assert_eq!(sent.told, Told::Organizer, "no other day's meeting is answered");
-    let found = invitations(&h).on_calendar(h.account_id, &added, MARCH).await.unwrap();
-    assert!(found.is_some(), "Show in Calendar still opens the nearest day");
+    assert_eq!(
+        sent.told,
+        Told::Organizer,
+        "no other day's meeting is answered"
+    );
+    let found = invitations(&h)
+        .on_calendar(h.account_id, &added, MARCH)
+        .await
+        .unwrap();
+    assert!(
+        found.is_some(),
+        "Show in Calendar still opens the nearest day"
+    );
 }
 
 fn booking(uid_of_return: &str) -> String {
@@ -1526,9 +1825,16 @@ async fn a_published_file_reports_no_change_when_it_comes_again() {
     let h = harness().await;
     let invitations = invitations(&h);
     let first = booking("back@rail");
-    invitations.open(h.account_id, "m1", &first, 1_000).await.unwrap();
+    invitations
+        .open(h.account_id, "m1", &first, 1_000)
+        .await
+        .unwrap();
     let again = first.replace("SUMMARY:Outbound", "SEQUENCE:1\r\nSUMMARY:Outbound Renamed");
-    let opened = invitations.open(h.account_id, "m2", &again, 2_000).await.unwrap().unwrap();
+    let opened = invitations
+        .open(h.account_id, "m2", &again, 2_000)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(opened.change, None);
 }
 
@@ -1539,15 +1845,25 @@ async fn an_answer_from_the_assistant_reaches_the_calendar_without_a_tick() {
     let h = harness().await;
     design_review_on_calendar(&h, &[]).await;
     h.fake.with(|s| {
-        s.messages.insert("m1".into(), meta("m1", "m1", 1, &["INBOX"]));
+        s.messages
+            .insert("m1".into(), meta("m1", "m1", 1, &["INBOX"]));
         s.bodies.insert(
             "m1".into(),
-            mailrs_domain::MessageBody { calendar: Some(invite(0, "20260310T090000Z")), ..Default::default() },
+            mailrs_domain::MessageBody {
+                calendar: Some(invite(0, "20260310T090000Z")),
+                ..Default::default()
+            },
         );
     });
 
     let (_, sent) = invitations(&h)
-        .answer_message(h.account_id, "m1", "me@example.com", Answer::Yes, MARCH_2026)
+        .answer_message(
+            h.account_id,
+            "m1",
+            "me@example.com",
+            Answer::Yes,
+            MARCH_2026,
+        )
         .await
         .unwrap()
         .expect("the message holds an invitation");
@@ -1565,7 +1881,10 @@ async fn an_answer_from_the_assistant_reaches_the_calendar_without_a_tick() {
 async fn a_failed_first_read_is_not_tried_again_for_a_minute() {
     let h = harness().await;
     h.fake.with(|s| s.calendars = vec![primary()]);
-    h.fake.put_calendar_event(Ev { rules: vec!["RRULE:FREQ=WEEKLY".into()], ..on_copy("design-review", OCCURRENCE) });
+    h.fake.put_calendar_event(Ev {
+        rules: vec!["RRULE:FREQ=WEEKLY".into()],
+        ..on_copy("design-review", OCCURRENCE)
+    });
     let invitations = invitations(&h);
     let invitation = read(&one_of_a_series());
     let lists = || {
@@ -1574,17 +1893,29 @@ async fn a_failed_first_read_is_not_tried_again_for_a_minute() {
     };
 
     h.fake.fail_next(GmailError::Network("offline".into()));
-    assert!(invitations.series(h.account_id, &invitation, OCCURRENCE).await.is_err());
+    assert!(
+        invitations
+            .series(h.account_id, &invitation, OCCURRENCE)
+            .await
+            .is_err()
+    );
     let tried = lists();
     assert_eq!(
-        invitations.series(h.account_id, &invitation, OCCURRENCE + 30_000).await.unwrap(),
+        invitations
+            .series(h.account_id, &invitation, OCCURRENCE + 30_000)
+            .await
+            .unwrap(),
         None,
         "half a minute on, the line reads the empty copy"
     );
     assert_eq!(lists(), tried, "and asks Google nothing");
 
     assert_eq!(
-        invitations.series(h.account_id, &invitation, OCCURRENCE + 61_000).await.unwrap().as_deref(),
+        invitations
+            .series(h.account_id, &invitation, OCCURRENCE + 61_000)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("Every week, no end date"),
         "a minute on, the read is tried again"
     );

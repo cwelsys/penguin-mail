@@ -15,8 +15,22 @@ use crate::{JmapClient, JmapError, Request, Session};
 
 /// What a message's row in a list needs.
 pub const META: &[&str] = &[
-    "id", "blobId", "threadId", "mailboxIds", "keywords", "size", "receivedAt", "messageId", "from", "to", "cc",
-    "subject", "preview", "hasAttachment", "header:List-Unsubscribe:asRaw", "header:List-Unsubscribe-Post:asRaw",
+    "id",
+    "blobId",
+    "threadId",
+    "mailboxIds",
+    "keywords",
+    "size",
+    "receivedAt",
+    "messageId",
+    "from",
+    "to",
+    "cc",
+    "subject",
+    "preview",
+    "hasAttachment",
+    "header:List-Unsubscribe:asRaw",
+    "header:List-Unsubscribe-Post:asRaw",
 ];
 
 /// Where a message sits and what it carries, for the change feed.
@@ -26,7 +40,17 @@ pub const PLACES: &[&str] = &["id", "threadId", "mailboxIds", "keywords"];
 pub const BODY: &[&str] = &["id", "blobId", "size", "headers", "bodyStructure"];
 
 /// The part properties `BODY` asks for.
-const PART_PROPERTIES: &[&str] = &["partId", "blobId", "size", "type", "charset", "disposition", "cid", "name", "subParts"];
+const PART_PROPERTIES: &[&str] = &[
+    "partId",
+    "blobId",
+    "size",
+    "type",
+    "charset",
+    "disposition",
+    "cid",
+    "name",
+    "subParts",
+];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -245,16 +269,29 @@ pub struct SetResponse {
 impl SetResponse {
     /// Why the server refused the update or the destroy of `id`.
     pub fn refusal(&self, id: &str) -> Option<&SetError> {
-        self.not_updated.as_ref().and_then(|n| n.get(id)).or_else(|| self.not_destroyed.as_ref().and_then(|n| n.get(id)))
+        self.not_updated
+            .as_ref()
+            .and_then(|n| n.get(id))
+            .or_else(|| self.not_destroyed.as_ref().and_then(|n| n.get(id)))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailboxWrite {
     /// `role` is an IANA mailbox attribute, such as `archive`, or none.
-    Create { name: String, parent_id: Option<String>, role: Option<String> },
-    Update { id: String, name: String, parent_id: Option<String> },
-    Destroy { id: String },
+    Create {
+        name: String,
+        parent_id: Option<String>,
+        role: Option<String>,
+    },
+    Update {
+        id: String,
+        name: String,
+        parent_id: Option<String>,
+    },
+    Destroy {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -358,7 +395,10 @@ pub fn pointer(segment: &str) -> String {
 }
 
 fn account(session: &Session) -> Result<String, JmapError> {
-    session.account_for(MAIL).map(str::to_string).ok_or_else(|| JmapError::UnknownCapability(MAIL.into()))
+    session
+        .account_for(MAIL)
+        .map(str::to_string)
+        .ok_or_else(|| JmapError::UnknownCapability(MAIL.into()))
 }
 
 impl JmapClient {
@@ -370,7 +410,11 @@ impl JmapClient {
     pub async fn mailboxes(&self) -> Result<Listed<Mailbox>, JmapError> {
         let account = self.mail_account().await?;
         let mut request = Request::new();
-        let id = request.call(MAIL, "Mailbox/get", json!({ "accountId": account, "ids": null }));
+        let id = request.call(
+            MAIL,
+            "Mailbox/get",
+            json!({ "accountId": account, "ids": null }),
+        );
         self.send(&request).await?.take(&id, "Mailbox/get")
     }
 
@@ -378,7 +422,11 @@ impl JmapClient {
     pub async fn email_state(&self) -> Result<String, JmapError> {
         let account = self.mail_account().await?;
         let mut request = Request::new();
-        let id = request.call(MAIL, "Email/get", json!({ "accountId": account, "ids": [], "properties": ["id"] }));
+        let id = request.call(
+            MAIL,
+            "Email/get",
+            json!({ "accountId": account, "ids": [], "properties": ["id"] }),
+        );
         let got: Got<Email> = self.send(&request).await?.take(&id, "Email/get")?;
         Ok(got.state)
     }
@@ -387,24 +435,47 @@ impl JmapClient {
     /// messages, with where each created or updated message now sits. The
     /// back-referenced `Email/get` is refused past `maxObjectsInGet`, so
     /// `max` goes no higher.
-    pub async fn mail_changes(&self, email_since: &str, mailbox_since: &str, max: usize) -> Result<MailChanges, JmapError> {
+    pub async fn mail_changes(
+        &self,
+        email_since: &str,
+        mailbox_since: &str,
+        max: usize,
+    ) -> Result<MailChanges, JmapError> {
         let account = self.mail_account().await?;
-        let max = max.min(self.session().await?.limits().max_objects_in_get.clamp(1, 500));
+        let max = max.min(
+            self.session()
+                .await?
+                .limits()
+                .max_objects_in_get
+                .clamp(1, 500),
+        );
         let mut request = Request::new();
-        let changes = request.call(MAIL, "Email/changes", json!({ "accountId": account, "sinceState": email_since, "maxChanges": max }));
+        let changes = request.call(
+            MAIL,
+            "Email/changes",
+            json!({ "accountId": account, "sinceState": email_since, "maxChanges": max }),
+        );
         let created = request.call(MAIL, "Email/get", json!({
             "accountId": account, "#ids": changes.result_of("Email/changes", "/created"), "properties": PLACES
         }));
         let updated = request.call(MAIL, "Email/get", json!({
             "accountId": account, "#ids": changes.result_of("Email/changes", "/updated"), "properties": PLACES
         }));
-        let mailboxes = request.call(MAIL, "Mailbox/changes", json!({ "accountId": account, "sinceState": mailbox_since }));
+        let mailboxes = request.call(
+            MAIL,
+            "Mailbox/changes",
+            json!({ "accountId": account, "sinceState": mailbox_since }),
+        );
         let mut answer = self.send(&request).await?;
         let email: ChangesResponse = answer.take(&changes, "Email/changes")?;
         let mut changed = answer.take::<Got<Email>>(&created, "Email/get")?.list;
         changed.extend(answer.take::<Got<Email>>(&updated, "Email/get")?.list);
         let mailbox: ChangesResponse = answer.take(&mailboxes, "Mailbox/changes")?;
-        Ok(MailChanges { email, mailbox, changed })
+        Ok(MailChanges {
+            email,
+            mailbox,
+            changed,
+        })
     }
 
     /// One page of a query, newest first, each hit with its thread.
@@ -417,15 +488,28 @@ impl JmapClient {
     /// removed before the anchor does not shift the page the way it shifts
     /// a position. A server that no longer lists the anchor answers the
     /// method error `anchorNotFound`.
-    pub async fn query_after(&self, query: &EmailQuery, anchor: &str) -> Result<Queried, JmapError> {
+    pub async fn query_after(
+        &self,
+        query: &EmailQuery,
+        anchor: &str,
+    ) -> Result<Queried, JmapError> {
         self.query_from(query, Some(anchor)).await
     }
 
-    async fn query_from(&self, query: &EmailQuery, anchor: Option<&str>) -> Result<Queried, JmapError> {
+    async fn query_from(
+        &self,
+        query: &EmailQuery,
+        anchor: Option<&str>,
+    ) -> Result<Queried, JmapError> {
         let account = self.mail_account().await?;
         // The page's ids feed one Email/get, which the server refuses whole
         // past maxObjectsInGet. A shorter page only means one more call.
-        let most = self.session().await?.limits().max_objects_in_get.clamp(1, 500);
+        let most = self
+            .session()
+            .await?
+            .limits()
+            .max_objects_in_get
+            .clamp(1, 500);
         let mut args = json!({
             "accountId": account,
             "sort": [{ "property": "receivedAt", "isAscending": false }],
@@ -450,21 +534,40 @@ impl JmapClient {
         let mut answer = self.send(&request).await?;
         let listed: QueryAnswer = answer.take(&found, "Email/query")?;
         let got: Got<Email> = answer.take(&threads, "Email/get")?;
-        let mut thread_of: BTreeMap<String, String> = got.list.into_iter().map(|e| (e.id, e.thread_id)).collect();
+        let mut thread_of: BTreeMap<String, String> =
+            got.list.into_iter().map(|e| (e.id, e.thread_id)).collect();
         // A hit the get no longer finds went between the two calls, and
         // has no thread to report. Leaving it out only moves the next page
         // back over what this one listed; a page left empty would read as
         // the end of the listing, so the caller asks again instead.
         let named = listed.ids.len();
-        let hits: Vec<Hit> = listed.ids.into_iter().filter_map(|id| Some(Hit { thread_id: thread_of.remove(&id)?, id })).collect();
+        let hits: Vec<Hit> = listed
+            .ids
+            .into_iter()
+            .filter_map(|id| {
+                Some(Hit {
+                    thread_id: thread_of.remove(&id)?,
+                    id,
+                })
+            })
+            .collect();
         if hits.is_empty() && named > 0 {
             return Err(JmapError::StateMismatch);
         }
-        Ok(Queried { hits, position: listed.position, total: listed.total, query_state: listed.query_state })
+        Ok(Queried {
+            hits,
+            position: listed.position,
+            total: listed.total,
+            query_state: listed.query_state,
+        })
     }
 
     /// `ids` with `properties`, a request per `maxObjectsInGet`.
-    pub async fn emails(&self, ids: &[String], properties: &[&str]) -> Result<Got<Email>, JmapError> {
+    pub async fn emails(
+        &self,
+        ids: &[String],
+        properties: &[&str],
+    ) -> Result<Got<Email>, JmapError> {
         let session = self.session().await?;
         let account = account(&session)?;
         let step = session.limits().max_objects_in_get.clamp(1, 500);
@@ -497,18 +600,29 @@ impl JmapClient {
         let mut all = Threads::default();
         for chunk in ids.chunks(step) {
             let mut request = Request::new();
-            let threads = request.call(MAIL, "Thread/get", json!({ "accountId": account, "ids": chunk }));
+            let threads = request.call(
+                MAIL,
+                "Thread/get",
+                json!({ "accountId": account, "ids": chunk }),
+            );
             let listed: Got<Thread> = self.send(&request).await?.take(&threads, "Thread/get")?;
             let email_ids: Vec<&String> = listed.list.iter().flat_map(|t| &t.email_ids).collect();
             for batch in email_ids.chunks(step * calls) {
                 let mut request = Request::new();
                 let gets: Vec<_> = batch
                     .chunks(step)
-                    .map(|part| request.call(MAIL, "Email/get", json!({ "accountId": account, "ids": part, "properties": META })))
+                    .map(|part| {
+                        request.call(
+                            MAIL,
+                            "Email/get",
+                            json!({ "accountId": account, "ids": part, "properties": META }),
+                        )
+                    })
                     .collect();
                 let mut answer = self.send(&request).await?;
                 for get in &gets {
-                    all.emails.extend(answer.take::<Got<Email>>(get, "Email/get")?.list);
+                    all.emails
+                        .extend(answer.take::<Got<Email>>(get, "Email/get")?.list);
                 }
             }
             all.threads.extend(listed.list);
@@ -518,7 +632,11 @@ impl JmapClient {
     }
 
     /// Patches `update` (id to patch object) and destroys `destroy`.
-    pub async fn set_emails(&self, update: &Map<String, Value>, destroy: &[String]) -> Result<SetResponse, JmapError> {
+    pub async fn set_emails(
+        &self,
+        update: &Map<String, Value>,
+        destroy: &[String],
+    ) -> Result<SetResponse, JmapError> {
         let account = self.mail_account().await?;
         let mut args = json!({ "accountId": account });
         if !update.is_empty() {
@@ -537,14 +655,22 @@ impl JmapClient {
         let account = self.mail_account().await?;
         let mut args = json!({ "accountId": account });
         let key = match write {
-            MailboxWrite::Create { name, parent_id, role } => {
+            MailboxWrite::Create {
+                name,
+                parent_id,
+                role,
+            } => {
                 args["create"] = json!({ "b": { "name": name, "parentId": parent_id } });
                 if let Some(role) = role {
                     args["create"]["b"]["role"] = json!(role);
                 }
                 "b".to_string()
             }
-            MailboxWrite::Update { id, name, parent_id } => {
+            MailboxWrite::Update {
+                id,
+                name,
+                parent_id,
+            } => {
                 args["update"] = json!({ id.clone(): { "name": name, "parentId": parent_id } });
                 id.clone()
             }
@@ -557,13 +683,22 @@ impl JmapClient {
         let mut request = Request::new();
         let call = request.call(MAIL, "Mailbox/set", args);
         let set: SetResponse = self.send(&request).await?.take(&call, "Mailbox/set")?;
-        if let Some(refused) = set.not_created.as_ref().and_then(|n| n.get(&key)).or_else(|| set.refusal(&key)) {
+        if let Some(refused) = set
+            .not_created
+            .as_ref()
+            .and_then(|n| n.get(&key))
+            .or_else(|| set.refusal(&key))
+        {
             return Err(refused.error());
         }
         match write {
             MailboxWrite::Create { .. } => set
                 .created
-                .and_then(|c| c.get("b").and_then(|b| b["id"].as_str()).map(str::to_string))
+                .and_then(|c| {
+                    c.get("b")
+                        .and_then(|b| b["id"].as_str())
+                        .map(str::to_string)
+                })
                 .ok_or_else(|| JmapError::Decode("the mailbox came back without an id".into())),
             _ => Ok(key),
         }
@@ -583,15 +718,29 @@ impl JmapClient {
         destroy: Option<&str>,
     ) -> Result<Saved, JmapError> {
         let account = self.mail_account().await?;
-        let mailboxes: Map<String, Value> = mailbox_ids.iter().map(|m| (m.clone(), json!(true))).collect();
-        let marks: Map<String, Value> = keywords.iter().map(|k| (k.to_string(), json!(true))).collect();
+        let mailboxes: Map<String, Value> = mailbox_ids
+            .iter()
+            .map(|m| (m.clone(), json!(true)))
+            .collect();
+        let marks: Map<String, Value> = keywords
+            .iter()
+            .map(|k| (k.to_string(), json!(true)))
+            .collect();
         let mut request = Request::new();
         let import = request.call(MAIL, "Email/import", json!({
             "accountId": account, "emails": { "m": { "blobId": blob_id, "mailboxIds": mailboxes, "keywords": marks } }
         }));
-        let email = match self.send(&request).await?.take::<ImportAnswer>(&import, "Email/import")?.one("m")? {
+        let email = match self
+            .send(&request)
+            .await?
+            .take::<ImportAnswer>(&import, "Email/import")?
+            .one("m")?
+        {
             Outcome::Made(email) => email,
-            Outcome::Exists(existing) => self.file_existing(&account, &existing, mailbox_ids, keywords, destroy).await?,
+            Outcome::Exists(existing) => {
+                self.file_existing(&account, &existing, mailbox_ids, keywords, destroy)
+                    .await?
+            }
         };
         // The server's copy of unchanged bytes is the old draft itself.
         let leftover = match destroy.filter(|old| *old != email.id) {
@@ -620,7 +769,10 @@ impl JmapClient {
         let email = found.list.into_iter().next().ok_or(JmapError::NotFound)?;
         let draft = email.keywords.get("$draft").copied().unwrap_or(false);
         if replacing != Some(id) && !draft {
-            return Err(JmapError::Method { kind: "alreadyExists".into(), description: String::new() });
+            return Err(JmapError::Method {
+                kind: "alreadyExists".into(),
+                description: String::new(),
+            });
         }
         let mut patch = Map::new();
         for mailbox in mailbox_ids {
@@ -635,7 +787,10 @@ impl JmapClient {
         if let Some(refused) = set.refusal(id) {
             return Err(refused.error());
         }
-        Ok(Imported { id: email.id, thread_id: email.thread_id })
+        Ok(Imported {
+            id: email.id,
+            thread_id: email.thread_id,
+        })
     }
 
     /// The patch that files a sent copy: out of Drafts and into Sent when
@@ -657,10 +812,23 @@ impl JmapClient {
 
     /// The copy the server already has as `id`, filed as sent, with its
     /// thread: for a server that took a submission of it at once.
-    async fn file_sent_copy(&self, account: &str, id: &str, submission: &Submission) -> Result<Imported, JmapError> {
+    async fn file_sent_copy(
+        &self,
+        account: &str,
+        id: &str,
+        submission: &Submission,
+    ) -> Result<Imported, JmapError> {
         let mut request = Request::new();
-        request.call(MAIL, "Email/set", json!({ "accountId": account, "update": { id: Self::filed(submission) } }));
-        let got = request.call(MAIL, "Email/get", json!({ "accountId": account, "ids": [id], "properties": ["id", "threadId"] }));
+        request.call(
+            MAIL,
+            "Email/set",
+            json!({ "accountId": account, "update": { id: Self::filed(submission) } }),
+        );
+        let got = request.call(
+            MAIL,
+            "Email/get",
+            json!({ "accountId": account, "ids": [id], "properties": ["id", "threadId"] }),
+        );
         // The message went out; a filing the server refuses does not undo that.
         self.found_copy(self.send(&request).await?.take(&got, "Email/get")?)
     }
@@ -668,7 +836,10 @@ impl JmapClient {
     /// The one message an `Email/get` of an existing copy answers.
     fn found_copy(&self, got: Got<Email>) -> Result<Imported, JmapError> {
         let email = got.list.into_iter().next().ok_or(JmapError::NotFound)?;
-        Ok(Imported { id: email.id, thread_id: email.thread_id })
+        Ok(Imported {
+            id: email.id,
+            thread_id: email.thread_id,
+        })
     }
 
     /// Destroys one message, and says why when the server refuses.
@@ -693,12 +864,17 @@ impl JmapClient {
     pub async fn submit(&self, submission: &Submission) -> Result<Imported, JmapError> {
         let session = self.session().await?;
         let account = account(&session)?;
-        let sender = session.account_for(SUBMISSION).ok_or_else(|| JmapError::UnknownCapability(SUBMISSION.into()))?.to_string();
+        let sender = session
+            .account_for(SUBMISSION)
+            .ok_or_else(|| JmapError::UnknownCapability(SUBMISSION.into()))?
+            .to_string();
         let home = submission
             .drafts
             .as_ref()
             .or(submission.sent.as_ref())
-            .ok_or_else(|| JmapError::Forbidden("the account has neither Drafts nor Sent".into()))?;
+            .ok_or_else(|| {
+                JmapError::Forbidden("the account has neither Drafts nor Sent".into())
+            })?;
         let mut keywords = Map::new();
         keywords.insert("$seen".into(), json!(true));
         if submission.drafts.is_some() {
@@ -709,7 +885,11 @@ impl JmapClient {
             "accountId": account,
             "emails": { "m": { "blobId": submission.blob_id, "mailboxIds": { home.clone(): true }, "keywords": keywords } }
         }));
-        let rcpt: Vec<Value> = submission.rcpt_to.iter().map(|a| json!({ "email": a })).collect();
+        let rcpt: Vec<Value> = submission
+            .rcpt_to
+            .iter()
+            .map(|a| json!({ "email": a }))
+            .collect();
         let mut args = json!({
             "accountId": sender,
             "create": { "s": {
@@ -726,10 +906,19 @@ impl JmapClient {
             args["onSuccessUpdateEmail"] = json!({ "#s": moved });
         }
         let submitted = request.call(SUBMISSION, "EmailSubmission/set", args.clone());
-        let mut answer = self.send(&request).await.map_err(|e| unclear_after_send(e, JmapError::SubmitUnknown))?;
+        let mut answer = self
+            .send(&request)
+            .await
+            .map_err(|e| unclear_after_send(e, JmapError::SubmitUnknown))?;
         let imported = answer
             .take::<ImportAnswer>(&import, "Email/import")
-            .map_err(|e| if refused_outright(&e) { e } else { JmapError::SubmitUnknown })?;
+            .map_err(|e| {
+                if refused_outright(&e) {
+                    e
+                } else {
+                    JmapError::SubmitUnknown
+                }
+            })?;
         let made = match imported.one("m") {
             // An import that names neither a copy nor a refusal hides
             // whether `#m` was made and sent.
@@ -749,24 +938,42 @@ impl JmapClient {
                 if made || self.went_out_before(&account, &sender, &existing).await? {
                     return self.file_sent_copy(&account, &existing, submission).await;
                 }
-                return self.submit_existing(&account, &existing, args, submission).await;
+                return self
+                    .submit_existing(&account, &existing, args, submission)
+                    .await;
             }
         };
         let error = match answer.take::<SetResponse>(&submitted, "EmailSubmission/set") {
-            Ok(set) if set.created.as_ref().is_some_and(|c| c.contains_key("s")) => return Ok(email),
+            Ok(set) if set.created.as_ref().is_some_and(|c| c.contains_key("s")) => {
+                return Ok(email);
+            }
             Ok(set) => match set.not_created.as_ref().and_then(|n| n.get("s")) {
                 Some(refused) => refused.error(),
-                None => JmapError::Decode("the submission's answer names neither a submission nor a refusal".into()),
+                None => JmapError::Decode(
+                    "the submission's answer names neither a submission nor a refusal".into(),
+                ),
             },
             Err(error) => error,
         };
         if !refused_outright(&error) {
             match self.look_at_copy(&account, &sender, &email.id).await {
-                Ok(Look { submitted: Some(true), .. } | Look { draft: false, .. }) => {
+                Ok(
+                    Look {
+                        submitted: Some(true),
+                        ..
+                    }
+                    | Look { draft: false, .. },
+                ) => {
                     // It went. A filing the server refuses does not undo that.
-                    return Ok(self.file_sent_copy(&account, &email.id, submission).await.unwrap_or(email));
+                    return Ok(self
+                        .file_sent_copy(&account, &email.id, submission)
+                        .await
+                        .unwrap_or(email));
                 }
-                Ok(Look { submitted: Some(false), .. }) => {}
+                Ok(Look {
+                    submitted: Some(false),
+                    ..
+                }) => {}
                 Ok(_) | Err(_) => return Err(JmapError::SubmitUnknown),
             }
         }
@@ -785,15 +992,31 @@ impl JmapClient {
     /// answer.
     async fn look_at_copy(&self, account: &str, sender: &str, id: &str) -> Result<Look, JmapError> {
         let mut request = Request::new();
-        let got = request.call(MAIL, "Email/get", json!({ "accountId": account, "ids": [id], "properties": ["id", "keywords"] }));
-        let asked = request.call(SUBMISSION, "EmailSubmission/query", json!({ "accountId": sender, "filter": { "emailIds": [id] } }));
+        let got = request.call(
+            MAIL,
+            "Email/get",
+            json!({ "accountId": account, "ids": [id], "properties": ["id", "keywords"] }),
+        );
+        let asked = request.call(
+            SUBMISSION,
+            "EmailSubmission/query",
+            json!({ "accountId": sender, "filter": { "emailIds": [id] } }),
+        );
         let mut answer = self.send(&request).await?;
-        let email = answer.take::<Got<Email>>(&got, "Email/get")?.list.into_iter().next().ok_or(JmapError::NotFound)?;
+        let email = answer
+            .take::<Got<Email>>(&got, "Email/get")?
+            .list
+            .into_iter()
+            .next()
+            .ok_or(JmapError::NotFound)?;
         let submitted = answer
             .take::<Value>(&asked, "EmailSubmission/query")
             .ok()
             .and_then(|found| found["ids"].as_array().map(|ids| !ids.is_empty()));
-        Ok(Look { draft: email.keywords.get("$draft").copied().unwrap_or(false), submitted })
+        Ok(Look {
+            draft: email.keywords.get("$draft").copied().unwrap_or(false),
+            submitted,
+        })
     }
 
     /// Whether an earlier try already sent the copy the server has as `id`,
@@ -801,20 +1024,38 @@ impl JmapClient {
     /// is no draft any more. Sending it then would send it twice.
     /// `EmailSubmission/query` is not on every server, so a refusal of it
     /// leaves the keyword to answer.
-    async fn went_out_before(&self, account: &str, sender: &str, id: &str) -> Result<bool, JmapError> {
+    async fn went_out_before(
+        &self,
+        account: &str,
+        sender: &str,
+        id: &str,
+    ) -> Result<bool, JmapError> {
         let look = self.look_at_copy(account, sender, id).await?;
         Ok(look.submitted == Some(true) || !look.draft)
     }
 
     /// Submits the message the server already has as `id`, with the same
     /// envelope as `args` asked for a new copy, and files it as sent.
-    async fn submit_existing(&self, account: &str, id: &str, mut args: Value, submission: &Submission) -> Result<Imported, JmapError> {
+    async fn submit_existing(
+        &self,
+        account: &str,
+        id: &str,
+        mut args: Value,
+        submission: &Submission,
+    ) -> Result<Imported, JmapError> {
         args["create"]["s"]["emailId"] = json!(id);
         args["onSuccessUpdateEmail"] = json!({ "#s": Self::filed(submission) });
         let mut request = Request::new();
-        let got = request.call(MAIL, "Email/get", json!({ "accountId": account, "ids": [id], "properties": ["id", "threadId"] }));
+        let got = request.call(
+            MAIL,
+            "Email/get",
+            json!({ "accountId": account, "ids": [id], "properties": ["id", "threadId"] }),
+        );
         let submitted = request.call(SUBMISSION, "EmailSubmission/set", args);
-        let mut answer = self.send(&request).await.map_err(|e| unclear_after_send(e, JmapError::SubmitUnknown))?;
+        let mut answer = self
+            .send(&request)
+            .await
+            .map_err(|e| unclear_after_send(e, JmapError::SubmitUnknown))?;
         let copy = answer.take(&got, "Email/get");
         // The copy is the server's own and stays either way; an answer
         // that is no clear refusal leaves the caller to look in Sent.
@@ -828,6 +1069,11 @@ impl JmapClient {
             Err(_) => return Err(JmapError::SubmitUnknown),
         }
         // It went; a copy the answer does not describe is still the one sent.
-        Ok(copy.and_then(|got| self.found_copy(got)).unwrap_or_else(|_| Imported { id: id.to_string(), thread_id: String::new() }))
+        Ok(copy
+            .and_then(|got| self.found_copy(got))
+            .unwrap_or_else(|_| Imported {
+                id: id.to_string(),
+                thread_id: String::new(),
+            }))
     }
 }

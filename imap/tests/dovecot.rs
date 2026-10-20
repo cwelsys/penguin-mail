@@ -61,9 +61,16 @@ fn check_signs_in_to_real_servers_and_refuses_a_certificate_for_another_name() {
             .await
             .expect("both servers take the password after STARTTLS");
 
-        let refused = check(&imaps, &smtps, ADDRESS, ADDRESS, "not-the-password", "not-the-password")
-            .await
-            .expect_err("a wrong password");
+        let refused = check(
+            &imaps,
+            &smtps,
+            ADDRESS,
+            ADDRESS,
+            "not-the-password",
+            "not-the-password",
+        )
+        .await
+        .expect_err("a wrong password");
         // check signs in to IMAP first, so the refusal comes from there.
         assert!(
             matches!(refused, CheckError::Imap(ImapError::Auth { .. })),

@@ -9,8 +9,8 @@
 
 use std::collections::HashSet;
 
-use mailrs_domain::{AccountId, Provider};
 use mailrs_domain::translate::{fill, gettext};
+use mailrs_domain::{AccountId, Provider};
 use mailrs_gmail::SIGN_IN_SCOPES;
 use mailrs_sync::{Offers, Withheld};
 
@@ -63,7 +63,9 @@ pub struct Wording {
 fn company(provider: Provider) -> &'static str {
     match provider {
         Provider::Microsoft => "Microsoft",
-        Provider::Gmail | Provider::Imap | Provider::Pop3 | Provider::Jmap => "Google",
+        Provider::Gmail | Provider::Imap | Provider::Pop3 | Provider::Jmap | Provider::CalDav => {
+            "Google"
+        }
     }
 }
 
@@ -71,7 +73,9 @@ fn company(provider: Provider) -> &'static str {
 fn settings_of(provider: Provider) -> &'static str {
     match provider {
         Provider::Microsoft => "Outlook",
-        Provider::Gmail | Provider::Imap | Provider::Pop3 | Provider::Jmap => "Gmail",
+        Provider::Gmail | Provider::Imap | Provider::Pop3 | Provider::Jmap | Provider::CalDav => {
+            "Gmail"
+        }
     }
 }
 
@@ -228,8 +232,14 @@ pub fn withheld_permissions(withheld: Withheld) -> Vec<Permission> {
         (withheld.delete, Permission::Delete),
         (withheld.contacts, Permission::Contacts),
         (withheld.change_contacts, Permission::ChangeContacts),
-        (withheld.calendar || withheld.calendar_list, Permission::Calendar),
-        (withheld.calendars || withheld.change_calendar_list, Permission::ManageCalendars),
+        (
+            withheld.calendar || withheld.calendar_list,
+            Permission::Calendar,
+        ),
+        (
+            withheld.calendars || withheld.change_calendar_list,
+            Permission::ManageCalendars,
+        ),
         (withheld.drive, Permission::Drive),
     ]
     .into_iter()
@@ -306,9 +316,7 @@ impl Permission {
             Permission::Settings => "emblem-system-symbolic",
             Permission::Delete => "user-trash-symbolic",
             Permission::Contacts | Permission::ChangeContacts => "penguin-mail-people-symbolic",
-            Permission::Calendar | Permission::ManageCalendars => {
-                "penguin-mail-calendar-symbolic"
-            }
+            Permission::Calendar | Permission::ManageCalendars => "penguin-mail-calendar-symbolic",
             Permission::Drive => "folder-documents-symbolic",
         }
     }
@@ -321,7 +329,10 @@ pub fn grant_bar_title(account: &str, missing: &[Permission], provider: Provider
     let allows: Vec<&str> = allows.iter().map(String::as_str).collect();
     fill(
         &gettext("{account} has not allowed Penguin Mail to {missing}"),
-        &[("account", account), ("missing", &crate::protection::joined(&allows))],
+        &[
+            ("account", account),
+            ("missing", &crate::protection::joined(&allows)),
+        ],
     )
 }
 
@@ -337,9 +348,16 @@ pub fn wants_banner(withheld: Withheld, asked: Option<&str>) -> bool {
     let Some(asked) = asked else {
         return true;
     };
-    let asked: HashSet<String> = asked.split_whitespace().map(str::to_ascii_lowercase).collect();
+    let asked: HashSet<String> = asked
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect();
     // Microsoft names its scopes in mixed case and may answer in another.
-    let covers = |scopes: &[&str]| scopes.iter().all(|s| asked.contains(&s.to_ascii_lowercase()));
+    let covers = |scopes: &[&str]| {
+        scopes
+            .iter()
+            .all(|s| asked.contains(&s.to_ascii_lowercase()))
+    };
     !(covers(&SIGN_IN_SCOPES) || covers(&mailrs_graph::SCOPES))
 }
 
@@ -375,7 +393,10 @@ mod tests {
             )
         );
         for permission in Permission::ALL {
-            assert!(!permission.feature(Provider::Gmail).1.is_empty(), "{permission:?}");
+            assert!(
+                !permission.feature(Provider::Gmail).1.is_empty(),
+                "{permission:?}"
+            );
             assert!(permission.feature_icon().ends_with("-symbolic"));
         }
     }
@@ -385,7 +406,11 @@ mod tests {
         assert_eq!(
             grant_bar_title(
                 "d.reyes@uni.example",
-                &[Permission::Settings, Permission::Delete, Permission::Calendar],
+                &[
+                    Permission::Settings,
+                    Permission::Delete,
+                    Permission::Calendar
+                ],
                 Provider::Gmail
             ),
             "d.reyes@uni.example has not allowed Penguin Mail to change Gmail settings, \
@@ -421,7 +446,8 @@ mod tests {
     #[test]
     fn the_calendar_offer_explains_the_reply_already_went() {
         let offer = Permission::Calendar.wording(Occasion::Offer, "a@example.com", Provider::Gmail);
-        let needed = Permission::Calendar.wording(Occasion::Needed, "a@example.com", Provider::Gmail);
+        let needed =
+            Permission::Calendar.wording(Occasion::Needed, "a@example.com", Provider::Gmail);
         assert_eq!(offer.heading, needed.heading);
         assert!(offer.body.starts_with("Your reply went to the organizer"));
         assert!(needed.body.starts_with("The assistant needs permission"));
@@ -429,12 +455,20 @@ mod tests {
 
     #[test]
     fn a_microsoft_account_hears_of_microsoft_and_outlook() {
-        let words = Permission::Settings.wording(Occasion::Needed, "d@outlook.com", Provider::Microsoft);
-        assert!(words.body.contains("Microsoft asks you to confirm"), "{}", words.body);
+        let words =
+            Permission::Settings.wording(Occasion::Needed, "d@outlook.com", Provider::Microsoft);
+        assert!(
+            words.body.contains("Microsoft asks you to confirm"),
+            "{}",
+            words.body
+        );
         assert!(words.body.contains("Outlook settings"));
         assert!(!words.body.contains("Google") && !words.body.contains("Gmail"));
         let google = Permission::Settings.wording(Occasion::Needed, "d@gmail.com", Provider::Gmail);
-        assert!(google.body.contains("Google asks you to confirm") && google.body.contains("Gmail settings"));
+        assert!(
+            google.body.contains("Google asks you to confirm")
+                && google.body.contains("Gmail settings")
+        );
         assert_eq!(
             grant_bar_title(
                 "d@outlook.com",
@@ -447,23 +481,39 @@ mod tests {
 
     #[test]
     fn the_settings_toast_names_the_providers_settings() {
-        assert_eq!(settings_needed(Provider::Gmail), "Penguin Mail needs permission to change Gmail settings");
-        assert_eq!(settings_needed(Provider::Microsoft), "Penguin Mail needs permission to change Outlook settings");
+        assert_eq!(
+            settings_needed(Provider::Gmail),
+            "Penguin Mail needs permission to change Gmail settings"
+        );
+        assert_eq!(
+            settings_needed(Provider::Microsoft),
+            "Penguin Mail needs permission to change Outlook settings"
+        );
     }
 
     #[test]
     fn no_word_a_microsoft_account_reads_names_google_or_gmail() {
         // Drive is Google's alone: Microsoft never asks for it.
-        for permission in Permission::ALL.into_iter().filter(|p| *p != Permission::Drive) {
+        for permission in Permission::ALL
+            .into_iter()
+            .filter(|p| *p != Permission::Drive)
+        {
             let (title, covers) = permission.feature(Provider::Microsoft);
             let mut said = vec![title, covers];
             for occasion in OCCASIONS {
                 let words = permission.wording(occasion, "d@outlook.com", Provider::Microsoft);
                 said.extend([words.heading, words.body]);
             }
-            said.push(grant_bar_title("d@outlook.com", &[permission], Provider::Microsoft));
+            said.push(grant_bar_title(
+                "d@outlook.com",
+                &[permission],
+                Provider::Microsoft,
+            ));
             for text in said {
-                assert!(!text.contains("Google") && !text.contains("Gmail"), "{permission:?}: {text}");
+                assert!(
+                    !text.contains("Google") && !text.contains("Gmail"),
+                    "{permission:?}: {text}"
+                );
             }
         }
         assert!(!Permission::Settings.purpose().contains("Gmail"));
@@ -471,8 +521,14 @@ mod tests {
 
     #[test]
     fn a_microsoft_consent_that_asked_for_everything_shows_no_banner() {
-        let withheld = Withheld { calendar: true, ..Withheld::NONE };
-        assert!(!wants_banner(withheld, Some(&mailrs_graph::SCOPES.join(" "))));
+        let withheld = Withheld {
+            calendar: true,
+            ..Withheld::NONE
+        };
+        assert!(!wants_banner(
+            withheld,
+            Some(&mailrs_graph::SCOPES.join(" "))
+        ));
         assert!(wants_banner(withheld, Some("openid Mail.ReadWrite")));
     }
 
@@ -501,16 +557,25 @@ mod tests {
     fn withheld_scopes_name_their_permissions() {
         assert_eq!(withheld_permissions(Withheld::NONE), []);
         assert_eq!(
-            withheld_permissions(Withheld { settings: true, ..Withheld::NONE }),
+            withheld_permissions(Withheld {
+                settings: true,
+                ..Withheld::NONE
+            }),
             [Permission::Settings]
         );
         // Calendar and the calendar list share one permission, either way.
         assert_eq!(
-            withheld_permissions(Withheld { calendar: true, ..Withheld::NONE }),
+            withheld_permissions(Withheld {
+                calendar: true,
+                ..Withheld::NONE
+            }),
             [Permission::Calendar]
         );
         assert_eq!(
-            withheld_permissions(Withheld { calendar_list: true, ..Withheld::NONE }),
+            withheld_permissions(Withheld {
+                calendar_list: true,
+                ..Withheld::NONE
+            }),
             [Permission::Calendar]
         );
         assert_eq!(
@@ -525,8 +590,14 @@ mod tests {
 
     #[test]
     fn a_banner_shows_for_an_account_never_asked_for_everything() {
-        let some_withheld = Withheld { calendar: true, ..Withheld::NONE };
-        assert!(wants_banner(some_withheld, None), "an old account asked for far less");
+        let some_withheld = Withheld {
+            calendar: true,
+            ..Withheld::NONE
+        };
+        assert!(
+            wants_banner(some_withheld, None),
+            "an old account asked for far less"
+        );
         let old_asked = "https://www.googleapis.com/auth/gmail.modify \
                           https://www.googleapis.com/auth/gmail.settings.basic";
         assert!(wants_banner(some_withheld, Some(old_asked)));
@@ -535,7 +606,10 @@ mod tests {
     #[test]
     fn no_banner_once_the_account_was_asked_and_chose() {
         let asked = SIGN_IN_SCOPES.join(" ");
-        let some_withheld = Withheld { calendar: true, ..Withheld::NONE };
+        let some_withheld = Withheld {
+            calendar: true,
+            ..Withheld::NONE
+        };
         assert!(
             !wants_banner(some_withheld, Some(&asked)),
             "a consent that asked for everything got its answer already"
@@ -549,8 +623,17 @@ mod tests {
     /// The grant every account held between the five-scope sign-in and
     /// the owner's approval of calendar management on 2026-09-28.
     fn five_scope_grant() -> String {
-        use mailrs_gmail::{CALENDAR_LIST_SCOPE, CALENDAR_SCOPE, CONTACTS_WRITE_SCOPE, DELETE_SCOPE, SETTINGS_SCOPE};
-        [DELETE_SCOPE, SETTINGS_SCOPE, CONTACTS_WRITE_SCOPE, CALENDAR_SCOPE, CALENDAR_LIST_SCOPE].join(" ")
+        use mailrs_gmail::{
+            CALENDAR_LIST_SCOPE, CALENDAR_SCOPE, CONTACTS_WRITE_SCOPE, DELETE_SCOPE, SETTINGS_SCOPE,
+        };
+        [
+            DELETE_SCOPE,
+            SETTINGS_SCOPE,
+            CONTACTS_WRITE_SCOPE,
+            CALENDAR_SCOPE,
+            CALENDAR_LIST_SCOPE,
+        ]
+        .join(" ")
     }
 
     /// An account in a store that holds the old read-only calendar list
@@ -566,11 +649,21 @@ mod tests {
         let consent = mailrs_store::accounts::consent(&conn, id).unwrap();
         let granted = mailrs_gmail::Granted::parse(consent.granted.as_deref().unwrap());
         let withheld = mailrs_sync::withheld_by_grant(Some(&granted));
-        assert!(!withheld.calendar && !withheld.calendar_list, "every calendar still reads");
+        assert!(
+            !withheld.calendar && !withheld.calendar_list,
+            "every calendar still reads"
+        );
         assert!(wants_banner(withheld, consent.asked.as_deref()));
-        assert_eq!(withheld_permissions(withheld), [Permission::ManageCalendars, Permission::Drive]);
         assert_eq!(
-            grant_bar_title("ana@example.com", &withheld_permissions(withheld), Provider::Gmail),
+            withheld_permissions(withheld),
+            [Permission::ManageCalendars, Permission::Drive]
+        );
+        assert_eq!(
+            grant_bar_title(
+                "ana@example.com",
+                &withheld_permissions(withheld),
+                Provider::Gmail
+            ),
             "ana@example.com has not allowed Penguin Mail to manage calendars and add files to Google Drive"
         );
     }
@@ -592,22 +685,41 @@ mod tests {
     #[test]
     fn either_calendar_management_scope_names_one_permission() {
         for withheld in [
-            Withheld { calendars: true, ..Withheld::NONE },
-            Withheld { change_calendar_list: true, ..Withheld::NONE },
+            Withheld {
+                calendars: true,
+                ..Withheld::NONE
+            },
+            Withheld {
+                change_calendar_list: true,
+                ..Withheld::NONE
+            },
         ] {
-            assert_eq!(withheld_permissions(withheld), [Permission::ManageCalendars]);
+            assert_eq!(
+                withheld_permissions(withheld),
+                [Permission::ManageCalendars]
+            );
         }
     }
 
     #[test]
     fn a_withheld_drive_names_its_own_permission() {
-        assert_eq!(withheld_permissions(Withheld { drive: true, ..Withheld::NONE }), [Permission::Drive]);
+        assert_eq!(
+            withheld_permissions(Withheld {
+                drive: true,
+                ..Withheld::NONE
+            }),
+            [Permission::Drive]
+        );
     }
 
     #[test]
     fn asking_for_drive_says_what_it_reaches() {
-        let wording = Permission::Drive.wording(Occasion::Needed, "ana@example.com", Provider::Gmail);
-        assert_eq!(wording.heading, "Allow Penguin Mail to Add Files to Google Drive");
+        let wording =
+            Permission::Drive.wording(Occasion::Needed, "ana@example.com", Provider::Gmail);
+        assert_eq!(
+            wording.heading,
+            "Allow Penguin Mail to Add Files to Google Drive"
+        );
         assert_eq!(
             wording.body,
             "Attaching a file from this computer to an event puts it in Google Drive for ana@example.com. \
@@ -615,26 +727,44 @@ mod tests {
         );
     }
 
-    const IMAP: Offers = Offers { calendar: false, ..Offers::EVERYTHING };
+    const IMAP: Offers = Offers {
+        calendar: false,
+        ..Offers::EVERYTHING
+    };
 
     #[test]
     fn the_card_offers_calendar_access_when_the_calendar_permission_is_withheld() {
-        let withheld = Withheld { calendar: true, ..Withheld::NONE };
+        let withheld = Withheld {
+            calendar: true,
+            ..Withheld::NONE
+        };
         assert!(card_offers_calendar_access(Offers::EVERYTHING, withheld));
-        let list_only = Withheld { calendar_list: true, ..Withheld::NONE };
+        let list_only = Withheld {
+            calendar_list: true,
+            ..Withheld::NONE
+        };
         assert!(card_offers_calendar_access(Offers::EVERYTHING, list_only));
     }
 
     #[test]
     fn the_card_offers_nothing_when_the_calendar_permission_is_granted() {
-        let other = Withheld { contacts: true, ..Withheld::NONE };
-        assert!(!card_offers_calendar_access(Offers::EVERYTHING, Withheld::NONE));
+        let other = Withheld {
+            contacts: true,
+            ..Withheld::NONE
+        };
+        assert!(!card_offers_calendar_access(
+            Offers::EVERYTHING,
+            Withheld::NONE
+        ));
         assert!(!card_offers_calendar_access(Offers::EVERYTHING, other));
     }
 
     #[test]
     fn the_card_offers_nothing_for_an_account_with_no_calendar() {
-        let withheld = Withheld { calendar: true, ..Withheld::NONE };
+        let withheld = Withheld {
+            calendar: true,
+            ..Withheld::NONE
+        };
         assert!(!card_offers_calendar_access(IMAP, withheld));
         assert!(!card_offers_calendar_access(IMAP, Withheld::NONE));
     }

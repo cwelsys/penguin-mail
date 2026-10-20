@@ -37,15 +37,26 @@ fn standup() -> Event {
         busy: true,
         rules: vec!["RRULE:FREQ=DAILY;COUNT=5".into()],
         guests: vec![
-            Guest { email: "priya@example.com".into(), organizer: true, ..Guest::default() },
-            Guest { email: "me@example.com".into(), me: true, ..Guest::default() },
+            Guest {
+                email: "priya@example.com".into(),
+                organizer: true,
+                ..Guest::default()
+            },
+            Guest {
+                email: "me@example.com".into(),
+                me: true,
+                ..Guest::default()
+            },
         ],
         ..Event::default()
     }
 }
 
 fn connected(h: &Harness) -> Arc<Connected> {
-    Arc::new(Connected(HashMap::from([(h.account_id, Arc::clone(&h.sync))])))
+    Arc::new(Connected(HashMap::from([(
+        h.account_id,
+        Arc::clone(&h.sync),
+    )])))
 }
 
 fn invitations(h: &Harness) -> Invitations<Connected> {
@@ -80,9 +91,16 @@ async fn read_standup(h: &Harness) -> CalendarCopy<Connected> {
 async fn on_day(h: &Harness, day: i64) -> Occurrence {
     let account = h.account_id;
     let from = NOW + day * DAY;
-    let mut found = h
-        .db
-        .read(move |c| store::occurrences(c, &[account], from, from + DAY / 2, store::CalendarScope::Shown))
+    let mut found =
+        h.db.read(move |c| {
+            store::occurrences(
+                c,
+                &[account],
+                from,
+                from + DAY / 2,
+                store::CalendarScope::Shown,
+            )
+        })
         .await
         .unwrap();
     assert_eq!(found.len(), 1, "one stand-up on day {day}");
@@ -110,23 +128,47 @@ async fn answering_this_event_reaches_google_on_that_occurrence_alone() {
     let wednesday = on_day(&h, 2).await;
 
     let done = invitations(&h)
-        .answer_event(h.account_id, &wednesday, Answer::No, RepeatScope::This, Some("On leave".into()))
+        .answer_event(
+            h.account_id,
+            &wednesday,
+            Answer::No,
+            RepeatScope::This,
+            Some("On leave".into()),
+        )
         .await
         .unwrap();
     assert_eq!(done, Permitted::Done(()));
-    assert_eq!(answers(&h).await, [None, None, Some(Answer::No), None, None], "the copy shows it at once");
+    assert_eq!(
+        answers(&h).await,
+        [None, None, Some(Answer::No), None, None],
+        "the copy shows it at once"
+    );
     assert_eq!(queued(&h).await.len(), 1, "the answer waits in the queue");
 
-    assert!(copy.send(h.account_id).await.unwrap().is_empty(), "nothing turned down");
+    assert!(
+        copy.send(h.account_id).await.unwrap().is_empty(),
+        "nothing turned down"
+    );
     let instance = occurrence_id(&standup(), NOW + 2 * DAY);
     assert_eq!(
         h.fake.with(|s| s.answered_events.clone()),
-        [("primary".to_string(), instance, Answer::No, Some("On leave".to_string()))]
+        [(
+            "primary".to_string(),
+            instance,
+            Answer::No,
+            Some("On leave".to_string())
+        )]
     );
     assert!(queued(&h).await.is_empty());
 
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
-    assert_eq!(answers(&h).await, [None, None, Some(Answer::No), None, None], "Google holds the same");
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
+    assert_eq!(
+        answers(&h).await,
+        [None, None, Some(Answer::No), None, None],
+        "Google holds the same"
+    );
 }
 
 #[tokio::test]
@@ -136,7 +178,13 @@ async fn answering_all_events_answers_the_series() {
     let wednesday = on_day(&h, 2).await;
 
     invitations(&h)
-        .answer_event(h.account_id, &wednesday, Answer::Yes, RepeatScope::All, None)
+        .answer_event(
+            h.account_id,
+            &wednesday,
+            Answer::Yes,
+            RepeatScope::All,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(answers(&h).await, [Some(Answer::Yes); 5]);
@@ -144,9 +192,16 @@ async fn answering_all_events_answers_the_series() {
     copy.send(h.account_id).await.unwrap();
     assert_eq!(
         h.fake.with(|s| s.answered_events.clone()),
-        [("primary".to_string(), "standup".to_string(), Answer::Yes, None)]
+        [(
+            "primary".to_string(),
+            "standup".to_string(),
+            Answer::Yes,
+            None
+        )]
     );
-    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN).await.unwrap();
+    copy.refresh(h.account_id, NOW + READ_EVERY_OPEN)
+        .await
+        .unwrap();
     assert_eq!(answers(&h).await, [Some(Answer::Yes); 5]);
 }
 
@@ -158,10 +213,19 @@ async fn an_answer_given_offline_goes_out_after_a_restart() {
     h.fake.with(|s| s.offline = true);
 
     invitations(&h)
-        .answer_event(h.account_id, &wednesday, Answer::Maybe, RepeatScope::This, Some("Might be late".into()))
+        .answer_event(
+            h.account_id,
+            &wednesday,
+            Answer::Maybe,
+            RepeatScope::This,
+            Some("Might be late".into()),
+        )
         .await
         .unwrap();
-    assert!(copy.send(h.account_id).await.is_err(), "the send waits for the network");
+    assert!(
+        copy.send(h.account_id).await.is_err(),
+        "the send waits for the network"
+    );
     assert_eq!(queued(&h).await.len(), 1, "the answer stays queued");
     drop(copy);
 
@@ -172,7 +236,12 @@ async fn an_answer_given_offline_goes_out_after_a_restart() {
     let instance = occurrence_id(&standup(), NOW + 2 * DAY);
     assert_eq!(
         h.fake.with(|s| s.answered_events.clone()),
-        [("primary".to_string(), instance, Answer::Maybe, Some("Might be late".to_string()))]
+        [(
+            "primary".to_string(),
+            instance,
+            Answer::Maybe,
+            Some("Might be late".to_string())
+        )]
     );
 }
 
@@ -187,10 +256,21 @@ async fn the_mail_card_answers_through_the_same_queue() {
          ORGANIZER:mailto:priya@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
     ))
     .unwrap();
-    let me = Address { name: None, email: "me@example.com".into() };
+    let me = Address {
+        name: None,
+        email: "me@example.com".into(),
+    };
 
     let sent = invitations(&h)
-        .answer(h.account_id, &invitation, &me, Answer::Yes, Scope::Series, Some("See you there".into()), NOW)
+        .answer(
+            h.account_id,
+            &invitation,
+            &me,
+            Answer::Yes,
+            Scope::Series,
+            Some("See you there".into()),
+            NOW,
+        )
         .await
         .unwrap();
     assert_eq!(sent.told, Told::Calendar);
@@ -203,7 +283,12 @@ async fn the_mail_card_answers_through_the_same_queue() {
     copy.send(h.account_id).await.unwrap();
     assert_eq!(
         h.fake.with(|s| s.answered_events.clone()),
-        [("primary".to_string(), "standup".to_string(), Answer::Yes, Some("See you there".to_string()))]
+        [(
+            "primary".to_string(),
+            "standup".to_string(),
+            Answer::Yes,
+            Some("See you there".to_string())
+        )]
     );
 }
 
@@ -217,9 +302,20 @@ async fn a_note_on_an_answer_by_mail_goes_out_as_a_comment() {
          ORGANIZER:mailto:priya@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
     )
     .unwrap();
-    let me = Address { name: None, email: "me@example.com".into() };
+    let me = Address {
+        name: None,
+        email: "me@example.com".into(),
+    };
     let sent = invitations(&h)
-        .answer(h.account_id, &invitation, &me, Answer::No, Scope::Series, Some("On holiday".into()), NOW)
+        .answer(
+            h.account_id,
+            &invitation,
+            &me,
+            Answer::No,
+            Scope::Series,
+            Some("On holiday".into()),
+            NOW,
+        )
         .await
         .unwrap();
     assert_eq!(sent.told, Told::Organizer);
@@ -248,16 +344,31 @@ async fn proposing_from_the_calendar_asks_the_organizer_about_that_occurrence() 
         .unwrap();
     let wednesday = on_day(&h, 2).await;
 
-    let (invitation, me, scope) = invitations.for_event(h.account_id, &wednesday).await.unwrap();
-    assert_eq!((invitation.sequence, me.email.as_str(), scope), (2, "me@example.com", Scope::Occurrence));
-    let when = mailrs_domain::invitation::When::At { starts_at: NOW + 2 * DAY + HOUR, ends_at: Some(NOW + 2 * DAY + HOUR + HOUR / 4) };
-    let told = invitations.propose(h.account_id, &invitation, &me, &when, scope, NOW).await.unwrap();
+    let (invitation, me, scope) = invitations
+        .for_event(h.account_id, &wednesday)
+        .await
+        .unwrap();
+    assert_eq!(
+        (invitation.sequence, me.email.as_str(), scope),
+        (2, "me@example.com", Scope::Occurrence)
+    );
+    let when = mailrs_domain::invitation::When::At {
+        starts_at: NOW + 2 * DAY + HOUR,
+        ends_at: Some(NOW + 2 * DAY + HOUR + HOUR / 4),
+    };
+    let told = invitations
+        .propose(h.account_id, &invitation, &me, &when, scope, NOW)
+        .await
+        .unwrap();
     assert_eq!(told, Told::Organizer);
 
     let decoded = super::invitations::sent_message(&h);
     assert!(decoded.contains("METHOD:COUNTER"), "{decoded}");
     assert!(decoded.contains("SEQUENCE:2"), "{decoded}");
-    assert!(decoded.contains("RECURRENCE-ID:20260923T141320Z"), "{decoded}");
+    assert!(
+        decoded.contains("RECURRENCE-ID:20260923T141320Z"),
+        "{decoded}"
+    );
 }
 
 /// The organizer's version as Google's copy has it, with no invitation
@@ -278,7 +389,10 @@ async fn proposal_sequence(copy_sequence: i64, mail: Option<i64>) -> String {
             all_day_reminders: None,
         }]
     });
-    h.fake.put_calendar_event(Event { sequence: copy_sequence, ..standup() });
+    h.fake.put_calendar_event(Event {
+        sequence: copy_sequence,
+        ..standup()
+    });
     copy(&h).refresh(h.account_id, NOW).await.unwrap();
     let invitations = invitations(&h);
     if let Some(mail) = mail {
@@ -297,9 +411,18 @@ async fn proposal_sequence(copy_sequence: i64, mail: Option<i64>) -> String {
             .unwrap();
     }
     let wednesday = on_day(&h, 2).await;
-    let (invitation, me, scope) = invitations.for_event(h.account_id, &wednesday).await.unwrap();
-    let when = mailrs_domain::invitation::When::At { starts_at: NOW + 2 * DAY + HOUR, ends_at: Some(NOW + 2 * DAY + 2 * HOUR) };
-    invitations.propose(h.account_id, &invitation, &me, &when, scope, NOW).await.unwrap();
+    let (invitation, me, scope) = invitations
+        .for_event(h.account_id, &wednesday)
+        .await
+        .unwrap();
+    let when = mailrs_domain::invitation::When::At {
+        starts_at: NOW + 2 * DAY + HOUR,
+        ends_at: Some(NOW + 2 * DAY + 2 * HOUR),
+    };
+    invitations
+        .propose(h.account_id, &invitation, &me, &when, scope, NOW)
+        .await
+        .unwrap();
     super::invitations::sent_message(&h)
 }
 
@@ -312,7 +435,10 @@ async fn a_proposal_with_no_mail_names_the_version_the_calendar_holds() {
 #[tokio::test]
 async fn a_proposal_names_the_newer_of_the_mail_and_the_calendar() {
     let calendar_newer = proposal_sequence(5, Some(2)).await;
-    assert!(calendar_newer.contains("SEQUENCE:5\r\n"), "{calendar_newer}");
+    assert!(
+        calendar_newer.contains("SEQUENCE:5\r\n"),
+        "{calendar_newer}"
+    );
     let mail_newer = proposal_sequence(3, Some(4)).await;
     assert!(mail_newer.contains("SEQUENCE:4\r\n"), "{mail_newer}");
 }

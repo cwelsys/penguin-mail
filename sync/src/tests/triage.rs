@@ -24,7 +24,10 @@ async fn archiving_applies_locally_and_remotely() {
         h.fake.with(|s| s.remote_writes.clone()),
         ["modify a + -INBOX", "modify b + -INBOX"]
     );
-    assert!(!h.fake.with(|s| crate::fake::has_label(&s.messages["a"], "INBOX")));
+    assert!(
+        !h.fake
+            .with(|s| crate::fake::has_label(&s.messages["a"], "INBOX"))
+    );
 }
 
 #[tokio::test]
@@ -67,7 +70,10 @@ async fn a_write_that_fails_part_way_keeps_what_gmail_took() {
     };
     let (archived, ()) = tokio::join!(archiving, refusing);
     assert!(archived.is_err());
-    assert!(!h.fake.with(|s| crate::fake::has_label(&s.messages["a"], "INBOX")));
+    assert!(
+        !h.fake
+            .with(|s| crate::fake::has_label(&s.messages["a"], "INBOX"))
+    );
     assert_eq!(h.labels_of("a").await, Vec::<String>::new());
     assert_eq!(h.labels_of("b").await, ["INBOX"]);
 }
@@ -80,17 +86,18 @@ async fn a_failed_write_undoes_only_its_own_change() {
     h.bootstrap_all().await;
     let mut held = h.fake.hold("users.messages.modify");
     let reading = h.sync.triage_thread("t1", &TriageAction::MarkRead);
-    // While the write waits, the message is archived elsewhere and a
-    // replay stores that. Then Gmail refuses the write.
+    // While the write waits, the message is archived elsewhere. Then Gmail
+    // refuses the write, and the replay that carries the archive runs once
+    // the write is over.
     let meanwhile = async {
         held.entered().await;
         h.fake.remote_relabel("a", &[], &["INBOX"]);
-        h.sync.incremental().await.unwrap();
         h.fake.fail_next(GmailError::NeedsReauth);
         held.release();
     };
     let (read, ()) = tokio::join!(reading, meanwhile);
     assert!(read.is_err());
+    h.sync.incremental().await.unwrap();
     assert_eq!(h.labels_of("a").await, ["UNREAD"]);
 }
 
@@ -135,7 +142,10 @@ async fn a_rate_limited_write_waits_out_gmails_retry_after() {
         waited <= std::time::Duration::from_secs(24),
         "waited {waited:?}"
     );
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, Vec::<String>::new());
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        Vec::<String>::new()
+    );
 }
 
 #[tokio::test]
@@ -202,9 +212,15 @@ async fn a_rate_limit_that_outlasts_the_ceiling_reports_plainly() {
         .collect();
     assert_eq!(
         told,
-        ["Gmail stayed busy for a moment, so “Move to trash” did not go through for 1 conversation."]
+        [
+            "Gmail stayed busy for a moment, so “Move to trash” did not go through for 1 conversation."
+        ]
     );
-    assert_eq!(h.threads(MailSet::Role(Role::Inbox)).await, ["t1"], "the thread comes back");
+    assert_eq!(
+        h.threads(MailSet::Role(Role::Inbox)).await,
+        ["t1"],
+        "the thread comes back"
+    );
 }
 
 /// A few messages go to Gmail a call each and many in one batch. Either
@@ -233,7 +249,8 @@ async fn a_few_messages_and_many_leave_the_trash_the_same_way() {
             let id = format!("m{i}");
             assert_eq!(h.labels_of(&id).await, ["INBOX"], "{count}: the store");
             assert_eq!(
-                h.fake.with(|s| mailrs_gmail::labels::label_ids(&s.messages[&id])),
+                h.fake
+                    .with(|s| mailrs_gmail::labels::label_ids(&s.messages[&id])),
                 ["INBOX"],
                 "{count}: Gmail"
             );

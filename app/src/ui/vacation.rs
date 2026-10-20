@@ -75,7 +75,11 @@ pub fn present(
     let (core, email, account_id) = (Rc::clone(core), account.email.clone(), account.id);
     let provider = account.provider;
     let provider_name = account.provider_name().to_string();
-    let offers = crate::offered::offers_for(core.account(account.id).as_ref().map(|sync| sync.services()));
+    let offers = crate::offered::offers_for(
+        core.account(account.id)
+            .as_ref()
+            .map(|sync| sync.services()),
+    );
     let settings = core.gmail_settings();
     glib::spawn_future_local(async move {
         let loaded = {
@@ -139,7 +143,9 @@ pub fn present(
                     }
                     Ok(Permitted::NeedsPermission) => {
                         button.set_sensitive(true);
-                        toasts.add_toast(crate::ui::toast(&crate::permission::settings_needed(provider)));
+                        toasts.add_toast(crate::ui::toast(&crate::permission::settings_needed(
+                            provider,
+                        )));
                     }
                     Err(err) => {
                         button.set_sensitive(true);
@@ -178,7 +184,11 @@ fn away_subtitle(provider_name: &str) -> String {
 /// The subject a save sends: what was typed when the row shows, and what
 /// the reply already held when it does not, so a hidden row never blanks it.
 fn subject_to_save(shown: bool, typed: &str, kept: &str) -> String {
-    if shown { typed.to_string() } else { kept.to_string() }
+    if shown {
+        typed.to_string()
+    } else {
+        kept.to_string()
+    }
 }
 
 struct Form {
@@ -329,7 +339,11 @@ impl Form {
         let last = midnight(&self.last.date()).max(first);
         AutomaticReply {
             enabled: self.enabled.is_active(),
-            subject: subject_to_save(self.keeps_subject, self.subject.text().trim(), &base.subject),
+            subject: subject_to_save(
+                self.keeps_subject,
+                self.subject.text().trim(),
+                &base.subject,
+            ),
             body: buffer
                 .text(&buffer.start_iter(), &buffer.end_iter(), false)
                 .trim_end()
@@ -408,9 +422,18 @@ mod tests {
     #[test]
     fn the_subtitle_names_the_provider_that_answers() {
         let off = "while you are away, even when this computer is off";
-        assert_eq!(away_subtitle("Gmail"), format!("Gmail answers new mail {off}"));
-        assert_eq!(away_subtitle("Outlook"), format!("Outlook answers new mail {off}"));
-        assert_eq!(away_subtitle("Fastmail"), format!("Fastmail answers new mail {off}"));
+        assert_eq!(
+            away_subtitle("Gmail"),
+            format!("Gmail answers new mail {off}")
+        );
+        assert_eq!(
+            away_subtitle("Outlook"),
+            format!("Outlook answers new mail {off}")
+        );
+        assert_eq!(
+            away_subtitle("Fastmail"),
+            format!("Fastmail answers new mail {off}")
+        );
     }
 
     #[test]

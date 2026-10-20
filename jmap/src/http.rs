@@ -83,7 +83,9 @@ struct Held {
 
 impl std::fmt::Debug for JmapClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JmapClient").field("session_url", &self.inner.session_url.as_str()).finish_non_exhaustive()
+        f.debug_struct("JmapClient")
+            .field("session_url", &self.inner.session_url.as_str())
+            .finish_non_exhaustive()
     }
 }
 
@@ -98,7 +100,9 @@ fn is_loopback(url: &Url) -> bool {
 }
 
 fn same_origin(a: &Url, b: &Url) -> bool {
-    a.scheme() == b.scheme() && a.host_str() == b.host_str() && a.port_or_known_default() == b.port_or_known_default()
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
 }
 
 /// reqwest's message names the URL, and a download URL can carry the
@@ -127,7 +131,8 @@ impl JmapClient {
     pub fn new(session_url: &str, auth: Auth) -> Result<JmapClient, JmapError> {
         // A URL that does not parse could still hold a password or an
         // address, so the error names which URL it was and none of it.
-        let url = Url::parse(session_url).map_err(|_| JmapError::BadUrl("the session URL".into()))?;
+        let url =
+            Url::parse(session_url).map_err(|_| JmapError::BadUrl("the session URL".into()))?;
         let url = without_userinfo(url)?;
         let usable = url.scheme() == "https" || (url.scheme() == "http" && is_loopback(&url));
         if !usable || url.host().is_none() {
@@ -168,12 +173,18 @@ impl JmapClient {
     }
 
     fn held(&self) -> std::sync::MutexGuard<'_, Held> {
-        self.inner.held.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner
+            .held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     fn cached(&self) -> Option<Arc<Session>> {
         let held = self.held();
-        held.session.as_ref().filter(|_| !held.stale).map(Arc::clone)
+        held.session
+            .as_ref()
+            .filter(|_| !held.stale)
+            .map(Arc::clone)
     }
 
     /// The session, fetched the first time and again after a call said it
@@ -218,7 +229,12 @@ impl JmapClient {
         for _ in 0..=MOST_REDIRECTS {
             let response = self
                 .with_credentials(|header| {
-                    let request = self.inner.http.get(url.clone()).header(AUTHORIZATION, header).timeout(CALL_TIMEOUT);
+                    let request = self
+                        .inner
+                        .http
+                        .get(url.clone())
+                        .header(AUTHORIZATION, header)
+                        .timeout(CALL_TIMEOUT);
                     async move { request.send().await.map_err(network) }
                 })
                 .await?;
@@ -242,14 +258,20 @@ impl JmapClient {
                         .and_then(|v| url.join(v).ok())
                         .ok_or_else(|| JmapError::Decode("a redirect without a location".into()))?;
                     if !same_origin(&next, &url) {
-                        return Err(JmapError::OffHost(next.host_str().unwrap_or_default().to_string()));
+                        return Err(JmapError::OffHost(
+                            next.host_str().unwrap_or_default().to_string(),
+                        ));
                     }
                     url = without_userinfo(next)?;
                 }
                 _ => return Err(failure(response).await),
             }
         }
-        Err(JmapError::Problem { status: 310, kind: "redirects".into(), detail: "too many redirects".into() })
+        Err(JmapError::Problem {
+            status: 310,
+            kind: "redirects".into(),
+            detail: "too many redirects".into(),
+        })
     }
 
     /// Shrinks the permits to the session's `maxConcurrentRequests` the
@@ -267,7 +289,8 @@ impl JmapClient {
     /// `url`, a URL the session named, when the credentials may go there:
     /// HTTPS, or HTTP when the session itself is on this computer.
     pub(crate) fn endpoint(&self, url: &str) -> Result<Url, JmapError> {
-        let parsed = Url::parse(url).map_err(|_| JmapError::BadUrl("a URL the session names".into()))?;
+        let parsed =
+            Url::parse(url).map_err(|_| JmapError::BadUrl("a URL the session names".into()))?;
         let parsed = without_userinfo(parsed)?;
         let session_is_local = self.inner.session_url.scheme() == "http";
         let fine = match parsed.scheme() {
@@ -291,7 +314,13 @@ impl JmapClient {
         refused: Option<&HeaderValue>,
     ) -> Result<(reqwest::RequestBuilder, HeaderValue), JmapError> {
         let header = self.inner.auth.header(refused).await?;
-        Ok((self.inner.http.request(method, url).header(AUTHORIZATION, header.clone()), header))
+        Ok((
+            self.inner
+                .http
+                .request(method, url)
+                .header(AUTHORIZATION, header.clone()),
+            header,
+        ))
     }
 
     /// The HTTP client every call shares.
@@ -309,14 +338,19 @@ impl JmapClient {
     /// 401. A 401 means the server acted on nothing, so even a write goes
     /// again safely; any other answer, or none, comes back as it is, and
     /// a second 401 too.
-    pub(crate) async fn with_credentials<F, Fut>(&self, send: F) -> Result<reqwest::Response, JmapError>
+    pub(crate) async fn with_credentials<F, Fut>(
+        &self,
+        send: F,
+    ) -> Result<reqwest::Response, JmapError>
     where
         F: Fn(HeaderValue) -> Fut,
         Fut: Future<Output = Result<reqwest::Response, JmapError>>,
     {
         let header = self.inner.auth.header(None).await?;
         let response = send(header.clone()).await?;
-        if response.status() != StatusCode::UNAUTHORIZED || self.inner.auth.kind() != AuthKind::OAuth {
+        if response.status() != StatusCode::UNAUTHORIZED
+            || self.inner.auth.kind() != AuthKind::OAuth
+        {
             return Ok(response);
         }
         drop(response);
@@ -342,7 +376,11 @@ impl JmapClient {
 
     /// When push comes back, while it is paused after a stall.
     pub fn push_paused(&self) -> Option<tokio::time::Instant> {
-        let mut until = self.inner.paused_until.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut until = self
+            .inner
+            .paused_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if until.is_some_and(|at| at <= tokio::time::Instant::now()) {
             *until = None;
         }
@@ -351,7 +389,11 @@ impl JmapClient {
 
     /// Records the task that holds a newly opened stream.
     pub(crate) fn keep_reader(&self, reader: tokio::task::AbortHandle) {
-        *self.inner.reader.lock().unwrap_or_else(PoisonError::into_inner) = Some(reader);
+        *self
+            .inner
+            .reader
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(reader);
     }
 
     /// Turns push off for the client's life and closes the stream.
@@ -362,7 +404,12 @@ impl JmapClient {
 
     /// Turns push off for a while and closes the stream.
     fn pause_pushing(&self) {
-        *self.inner.paused_until.lock().unwrap_or_else(PoisonError::into_inner) = Some(tokio::time::Instant::now() + PUSH_PAUSE);
+        *self
+            .inner
+            .paused_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) =
+            Some(tokio::time::Instant::now() + PUSH_PAUSE);
         self.close_stream();
     }
 
@@ -370,7 +417,13 @@ impl JmapClient {
     /// whether or not anyone polls the watch that waits on it. The watch
     /// finds the stream closed when it next runs.
     fn close_stream(&self) {
-        if let Some(reader) = self.inner.reader.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        if let Some(reader) = self
+            .inner
+            .reader
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
             reader.abort();
         }
         self.set_streaming(false);
@@ -411,7 +464,11 @@ impl JmapClient {
     /// One of the account's slots for a request in flight.
     pub(crate) async fn permit(&self) -> SemaphorePermit<'_> {
         // The semaphore is never closed, so acquiring cannot fail.
-        self.inner.permits.acquire().await.expect("the permits stay open")
+        self.inner
+            .permits
+            .acquire()
+            .await
+            .expect("the permits stay open")
     }
 
     /// Sends `request` to the session's `apiUrl`. A capability the session
@@ -419,14 +476,18 @@ impl JmapClient {
     /// before anything goes out.
     pub async fn send(&self, request: &Request) -> Result<Response, JmapError> {
         let session = self.session().await?;
-        if let Some(missing) = request.using().find(|c| !session.capabilities.contains_key(*c)) {
+        if let Some(missing) = request
+            .using()
+            .find(|c| !session.capabilities.contains_key(*c))
+        {
             return Err(JmapError::UnknownCapability(missing.to_string()));
         }
         let limits = session.limits();
         if request.len() > limits.max_calls_in_request {
             return Err(JmapError::RequestTooLarge);
         }
-        let body = serde_json::to_vec(&request.body()).map_err(|e| JmapError::Decode(e.to_string()))?;
+        let body =
+            serde_json::to_vec(&request.body()).map_err(|e| JmapError::Decode(e.to_string()))?;
         if body.len() as u64 > limits.max_size_request {
             return Err(JmapError::RequestTooLarge);
         }
@@ -445,7 +506,9 @@ impl JmapClient {
             .with_credentials(|header| {
                 // The body sits in memory, so it always clones, and the
                 // copy shares its buffer.
-                let copy = request.try_clone().ok_or_else(|| JmapError::Network("the request cannot be sent again".into()));
+                let copy = request
+                    .try_clone()
+                    .ok_or_else(|| JmapError::Network("the request cannot be sent again".into()));
                 async move {
                     let mut copy = copy?;
                     copy.headers_mut().insert(AUTHORIZATION, header);
@@ -466,7 +529,10 @@ impl JmapClient {
 }
 
 fn retry_after(response: &reqwest::Response) -> Option<Duration> {
-    wait_of(response.headers().get(RETRY_AFTER)?.to_str().ok()?, chrono::Utc::now())
+    wait_of(
+        response.headers().get(RETRY_AFTER)?.to_str().ok()?,
+        chrono::Utc::now(),
+    )
 }
 
 /// The longest wait a `Retry-After` gets: a server's clock or a typo should
@@ -482,7 +548,9 @@ fn wait_of(value: &str, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> 
         Ok(seconds) => Duration::from_secs(seconds),
         Err(_) => {
             let at = chrono::DateTime::parse_from_rfc2822(value).ok()?;
-            (at.with_timezone(&chrono::Utc) - now).to_std().unwrap_or_default()
+            (at.with_timezone(&chrono::Utc) - now)
+                .to_std()
+                .unwrap_or_default()
         }
     };
     Some(wait.min(MOST_RETRY_AFTER))
@@ -493,18 +561,29 @@ fn wait_of(value: &str, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> 
 pub(crate) async fn failure(response: reqwest::Response) -> JmapError {
     let status = response.status().as_u16();
     if matches!(status, 429 | 503) {
-        return JmapError::RateLimited { retry_after: retry_after(&response) };
+        return JmapError::RateLimited {
+            retry_after: retry_after(&response),
+        };
     }
     let body = read_capped(response, ERROR_LIMIT).await.unwrap_or_default();
     let parsed: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    let kind = parsed.get("type").and_then(Value::as_str).unwrap_or_default();
-    let detail = parsed.get("detail").and_then(Value::as_str).unwrap_or_default();
+    let kind = parsed
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let detail = parsed
+        .get("detail")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     problem(status, kind, detail)
 }
 
 /// The body, read a chunk at a time and refused once it passes `limit`,
 /// so a large answer never sits whole in memory before it is refused.
-pub(crate) async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, JmapError> {
+pub(crate) async fn read_capped(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, JmapError> {
     if response.content_length().is_some_and(|n| n > limit as u64) {
         return Err(JmapError::AnswerTooLarge { limit });
     }
@@ -528,11 +607,23 @@ mod tests {
 
     #[test]
     fn a_retry_after_reads_seconds_or_an_http_date_and_is_capped() {
-        let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T09:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T09:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         assert_eq!(wait_of(" 7 ", now), Some(Duration::from_secs(7)));
-        assert_eq!(wait_of("Mon, 12 Oct 2026 09:02:00 GMT", now), Some(Duration::from_secs(120)));
-        assert_eq!(wait_of("Mon, 12 Oct 2026 08:00:00 GMT", now), Some(Duration::ZERO), "a date past asks for no wait");
-        assert_eq!(wait_of("Tue, 13 Oct 2026 09:00:00 GMT", now), Some(MOST_RETRY_AFTER));
+        assert_eq!(
+            wait_of("Mon, 12 Oct 2026 09:02:00 GMT", now),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            wait_of("Mon, 12 Oct 2026 08:00:00 GMT", now),
+            Some(Duration::ZERO),
+            "a date past asks for no wait"
+        );
+        assert_eq!(
+            wait_of("Tue, 13 Oct 2026 09:00:00 GMT", now),
+            Some(MOST_RETRY_AFTER)
+        );
         assert_eq!(wait_of("86400", now), Some(MOST_RETRY_AFTER));
         assert_eq!(wait_of("soon", now), None);
     }
@@ -551,35 +642,66 @@ mod tests {
             "uploadUrl": format!("{base}/upload/"),
             "state": "s1"
         });
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_json(session)).mount(&server).await;
-        let client = JmapClient::new(&format!("{base}/jmap/session"), Auth::Bearer("t".into())).unwrap();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(session))
+            .mount(&server)
+            .await;
+        let client =
+            JmapClient::new(&format!("{base}/jmap/session"), Auth::Bearer("t".into())).unwrap();
         client.session().await.unwrap();
         (server, client)
     }
 
     #[test]
     fn an_https_session_refuses_a_loopback_http_url() {
-        let client = JmapClient::new("https://mail.example.org/jmap/session", Auth::Bearer("t".into())).unwrap();
-        assert!(matches!(client.endpoint("http://127.0.0.1/api/"), Err(JmapError::BadUrl(_))));
+        let client = JmapClient::new(
+            "https://mail.example.org/jmap/session",
+            Auth::Bearer("t".into()),
+        )
+        .unwrap();
+        assert!(matches!(
+            client.endpoint("http://127.0.0.1/api/"),
+            Err(JmapError::BadUrl(_))
+        ));
         assert!(client.endpoint("https://mail.example.org/api/").is_ok());
     }
 
     #[tokio::test]
     async fn the_permits_shrink_to_the_sessions_limit() {
-        assert_eq!(client_with_concurrency(2).await.1.inner.permits.available_permits(), 2);
+        assert_eq!(
+            client_with_concurrency(2)
+                .await
+                .1
+                .inner
+                .permits
+                .available_permits(),
+            2
+        );
     }
 
     #[tokio::test]
     async fn a_server_allowing_one_request_leaves_one_permit() {
-        assert_eq!(client_with_concurrency(1).await.1.inner.permits.available_permits(), 1);
+        assert_eq!(
+            client_with_concurrency(1)
+                .await
+                .1
+                .inner
+                .permits
+                .available_permits(),
+            1
+        );
     }
 
     #[tokio::test]
     async fn the_session_read_waits_for_a_free_permit() {
         let (_server, client) = client_with_concurrency(50).await;
         let held: Vec<_> = every_permit(&client).await;
-        let waited = tokio::time::timeout(Duration::from_millis(100), client.refresh_session()).await;
-        assert!(waited.is_err(), "the session read went out with every permit taken");
+        let waited =
+            tokio::time::timeout(Duration::from_millis(100), client.refresh_session()).await;
+        assert!(
+            waited.is_err(),
+            "the session read went out with every permit taken"
+        );
         drop(held);
         client.refresh_session().await.unwrap();
     }
@@ -602,7 +724,11 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn push_comes_back_after_a_stall_has_paused_it() {
-        let client = JmapClient::new("https://mail.example.org/jmap/session", Auth::Bearer("t".into())).unwrap();
+        let client = JmapClient::new(
+            "https://mail.example.org/jmap/session",
+            Auth::Bearer("t".into()),
+        )
+        .unwrap();
         client.pause_pushing();
         assert!(client.push_paused().is_some());
         tokio::time::advance(PUSH_PAUSE).await;
@@ -613,13 +739,29 @@ mod tests {
     #[tokio::test]
     async fn a_refused_fixed_token_goes_out_once() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(401)).expect(1).mount(&server).await;
-        let client = JmapClient::new(&format!("{}/jmap/session", server.uri()), Auth::Bearer("t".into())).unwrap();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = JmapClient::new(
+            &format!("{}/jmap/session", server.uri()),
+            Auth::Bearer("t".into()),
+        )
+        .unwrap();
         assert_eq!(client.session().await.unwrap_err(), JmapError::Unauthorized);
     }
 
     #[tokio::test]
     async fn a_server_allowing_more_still_gets_the_clients_own_most() {
-        assert_eq!(client_with_concurrency(50).await.1.inner.permits.available_permits(), MOST_AT_ONCE);
+        assert_eq!(
+            client_with_concurrency(50)
+                .await
+                .1
+                .inner
+                .permits
+                .available_permits(),
+            MOST_AT_ONCE
+        );
     }
 }

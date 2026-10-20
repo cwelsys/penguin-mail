@@ -39,6 +39,8 @@ and then the name it builds is the one a reader hears.
 
 ## The message
 
+Hovering over a web or email link, or focusing it with Tab, shows its destination at the bottom-right of the reading pane. The preview is a status region for screen readers. It names the destination site before the full address and explains any signs of deception. A message with such links also has a warning above its body, outside the sender's styles. These local checks compare displayed addresses with destinations and look for disguised hosts and hidden characters. They make no network requests and do not certify that a site is safe.
+
 `app/src/render.rs` writes the page the WebView shows, so the message
 gets HTML accessibility: the subject is the page's only `h1` and each
 sender is a heading under it, the details panel is a real `<details>`,
@@ -105,6 +107,16 @@ a `recipient.remove` action a screen reader can run; its close button
 runs the same action.
 
 ## The thread list from the keyboard
+
+Ctrl+B (Cmd+B on macOS) shows or hides the sidebar in the main window,
+in both Mail and Calendar. The Keyboard Shortcuts dialog lists it under
+General. In the composer, the same key formats bold text.
+
+A paged IMAP folder has a **More** button below the thread list while the
+server has another page, or while a failed page can be tried again. It is
+reachable with Tab even when grouping leaves too few rows for a scrollbar.
+Loading another page keeps selected conversations selected when they remain
+in the list.
 
 The thread list is one Tab stop, like the mailbox list. Its list view
 uses GTK's `ListTabBehavior::Item`, so Tab and Shift+Tab leave it, and
@@ -220,3 +232,7 @@ Nothing known. The last four gaps closed in September 2026: the row
 menus open with Menu or Shift+F10, the formatting bar is one tab stop,
 Insert Image has Ctrl+Shift+P, and the arrow keys reach every recipient
 chip. Write a new gap down here when you find one, with why it was left.
+
+Preferences uses a single page-list Tab stop, with arrow keys to choose a page and Enter to open it. Search also finds controls inside folded account, Skills and MCP sections and expands the path to the selected control. Account drag handles have named Move Up and Move Down alternatives; after a move, focus stays on an available move button for that account.
+
+The model menu in the assistant's question box and the Tools menu in its header work from the keyboard. File chips have a named Remove button. What it did is one disclosure per turn, with nested thought and tool disclosures whose input and result remain selectable. Detach and Dock move the same widgets and return focus to the question field. Closing a detached assistant preserves the chat in the mail window.

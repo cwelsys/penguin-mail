@@ -60,9 +60,9 @@ pub fn save(conn: &Connection, contacts: &[Contact]) -> Result<()> {
             // An empty file means a check found no photo. A contact that
             // comes back in a refresh has changed, and Graph keeps the same
             // URL for a photo added later, so ask again.
-            Some((url, file)) if url == contact.photo_url => {
-                file.filter(|f| !f.is_empty()).or(contact.photo_file.clone())
-            }
+            Some((url, file)) if url == contact.photo_url => file
+                .filter(|f| !f.is_empty())
+                .or(contact.photo_file.clone()),
             _ => contact.photo_file.clone(),
         };
         conn.execute(
@@ -317,7 +317,12 @@ mod tests {
         let work = accounts::insert_account(&conn, "dana@work.example", 0).unwrap();
         save(
             &conn,
-            &[contact(work, "people/c1", "Mara Okafor", &["mara@example.org"])],
+            &[contact(
+                work,
+                "people/c1",
+                "Mara Okafor",
+                &["mara@example.org"],
+            )],
         )
         .unwrap();
         assert!(holds(&conn, work, " MARA@example.org").unwrap());

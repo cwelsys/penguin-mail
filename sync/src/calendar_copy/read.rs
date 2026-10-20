@@ -35,7 +35,10 @@ impl<A: Accounts> CalendarCopy<A> {
         scope: CalendarScope,
     ) -> Result<Vec<Occurrence>, SyncError> {
         let accounts = accounts.to_vec();
-        Ok(self.db.read(move |c| store::occurrences(c, &accounts, from, to, scope)).await?)
+        Ok(self
+            .db
+            .read(move |c| store::occurrences(c, &accounts, from, to, scope))
+            .await?)
     }
 
     /// The events that mention `text`, the next occurrence after `from`
@@ -49,14 +52,25 @@ impl<A: Accounts> CalendarCopy<A> {
         limit: usize,
     ) -> Result<Vec<Occurrence>, SyncError> {
         let (accounts, text) = (accounts.to_vec(), text.to_string());
-        Ok(self.db.read(move |c| store::search(c, &accounts, &text, from, scope, limit)).await?)
+        Ok(self
+            .db
+            .read(move |c| store::search(c, &accounts, &text, from, scope, limit))
+            .await?)
     }
 
     /// The event `id` on `calendar`, or `None` when the copy no longer
     /// holds it.
-    pub async fn event(&self, account_id: AccountId, calendar: &str, id: &str) -> Result<Option<Event>, SyncError> {
+    pub async fn event(
+        &self,
+        account_id: AccountId,
+        calendar: &str,
+        id: &str,
+    ) -> Result<Option<Event>, SyncError> {
         let (calendar, id) = (calendar.to_string(), id.to_string());
-        Ok(self.db.read(move |c| store::event(c, account_id, &calendar, &id)).await?)
+        Ok(self
+            .db
+            .read(move |c| store::event(c, account_id, &calendar, &id))
+            .await?)
     }
 
     /// Each account's calendars, in the order `accounts` names them.
@@ -80,7 +94,11 @@ impl<A: Accounts> CalendarCopy<A> {
 
     /// How many events the copy holds on `calendar`, a series counted
     /// once, for the question before the calendar is deleted.
-    pub async fn event_count(&self, account_id: AccountId, calendar: &str) -> Result<usize, SyncError> {
+    pub async fn event_count(
+        &self,
+        account_id: AccountId,
+        calendar: &str,
+    ) -> Result<usize, SyncError> {
         let calendar = calendar.to_string();
         Ok(self
             .db
@@ -94,14 +112,27 @@ impl<A: Accounts> CalendarCopy<A> {
     pub async fn every_account(&self) -> Result<Vec<AccountId>, SyncError> {
         Ok(self
             .db
-            .read(|c| Ok(mailrs_store::accounts::list_accounts(c)?.into_iter().map(|a| a.id).collect()))
+            .read(|c| {
+                Ok(mailrs_store::accounts::list_accounts(c)?
+                    .into_iter()
+                    .map(|a| a.id)
+                    .collect())
+            })
             .await?)
     }
 
     /// Shows or hides a calendar's events on this computer. The provider
     /// never hears of it.
-    pub async fn show_calendar(&self, account_id: AccountId, calendar: &str, shown: bool) -> Result<(), SyncError> {
+    pub async fn show_calendar(
+        &self,
+        account_id: AccountId,
+        calendar: &str,
+        shown: bool,
+    ) -> Result<(), SyncError> {
         let calendar = calendar.to_string();
-        Ok(self.db.write(move |c| store::set_shown(c, account_id, &calendar, shown)).await?)
+        Ok(self
+            .db
+            .write(move |c| store::set_shown(c, account_id, &calendar, shown))
+            .await?)
     }
 }

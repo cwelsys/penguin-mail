@@ -8,7 +8,9 @@
 use std::collections::HashMap;
 
 use calcard::common::timezone::Tz;
-use calcard::icalendar::{ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarProperty};
+use calcard::icalendar::{
+    ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarProperty,
+};
 use chrono::{Offset, TimeZone, Utc};
 
 pub(crate) struct Zones {
@@ -19,7 +21,11 @@ impl Zones {
     pub(crate) fn of(ical: &ICalendar) -> Zones {
         let mut named = HashMap::new();
         for zone in ical.timezones() {
-            let Some(tzid) = zone.property(&ICalendarProperty::Tzid).and_then(|e| e.values.first()).and_then(|v| v.as_text()) else {
+            let Some(tzid) = zone
+                .property(&ICalendarProperty::Tzid)
+                .and_then(|e| e.values.first())
+                .and_then(|v| v.as_text())
+            else {
                 continue;
             };
             let found = match zone.timezone() {
@@ -58,21 +64,43 @@ fn by_offsets(ical: &ICalendar, zone: &ICalendarComponent, tzid: &str) -> Option
     let january = Utc.with_ymd_and_hms(2026, 1, 15, 12, 0, 0).single()?;
     let july = Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).single()?;
     let offsets = |tz: chrono_tz::Tz| {
-        let at = |when: chrono::DateTime<Utc>| when.with_timezone(&tz).offset().fix().local_minus_utc();
+        let at =
+            |when: chrono::DateTime<Utc>| when.with_timezone(&tz).offset().fix().local_minus_utc();
         let (jan, jul) = (at(january), at(july));
         (jan.min(jul), jan.max(jul))
     };
     let wanted = (standard.min(daylight), standard.max(daylight));
-    let matching: Vec<chrono_tz::Tz> = chrono_tz::TZ_VARIANTS.iter().copied().filter(|tz| offsets(*tz) == wanted).collect();
+    let matching: Vec<chrono_tz::Tz> = chrono_tz::TZ_VARIANTS
+        .iter()
+        .copied()
+        .filter(|tz| offsets(*tz) == wanted)
+        .collect();
     let words = tzid.to_ascii_lowercase();
     matching
         .iter()
         .copied()
-        .find(|tz| tz.name().rsplit('/').next().is_some_and(|city| words.contains(&city.to_ascii_lowercase().replace('_', " "))))
+        .find(|tz| {
+            tz.name()
+                .rsplit('/')
+                .next()
+                .is_some_and(|city| words.contains(&city.to_ascii_lowercase().replace('_', " ")))
+        })
         .or_else(|| {
-            ["Europe/", "America/", "Asia/", "Australia/", "Pacific/", "Africa/"]
-                .iter()
-                .find_map(|region| matching.iter().copied().find(|tz| tz.name().starts_with(region)))
+            [
+                "Europe/",
+                "America/",
+                "Asia/",
+                "Australia/",
+                "Pacific/",
+                "Africa/",
+            ]
+            .iter()
+            .find_map(|region| {
+                matching
+                    .iter()
+                    .copied()
+                    .find(|tz| tz.name().starts_with(region))
+            })
         })
 }
 

@@ -21,7 +21,9 @@ fn on_worker_stack(body: impl Future<Output = ()> + Send + 'static) {
         .thread_stack_size(crate::WORKER_STACK)
         .build()
         .expect("a runtime");
-    runtime.block_on(runtime.spawn(body)).expect("the test body");
+    runtime
+        .block_on(runtime.spawn(body))
+        .expect("the test body");
 }
 
 async fn wait_for(events: &Receiver<ChangeEvent>, wanted: impl Fn(&ChangeEvent) -> bool) {
@@ -238,16 +240,25 @@ async fn while_idle_keeps_failing_the_inbox_is_polled_each_minute() {
         h.imap.fail_on("idle", ImapError::Network("dropped".into()));
         mail.watch().await;
     }
-    assert_eq!(mail.poll_interval(), Some(Duration::from_secs(60)), "as on a server without IDLE");
+    assert_eq!(
+        mail.poll_interval(),
+        Some(Duration::from_secs(60)),
+        "as on a server without IDLE"
+    );
 
     let watching = tokio::spawn({
         let mail = mail.clone();
         async move { mail.watch().await }
     });
     idling(&h.imap, 5).await;
-    h.imap.deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(0));
+    h.imap
+        .deliver_flagged("INBOX", &message("b", "Moss", ""), &[], days_ago(0));
     watching.await.unwrap();
-    assert_eq!(mail.poll_interval(), Some(Duration::from_secs(5 * 60)), "IDLE works again");
+    assert_eq!(
+        mail.poll_interval(),
+        Some(Duration::from_secs(5 * 60)),
+        "IDLE works again"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -349,9 +360,11 @@ fn check_for_mail_takes_mail_moved_away_elsewhere_out_of_the_inbox_at_once() {
         };
         assert_eq!(stored(db.clone()).await, 1);
         // Let the first look finish, so the poke is what finds the change.
-        // It lists the mailboxes a third time and ends at Junk.
+        // It lists the mailboxes a third time and ends at Archive.
         tokio::time::timeout(Duration::from_secs(5), async {
-            while imap.calls_to("list") < 3 || imap.calls().last().map(String::as_str) != Some("select Junk") {
+            while imap.calls_to("list") < 3
+                || imap.calls().last().map(String::as_str) != Some("select Archive")
+            {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })

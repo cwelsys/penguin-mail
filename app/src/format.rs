@@ -193,7 +193,10 @@ pub fn event_when(when: &When, now: DateTime<Local>) -> String {
             let date = long_date(start.date_naive());
             let from = crate::clock_format::time_text(start.time());
             let Some(end) = ends_at.and_then(local) else {
-                return fill(&gettext("{date} · {start}"), &[("date", &date), ("start", &from)]);
+                return fill(
+                    &gettext("{date} · {start}"),
+                    &[("date", &date), ("start", &from)],
+                );
             };
             // A meeting that runs past midnight names the day it ends on.
             let until = if end.date_naive() == start.date_naive() {
@@ -241,7 +244,10 @@ pub fn event_moved_from(was: EpochMillis, all_day: bool, now: DateTime<Local>) -
     } else {
         fill(
             &gettext("{day} {time}"),
-            &[("day", &day), ("time", &crate::clock_format::time_text(start.time()))],
+            &[
+                ("day", &day),
+                ("time", &crate::clock_format::time_text(start.time())),
+            ],
         )
     }
 }
@@ -365,7 +371,11 @@ fn domain_name(email: &str) -> Option<String> {
 pub fn account_labels(
     accounts: &[(AccountId, &str, Option<&str>)],
 ) -> std::collections::HashMap<AccountId, AccountName> {
-    let given = |name: Option<&str>| name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+    let given = |name: Option<&str>| {
+        name.map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+    };
     let short: Vec<String> = accounts
         .iter()
         .map(|(_, email, name)| {
@@ -673,10 +683,19 @@ mod tests {
             (2, "dana@fernwood.example", None),
             (3, "d.reyes@outlook.com", Some(" ")),
         ]);
-        assert_eq!(labels[&1], AccountName { short: "Work".into(), full: "Work".into() });
+        assert_eq!(
+            labels[&1],
+            AccountName {
+                short: "Work".into(),
+                full: "Work".into()
+            }
+        );
         assert_eq!(
             labels[&2],
-            AccountName { short: "Fernwood".into(), full: "dana@fernwood.example".into() }
+            AccountName {
+                short: "Fernwood".into(),
+                full: "dana@fernwood.example".into()
+            }
         );
         assert_eq!(labels[&3].short, "Outlook");
     }
@@ -691,7 +710,10 @@ mod tests {
         assert_eq!(labels[&1].short, "dana@gmail.com");
         assert_eq!(labels[&2].short, "reyes@gmail.com");
         assert_eq!(labels[&3].short, "Fernwood");
-        assert_eq!(account_labels(&[(4, "ana@example.co.uk", None)])[&4].short, "Example");
+        assert_eq!(
+            account_labels(&[(4, "ana@example.co.uk", None)])[&4].short,
+            "Example"
+        );
     }
 
     #[test]

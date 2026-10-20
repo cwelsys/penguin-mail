@@ -12,8 +12,8 @@ use mailrs_domain::{Account, Filter, Label, LabelKind};
 use mailrs_sync::{BackendError, Permitted, Replaced, RuleList, SyncError};
 
 use crate::core::Core;
-use crate::permission::Permission;
 use crate::offered::Filing;
+use crate::permission::Permission;
 use crate::rules::{
     RuleForm, Unshown, describe_action, describe_criteria, empty_line, offers_never_spam,
     place_line, waiting_line,
@@ -203,11 +203,15 @@ impl Rules {
         self.add.set_visible(!none);
         if none {
             // The description is markup, and a provider name may hold an "&".
-            self.empty.set_description(Some(&glib::markup_escape_text(&empty_line(list.place, &provider))));
+            self.empty
+                .set_description(Some(&glib::markup_escape_text(&empty_line(
+                    list.place, &provider,
+                ))));
             self.stack.set_visible_child_name("empty");
             return;
         }
-        self.list.set_description(Some(&place_line(list.place, &provider)));
+        self.list
+            .set_description(Some(&place_line(list.place, &provider)));
         if list.waiting {
             let row = adw::ActionRow::builder()
                 .title(glib::markup_escape_text(&waiting_line(&provider)))
@@ -258,8 +262,14 @@ impl Rules {
                 continue;
             }
             // The demo's screenshot of a rule kept here (`MAILRS_DEMO_SWITCH`).
-            let shown_here = self.core.demo && std::env::var("MAILRS_DEMO_SWITCH").is_ok_and(|stage| stage == "rules-here");
-            if shown_here || list.here.iter().any(|here| filter.id.as_ref() == Some(here)) {
+            let shown_here = self.core.demo
+                && std::env::var("MAILRS_DEMO_SWITCH").is_ok_and(|stage| stage == "rules-here");
+            if shown_here
+                || list
+                    .here
+                    .iter()
+                    .any(|here| filter.id.as_ref() == Some(here))
+            {
                 // Kept from before a switch to JMAP: the server runs a
                 // script of the person's own that it cannot include.
                 row.set_subtitle(&glib::markup_escape_text(&format!(
@@ -619,7 +629,11 @@ impl Rules {
                             let retry = button.clone();
                             this.ask_to_replace(script, move |rules| {
                                 retry.set_sensitive(false);
-                                rules.replace(old_again.clone(), filter_again.clone(), retry.clone());
+                                rules.replace(
+                                    old_again.clone(),
+                                    filter_again.clone(),
+                                    retry.clone(),
+                                );
                             });
                         }
                         None => this.failed(&gettext("Could not save the rule: {reason}"), &err),
@@ -678,7 +692,10 @@ pub fn replace_question(account: &Account, script: &str) -> adw::AlertDialog {
             &[("provider", &provider), ("script", script)],
         ))
         .build();
-    dialog.add_responses(&[("cancel", &gettext("Cancel")), ("replace", &gettext("Replace"))]);
+    dialog.add_responses(&[
+        ("cancel", &gettext("Cancel")),
+        ("replace", &gettext("Replace")),
+    ]);
     dialog.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");

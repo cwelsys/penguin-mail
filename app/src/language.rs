@@ -144,6 +144,9 @@ mod tests {
     #[test]
     fn the_source_language_says_it_is_american_english() {
         let first = &choices()[0];
-        assert_eq!((first.code.as_str(), first.name.as_str()), ("en", "English (United States)"));
+        assert_eq!(
+            (first.code.as_str(), first.name.as_str()),
+            ("en", "English (United States)")
+        );
     }
 }

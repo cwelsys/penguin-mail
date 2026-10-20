@@ -12,7 +12,6 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::sync::Mutex;
 
-use crate::{GmailError, OneClickError};
 use crate::convert::text_to_html;
 use crate::convert::{HistoryPage, history_page};
 use crate::limiter::{self, AccountQuota};
@@ -22,6 +21,7 @@ use crate::model::{
 };
 use crate::oauth::{AccessToken, Granted, LoopbackListener, OAuthClient, Pkce, random_token};
 use crate::people::{self, ConnectionsPage, ContactFields, Person};
+use crate::{GmailError, OneClickError};
 
 /// The largest JSON answer most calls take: label and message lists,
 /// metadata, history, contacts.
@@ -476,7 +476,11 @@ impl GmailClient {
                 self.http().get(self.url("settings/filters"))
             })
             .await?;
-        Ok(list.filter.into_iter().map(GmailFilter::into_filter).collect())
+        Ok(list
+            .filter
+            .into_iter()
+            .map(GmailFilter::into_filter)
+            .collect())
     }
 
     pub async fn create_filter(&self, filter: &Filter) -> Result<Filter, GmailError> {
@@ -769,7 +773,10 @@ impl GmailClient {
     /// back the answer whatever its status, for a caller that reads more
     /// than success and failure, such as Drive's 308 during a resumable
     /// upload. A 401 refreshes the token and sends once more.
-    pub(crate) async fn send_any(&self, build: impl Fn() -> RequestBuilder) -> Result<Response, GmailError> {
+    pub(crate) async fn send_any(
+        &self,
+        build: impl Fn() -> RequestBuilder,
+    ) -> Result<Response, GmailError> {
         let mut retried = false;
         loop {
             let token = self.bearer().await?;
@@ -829,9 +836,7 @@ impl GmailClient {
                 }
                 changed
             };
-            if changed
-                && let Some(hook) = &self.on_granted
-            {
+            if changed && let Some(hook) = &self.on_granted {
                 hook(granted);
             }
         }
@@ -935,7 +940,10 @@ fn metadata_query() -> Vec<(&'static str, &'static str)> {
 
 /// The body, read a chunk at a time and refused once it passes `limit`,
 /// so a large answer never sits whole in memory before it is refused.
-pub(crate) async fn read_capped(mut response: Response, limit: usize) -> Result<Vec<u8>, GmailError> {
+pub(crate) async fn read_capped(
+    mut response: Response,
+    limit: usize,
+) -> Result<Vec<u8>, GmailError> {
     if response.content_length().is_some_and(|n| n > limit as u64) {
         return Err(GmailError::TooLarge { limit });
     }
@@ -950,7 +958,8 @@ pub(crate) async fn read_capped(mut response: Response, limit: usize) -> Result<
 }
 
 async fn text_of(response: Response, limit: usize) -> Result<String, GmailError> {
-    String::from_utf8(read_capped(response, limit).await?).map_err(|e| GmailError::Decode(e.to_string()))
+    String::from_utf8(read_capped(response, limit).await?)
+        .map_err(|e| GmailError::Decode(e.to_string()))
 }
 
 /// A JSON answer, read under the usual cap.
@@ -967,7 +976,9 @@ pub(crate) async fn error_from_response(response: Response) -> GmailError {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
-    let body = String::from_utf8_lossy(&read_capped(response, ERROR_LIMIT).await.unwrap_or_default()).into_owned();
+    let body =
+        String::from_utf8_lossy(&read_capped(response, ERROR_LIMIT).await.unwrap_or_default())
+            .into_owned();
     match status {
         401 => GmailError::NeedsReauth,
         404 => GmailError::NotFound,
@@ -1073,7 +1084,12 @@ pub async fn authorize(
     open_browser(&oauth.authorize_url(&redirect_uri, &pkce, &state)?);
     let code = listener.wait_for_code(&state).await?;
     let tokens = oauth.exchange_code(&code, &redirect_uri, &pkce).await?;
-    if tokens.access.granted.as_ref().is_some_and(|g| !g.reads_mail()) {
+    if tokens
+        .access
+        .granted
+        .as_ref()
+        .is_some_and(|g| !g.reads_mail())
+    {
         return Err(GmailError::MailNotGranted);
     }
     let granted = tokens.access.granted.clone();

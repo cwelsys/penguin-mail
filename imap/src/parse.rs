@@ -129,7 +129,8 @@ impl Reads for UnreadReader<'_> {
     fn read(&mut self, response: &Response<'_>) {
         if let Response::MailboxData(MailboxDatum::Status { mailbox, status }) = response
             && (mailbox == self.mailbox
-                || (self.mailbox.eq_ignore_ascii_case("INBOX") && mailbox.eq_ignore_ascii_case("INBOX")))
+                || (self.mailbox.eq_ignore_ascii_case("INBOX")
+                    && mailbox.eq_ignore_ascii_case("INBOX")))
         {
             for attribute in status {
                 if let async_imap::imap_proto::StatusAttribute::Unseen(count) = attribute {
@@ -266,10 +267,9 @@ impl Reads for SelectReader {
         match response {
             Response::Data {
                 status: Status::Ok,
-                outcome:
-                    Outcome {
-                        code: Some(code), ..
-                    },
+                outcome: Outcome {
+                    code: Some(code), ..
+                },
             } => match code {
                 ResponseCode::UidValidity(v) => self.uidvalidity = Some(*v),
                 ResponseCode::UidNext(n) => self.selected.uidnext = Some(*n),
@@ -915,8 +915,18 @@ pub(crate) mod tests {
         assert_eq!(
             reader.uses,
             [
-                QuotaUse { root: "User quota".into(), resource: "STORAGE".into(), usage: 10, limit: 1_048_576 },
-                QuotaUse { root: "User quota".into(), resource: "MESSAGE".into(), usage: 4, limit: 1000 },
+                QuotaUse {
+                    root: "User quota".into(),
+                    resource: "STORAGE".into(),
+                    usage: 10,
+                    limit: 1_048_576
+                },
+                QuotaUse {
+                    root: "User quota".into(),
+                    resource: "MESSAGE".into(),
+                    usage: 4,
+                    limit: 1000
+                },
             ]
         );
     }
@@ -1057,8 +1067,14 @@ pub(crate) mod tests {
         let header = "BODY[HEADER.FIELDS (FROM SUBJECT)] {32}\r\nFrom: a@b.pt\r\nSubject: hello\r\n\r\n)\r\n";
         let meta = "FLAGS (\\Seen) INTERNALDATE \" 7-Feb-2026 10:00:00 +0100\" RFC822.SIZE 900";
         for lines in [
-            [format!("* 5 FETCH (UID 12 {meta})\r\n"), format!("* 5 FETCH (UID 12 {header}")],
-            [format!("* 5 FETCH (UID 12 {header}"), format!("* 5 FETCH (UID 12 {meta})\r\n")],
+            [
+                format!("* 5 FETCH (UID 12 {meta})\r\n"),
+                format!("* 5 FETCH (UID 12 {header}"),
+            ],
+            [
+                format!("* 5 FETCH (UID 12 {header}"),
+                format!("* 5 FETCH (UID 12 {meta})\r\n"),
+            ],
         ] {
             let mut reader = HeadersReader::new(&UidSet::from_uids([12]));
             feed(&mut reader, &[lines[0].as_str(), lines[1].as_str()]);
@@ -1412,8 +1428,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_section_reader_takes_the_bytes_of_its_uid_whole() {
-        let (_, response) =
-            Response::parse(b"* 2 FETCH (UID 9 BODY[1] {5}\r\nhello)\r\n").unwrap();
+        let (_, response) = Response::parse(b"* 2 FETCH (UID 9 BODY[1] {5}\r\nhello)\r\n").unwrap();
         let mut reader = SectionReader::new(9);
         assert_eq!(reader.wants(&response), Some(&b"hello"[..]));
         reader.keep(b"hello".to_vec());

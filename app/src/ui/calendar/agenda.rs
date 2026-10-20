@@ -34,7 +34,8 @@ use super::words;
 /// The class that marks an invitation the account has not answered: the
 /// dot becomes a ring, as Week and Month draw such an event dashed.
 fn answer_mark(event: &mailrs_domain::calendar::Event) -> Option<&'static str> {
-    (super::block::answer_state(event) == super::block::AnswerState::Unanswered).then_some("unanswered")
+    (super::block::answer_state(event) == super::block::AnswerState::Unanswered)
+        .then_some("unanswered")
 }
 
 /// One row's data: the occurrence, the local date it groups under, and
@@ -71,10 +72,7 @@ fn sorted_rows<Z: TimeZone>(occurrences: &[Occurrence], zone: &Z) -> Vec<Row> {
 
 /// `occurrences` grouped into days, earliest first; within a day an
 /// all-day occurrence comes before a timed one, then by start time.
-fn days_of<Z: TimeZone>(
-    occurrences: &[Occurrence],
-    zone: &Z,
-) -> Vec<(NaiveDate, Vec<Occurrence>)> {
+fn days_of<Z: TimeZone>(occurrences: &[Occurrence], zone: &Z) -> Vec<(NaiveDate, Vec<Occurrence>)> {
     let mut dated: Vec<(NaiveDate, Occurrence)> = occurrences
         .iter()
         .map(|o| (agenda_date(o, zone), o.clone()))
@@ -230,8 +228,13 @@ mod model {
             }
             let old = self.imp().items.borrow().len() as u32;
             self.imp().items.borrow_mut().extend(items);
-            let dates: Vec<NaiveDate> =
-                self.imp().items.borrow().iter().map(|row| row.date).collect();
+            let dates: Vec<NaiveDate> = self
+                .imp()
+                .items
+                .borrow()
+                .iter()
+                .map(|row| row.date)
+                .collect();
             self.imp().sections.replace(sections_of(&dates));
             self.items_changed(old, 0, added);
             self.sections_changed(0, old + added);
@@ -454,10 +457,12 @@ mod row {
             // Out of office and focus time say so, since the stripes and
             // the icon that show it are not spoken.
             let titled = match crate::ui::calendar::kinds::kind_words(&o.event.kind) {
-                Some(kind) if !kind.eq_ignore_ascii_case(o.event.title.trim()) => mailrs_domain::translate::fill(
-                    &gettext("{title}, {kind}"),
-                    &[("title", &o.event.title), ("kind", &kind)],
-                ),
+                Some(kind) if !kind.eq_ignore_ascii_case(o.event.title.trim()) => {
+                    mailrs_domain::translate::fill(
+                        &gettext("{title}, {kind}"),
+                        &[("title", &o.event.title), ("kind", &kind)],
+                    )
+                }
                 _ => o.event.title.clone(),
             };
             let name = mailrs_domain::translate::fill(
@@ -591,7 +596,9 @@ impl Agenda {
             .vexpand(true)
             .child(&list_view)
             .build();
-        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
         content.append(&no_earlier);
         content.append(&scrolled);
         // A wide window reads the agenda as a centered column; a narrow
@@ -682,7 +689,8 @@ impl Agenda {
         let rows = sorted_rows(occurrences, zone);
         let inserted = self.model.prepend_rows(rows);
         if inserted > 0 {
-            self.list_view.scroll_to(inserted, gtk::ListScrollFlags::NONE, None);
+            self.list_view
+                .scroll_to(inserted, gtk::ListScrollFlags::NONE, None);
         }
     }
 
@@ -797,9 +805,16 @@ mod tests {
         }
     }
 
-    fn invitation(answer: Option<mailrs_domain::invitation::Answer>) -> mailrs_domain::calendar::Event {
+    fn invitation(
+        answer: Option<mailrs_domain::invitation::Answer>,
+    ) -> mailrs_domain::calendar::Event {
         mailrs_domain::calendar::Event {
-            guests: vec![mailrs_domain::calendar::Guest { me: true, organizer: false, answer, ..Default::default() }],
+            guests: vec![mailrs_domain::calendar::Guest {
+                me: true,
+                organizer: false,
+                answer,
+                ..Default::default()
+            }],
             ..Default::default()
         }
     }
@@ -811,7 +826,10 @@ mod tests {
 
     #[test]
     fn an_answered_or_own_event_takes_no_ring() {
-        assert_eq!(answer_mark(&invitation(Some(mailrs_domain::invitation::Answer::Yes))), None);
+        assert_eq!(
+            answer_mark(&invitation(Some(mailrs_domain::invitation::Answer::Yes))),
+            None
+        );
         assert_eq!(answer_mark(&timed(0).event), None);
     }
 
@@ -819,11 +837,23 @@ mod tests {
     fn events_group_into_days_earliest_first_with_all_day_ahead_of_timed() {
         let zone = chrono_tz::Europe::Lisbon;
         let at = |day, hour| {
-            zone.with_ymd_and_hms(2026, 9, day, hour, 0, 0).unwrap().timestamp_millis()
+            zone.with_ymd_and_hms(2026, 9, day, hour, 0, 0)
+                .unwrap()
+                .timestamp_millis()
         };
-        let mut all_day = timed(chrono::Utc.with_ymd_and_hms(2026, 9, 24, 0, 0, 0).unwrap().timestamp_millis());
+        let mut all_day = timed(
+            chrono::Utc
+                .with_ymd_and_hms(2026, 9, 24, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis(),
+        );
         std::sync::Arc::make_mut(&mut all_day.event).all_day = true;
-        let found = [timed(at(25, 9)), timed(at(24, 15)), all_day, timed(at(24, 8))];
+        let found = [
+            timed(at(25, 9)),
+            timed(at(24, 15)),
+            all_day,
+            timed(at(24, 8)),
+        ];
         let days = days_of(&found, &zone);
         let shape: Vec<(NaiveDate, Vec<bool>)> = days
             .iter()
@@ -831,7 +861,10 @@ mod tests {
             .collect();
         assert_eq!(
             shape,
-            vec![(d(2026, 9, 24), vec![true, false, false]), (d(2026, 9, 25), vec![false])]
+            vec![
+                (d(2026, 9, 24), vec![true, false, false]),
+                (d(2026, 9, 25), vec![false])
+            ]
         );
         assert!(days[0].1[1].start < days[0].1[2].start);
     }
@@ -840,7 +873,9 @@ mod tests {
     fn a_later_read_drops_what_an_earlier_day_already_listed() {
         let zone = chrono_tz::Europe::Lisbon;
         let at = |day, hour| {
-            zone.with_ymd_and_hms(2026, 9, day, hour, 0, 0).unwrap().timestamp_millis()
+            zone.with_ymd_and_hms(2026, 9, day, hour, 0, 0)
+                .unwrap()
+                .timestamp_millis()
         };
         // The store returns a multi-day event again when a later read
         // overlaps it; its own start still sits before that read.
