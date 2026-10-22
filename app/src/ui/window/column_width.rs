@@ -11,10 +11,13 @@ use crate::settings::MailColumn;
 
 /// The separator owns keyboard focus; its split view measures drags,
 /// because a right-to-left pane moves its origin while being resized.
+/// Widths pass through `changed` at Normal text size; `factor` says how
+/// many pixels one of those takes now (`text_scale::factor`).
 pub(super) fn wrap(
     child: &impl IsA<gtk::Widget>,
     split: &impl IsA<gtk::Widget>,
     column: MailColumn,
+    factor: impl Fn() -> f64 + 'static,
     changed: impl Fn(i32, bool) -> i32 + 'static,
 ) -> (gtk::Box, gtk::Separator) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -53,11 +56,14 @@ pub(super) fn wrap(
         }
         width
     });
-    divider.connect_state_flags_changed(|divider, _| {
+    let at_normal: Rc<dyn Fn(i32) -> i32> =
+        Rc::new(move |pixels| (f64::from(pixels) / factor()).round() as i32);
+    let shown = at_normal.clone();
+    divider.connect_state_flags_changed(move |divider, _| {
         if let Some(parent) = divider.parent() {
-            divider.update_property(&[gtk::accessible::Property::ValueNow(f64::from(
+            divider.update_property(&[gtk::accessible::Property::ValueNow(f64::from(shown(
                 parent.width(),
-            ))]);
+            )))]);
         }
     });
     let start = Rc::new(Cell::new(None));
@@ -66,11 +72,12 @@ pub(super) fn wrap(
         .button(1)
         .propagation_phase(gtk::PropagationPhase::Capture)
         .build();
-    let (pane, handle, began, current) = (
+    let (pane, handle, began, current, dragged) = (
         row.downgrade(),
         divider.downgrade(),
         start.clone(),
         width.clone(),
+        at_normal.clone(),
     );
     drag.connect_drag_begin(move |gesture, x, y| {
         let (Some(pane), Some(handle)) = (pane.upgrade(), handle.upgrade()) else {
@@ -95,14 +102,15 @@ pub(super) fn wrap(
         tracing::debug!(?column, direction = ?pane.direction(), "mail column drag began");
         handle.grab_focus();
         began.set(Some(pane.width()));
-        current.set(pane.width());
+        current.set(dragged(pane.width()));
         gesture.set_state(gtk::EventSequenceState::Claimed);
     });
-    let (pane, began, current, change) = (
+    let (pane, began, current, change, dragged) = (
         row.downgrade(),
         start.clone(),
         width.clone(),
         changed.clone(),
+        at_normal.clone(),
     );
     drag.connect_drag_update(move |_, dx, _| {
         let (Some(pane), Some(start)) = (pane.upgrade(), began.get()) else {
@@ -113,7 +121,9 @@ pub(super) fn wrap(
         } else {
             1.0
         };
-        let next = column.clamp(start.saturating_add((dx * direction).round() as i32));
+        let next = column.clamp(dragged(
+            start.saturating_add((dx * direction).round() as i32),
+        ));
         current.set(change(next, false));
     });
     let change = changed.clone();
@@ -138,7 +148,7 @@ pub(super) fn wrap(
         }
         let Some(width) = key_width(
             column,
-            pane.width(),
+            at_normal(pane.width()),
             key,
             pane.direction() == gtk::TextDirection::Rtl,
         ) else {

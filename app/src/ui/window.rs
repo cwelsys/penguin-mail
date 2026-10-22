@@ -524,8 +524,45 @@ impl MainWindow {
             }
             crate::settings::MailColumn::Messages => self.nav.width() - reading - controls,
         };
+        let available = (f64::from(available) / self.text_factor()).round() as i32;
         let (least, most) = column.limits();
         width.clamp(least, available.clamp(least, most))
+    }
+
+    /// How many pixels a pane width at Normal text takes now.
+    fn text_factor(&self) -> f64 {
+        text_factor_of(&self.app)
+    }
+
+    /// Puts the mailbox sidebar and the message list at the widths the
+    /// person chose, or their defaults, scaled for the text size.
+    fn scale_columns(&self) {
+        let factor = self.text_factor();
+        let (mailboxes, messages) = self.settings_with(|s| (s.mailbox_width, s.message_list_width));
+        let (least, most) = match mailboxes {
+            Some(width) => {
+                let width = crate::settings::MailColumn::Mailboxes.clamp(width);
+                (width, width)
+            }
+            None => (256, 256),
+        };
+        let (least, most) = (f64::from(least) * factor, f64::from(most) * factor);
+        self.split
+            .set_max_sidebar_width(most.max(self.split.min_sidebar_width()));
+        self.split.set_min_sidebar_width(least);
+        self.split.set_max_sidebar_width(most);
+        let (least, most) = match messages {
+            Some(width) => {
+                let width = crate::settings::MailColumn::Messages.clamp(width);
+                (width, width)
+            }
+            None => (300, 420),
+        };
+        let (least, most) = (f64::from(least) * factor, f64::from(most) * factor);
+        self.nav
+            .set_max_sidebar_width(most.max(self.nav.min_sidebar_width()));
+        self.nav.set_min_sidebar_width(least);
+        self.nav.set_max_sidebar_width(most);
     }
 
     pub fn new(app: &Rc<App>) -> Rc<MainWindow> {
@@ -572,7 +609,6 @@ impl MainWindow {
             // window colour, as the mockup draws it, rather than the
             // sidebar shade an `AdwNavigationSplitView` pane takes by
             // default.
-            let settings = app.settings();
             let nav = adw::NavigationSplitView::builder()
                 .sidebar(&list.page)
                 .content(&conversation.page)
@@ -584,25 +620,21 @@ impl MainWindow {
                 // the sidebar in a 1,440 px window.
                 .sidebar_width_fraction(0.331)
                 .build();
-            if let Some(width) = settings.message_list_width {
-                let width = f64::from(crate::settings::MailColumn::Messages.clamp(width));
-                nav.set_max_sidebar_width(width.max(nav.min_sidebar_width()));
-                nav.set_min_sidebar_width(width);
-                nav.set_max_sidebar_width(width);
-            }
             let content = list.page.child().expect("the list has its toolbar");
             list.page.set_child(None::<&gtk::Widget>);
             let (columns, owner, window) = (nav.downgrade(), Rc::downgrade(app), weak.clone());
+            let measure = Rc::downgrade(app);
             let (list_body, list_divider) = column_width::wrap(
                 &content,
                 &nav,
                 crate::settings::MailColumn::Messages,
+                move || text_factor_of(&measure),
                 move |width, save| {
                     let width = window.upgrade().map_or(width, |win| {
                         win.fit_column_width(crate::settings::MailColumn::Messages, width)
                     });
                     if let Some(nav) = columns.upgrade() {
-                        let width = f64::from(width);
+                        let width = f64::from(width) * text_factor_of(&owner);
                         nav.set_max_sidebar_width(width.max(nav.min_sidebar_width()));
                         nav.set_min_sidebar_width(width);
                         nav.set_max_sidebar_width(width);
@@ -718,24 +750,20 @@ impl MainWindow {
                 .max_sidebar_width(256.0)
                 .sidebar_width_fraction(0.178)
                 .build();
-            if let Some(width) = settings.mailbox_width {
-                let width = f64::from(crate::settings::MailColumn::Mailboxes.clamp(width));
-                split.set_max_sidebar_width(width.max(split.min_sidebar_width()));
-                split.set_min_sidebar_width(width);
-                split.set_max_sidebar_width(width);
-            }
             split.set_sidebar(None::<&gtk::Widget>);
             let (panes, owner, window) = (split.downgrade(), Rc::downgrade(app), weak.clone());
+            let measure = Rc::downgrade(app);
             let (sidebar_body, sidebar_divider) = column_width::wrap(
                 &sidebar.page,
                 &split,
                 crate::settings::MailColumn::Mailboxes,
+                move || text_factor_of(&measure),
                 move |width, save| {
                     let width = window.upgrade().map_or(width, |win| {
                         win.fit_column_width(crate::settings::MailColumn::Mailboxes, width)
                     });
                     if let Some(split) = panes.upgrade() {
-                        let width = f64::from(width);
+                        let width = f64::from(width) * text_factor_of(&owner);
                         split.set_max_sidebar_width(width.max(split.min_sidebar_width()));
                         split.set_min_sidebar_width(width);
                         split.set_max_sidebar_width(width);
@@ -1191,6 +1219,7 @@ impl MainWindow {
             .conversation
             .set_zoom(app.settings_with(|s| s.text_size.zoom()));
         super::text_scale::apply(app.settings_with(|s| s.text_size));
+        window.scale_columns();
         app.unread()
             .show_in(Box::new(ShownCounts(Rc::downgrade(&window))));
         let weak = Rc::downgrade(&window);
@@ -4014,6 +4043,7 @@ impl MainWindow {
                     view.set_zoom(settings.text_size.zoom());
                 }
                 super::text_scale::apply(settings.text_size);
+                self.scale_columns();
             }
             Effect::Contacts => {
                 self.list.photos_changed();
@@ -4399,6 +4429,12 @@ fn still_there(mailbox: &Mailbox, data: &[(Account, Vec<Label>)]) -> bool {
 /// Wraps the assistant's split view in a [`room::Room`] that folds the
 /// mailboxes and lays the assistant over the space as the window's width
 /// requires, from what `needs` measures.
+fn text_factor_of(app: &Weak<App>) -> f64 {
+    app.upgrade().map_or(1.0, |app| {
+        app.settings_with(|s| super::text_scale::factor(s.text_size))
+    })
+}
+
 fn arranged_room(
     split: &adw::OverlaySplitView,
     assistant_split: &adw::OverlaySplitView,

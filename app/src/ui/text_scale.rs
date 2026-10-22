@@ -37,9 +37,35 @@ fn stylesheet(size: TextSize) -> String {
     format!("window {{ font-size: {:.3}em; }}\n", size.zoom())
 }
 
+/// How many pixels a width laid out for Normal text takes: the chosen
+/// size times the desktop's own text scale, which GTK carries as a dpi.
+/// Pane widths are kept at Normal and multiplied by this on the way to
+/// the screen, so they keep their share of the text at every size.
+pub fn factor(size: TextSize) -> f64 {
+    let dpi = gtk::Settings::default().map_or(-1, |settings| settings.gtk_xft_dpi());
+    scale(size.zoom(), dpi)
+}
+
+fn scale(zoom: f64, xft_dpi: i32) -> f64 {
+    let desktop = if xft_dpi > 0 {
+        f64::from(xft_dpi) / (96.0 * 1024.0)
+    } else {
+        1.0
+    };
+    zoom * desktop
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn widths_follow_the_text_size_and_the_desktop_scale() {
+        assert_eq!(scale(1.0, -1), 1.0);
+        assert_eq!(scale(1.3, 96 * 1024), 1.3);
+        assert_eq!(scale(1.0, 120 * 1024), 1.25);
+        assert_eq!(scale(0.9, 0), 0.9);
+    }
 
     #[test]
     fn default_keeps_the_desktop_font_size() {
