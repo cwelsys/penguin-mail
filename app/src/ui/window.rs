@@ -1190,6 +1190,7 @@ impl MainWindow {
         window
             .conversation
             .set_zoom(app.settings_with(|s| s.text_size.zoom()));
+        super::text_scale::apply(app.settings_with(|s| s.text_size));
         app.unread()
             .show_in(Box::new(ShownCounts(Rc::downgrade(&window))));
         let weak = Rc::downgrade(&window);
@@ -4012,6 +4013,7 @@ impl MainWindow {
                 for view in self.views() {
                     view.set_zoom(settings.text_size.zoom());
                 }
+                super::text_scale::apply(settings.text_size);
             }
             Effect::Contacts => {
                 self.list.photos_changed();

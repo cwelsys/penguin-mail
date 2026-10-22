@@ -44,6 +44,7 @@ pub mod sidebar;
 pub mod smart_editor;
 pub mod switch_jmap;
 pub mod templates;
+pub mod text_scale;
 pub mod texture;
 pub mod thread_list;
 pub mod thread_row;
