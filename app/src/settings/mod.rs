@@ -684,8 +684,8 @@ impl TextSize {
         match self {
             TextSize::Small => 0.9,
             TextSize::Normal => 1.0,
-            TextSize::Large => 1.25,
-            TextSize::Larger => 1.5,
+            TextSize::Large => 1.15,
+            TextSize::Larger => 1.3,
         }
     }
 }
