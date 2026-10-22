@@ -65,3 +65,6 @@ levelbar.server-space.full block.filled { background-color: var(--error-bg-color
   color: var(--error-color);
   background-color: alpha(var(--error-bg-color), 0.18);
 }
+
+/* The selected mailbox as a navigation drawer marks it: a full pill. */
+.mailboxes > row { border-radius: 999px; }
