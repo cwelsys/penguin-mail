@@ -56,14 +56,42 @@ pub fn follow() {
     };
     let accent = named("accent_bg_color").map(|c| c.to_str().to_string());
     let accent_text = named("accent_color").map(|c| c.to_str().to_string());
-    let css = page_vars(
+    let mut css = page_vars(
         &bg.to_str(),
         &fg.to_str(),
         accent.as_deref(),
         accent_text.as_deref(),
     );
+    if adw::StyleManager::default().is_dark() {
+        css.push_str(&dark_avatars());
+    }
     *PAGE.lock().unwrap() = css;
     *VIEW_BG.lock().unwrap() = Some(bg);
+}
+
+/// `format::PALETTE` against Catppuccin Mocha, as `data/palette.css` maps
+/// the window's avatars.
+const MOCHA: [(&str, &str); 9] = [
+    ("#3584e4", "#89b4fa"),
+    ("#2190a4", "#94e2d5"),
+    ("#3a944a", "#a6e3a1"),
+    ("#c88800", "#f9e2af"),
+    ("#ed5b00", "#fab387"),
+    ("#e62d42", "#f38ba8"),
+    ("#d56199", "#f5c2e7"),
+    ("#9141ac", "#cba6f7"),
+    ("#6f8396", "#9399b2"),
+];
+
+/// The page writes an avatar's hue into its `style` attribute, which only
+/// `!important` outranks.
+fn dark_avatars() -> String {
+    MOCHA
+        .iter()
+        .map(|(from, to)| {
+            format!(".avatar[style*=\"{from}\"]{{background:{to}!important;color:#11111b}}")
+        })
+        .collect()
 }
 
 /// CSS appended to the page's own, overriding its colour variables.
@@ -116,5 +144,16 @@ mod tests {
         assert!(css.contains("--accent:rgb(137,180,250)"));
         assert!(!css.contains("--accent-text"));
         assert!(css.ends_with('}'));
+    }
+
+    #[test]
+    fn every_avatar_hue_the_page_writes_has_a_mocha_twin() {
+        let froms: Vec<&str> = super::MOCHA.iter().map(|(from, _)| *from).collect();
+        assert_eq!(froms, crate::format::PALETTE);
+        assert!(
+            super::dark_avatars().contains(
+                ".avatar[style*=\"#e62d42\"]{background:#f38ba8!important;color:#11111b}"
+            )
+        );
     }
 }

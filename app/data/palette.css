@@ -68,3 +68,36 @@ levelbar.server-space.full block.filled { background-color: var(--error-bg-color
 
 /* The selected mailbox as a navigation drawer marks it: a full pill. */
 .mailboxes > row { border-radius: 999px; }
+
+/* Catppuccin Mocha's hues for the flags, accounts and avatars in dark
+   mode. GNOME's palette is saturated for a white page and glares on a
+   dark one; avatars take dark letters, which read on the pastel fills. */
+.app-dark .flag-red { color: #f38ba8; }
+.app-dark .flag-orange { color: #fab387; }
+.app-dark .flag-yellow { color: #f9e2af; }
+.app-dark .flag-green { color: #a6e3a1; }
+.app-dark .flag-blue { color: #89b4fa; }
+.app-dark .flag-purple { color: #cba6f7; }
+.app-dark .flag-gray { color: #9399b2; }
+.app-dark .thread-row .vip.marker,
+.app-dark .sidebar-vip { color: #f9e2af; }
+
+.app-dark .account-0 { background: #89b4fa; }
+.app-dark .account-1 { background: #94e2d5; }
+.app-dark .account-2 { background: #a6e3a1; }
+.app-dark .account-3 { background: #f9e2af; }
+.app-dark .account-4 { background: #fab387; }
+.app-dark .account-5 { background: #f38ba8; }
+.app-dark .account-6 { background: #f5c2e7; }
+.app-dark .account-7 { background: #cba6f7; }
+.app-dark .account-8 { background: #9399b2; }
+
+.app-dark .avatar-hue-0 avatar { background-color: #89b4fa; color: #11111b; }
+.app-dark .avatar-hue-1 avatar { background-color: #94e2d5; color: #11111b; }
+.app-dark .avatar-hue-2 avatar { background-color: #a6e3a1; color: #11111b; }
+.app-dark .avatar-hue-3 avatar { background-color: #f9e2af; color: #11111b; }
+.app-dark .avatar-hue-4 avatar { background-color: #fab387; color: #11111b; }
+.app-dark .avatar-hue-5 avatar { background-color: #f38ba8; color: #11111b; }
+.app-dark .avatar-hue-6 avatar { background-color: #f5c2e7; color: #11111b; }
+.app-dark .avatar-hue-7 avatar { background-color: #cba6f7; color: #11111b; }
+.app-dark .avatar-hue-8 avatar { background-color: #9399b2; color: #11111b; }
