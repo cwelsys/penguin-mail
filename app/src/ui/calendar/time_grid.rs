@@ -181,12 +181,15 @@ fn all_day_rect(
 
 /// How many lines of title fit in a block running from `top` to `bottom`
 /// hours: its height less the padding, the title's top margin and the
-/// time line, in lines of the 12.5 px title.
-fn title_lines(top: f64, bottom: f64) -> i32 {
-    const ABOVE_AND_BELOW: f32 = 6.0 + 3.0 + 15.0;
+/// time line, in lines of the 12.5 px title. The time line and the
+/// title's lines are `scale` times taller than at Normal text
+/// (`text_scale::current`); the padding stays.
+fn title_lines(top: f64, bottom: f64, scale: f32) -> i32 {
+    const PADDING: f32 = 6.0 + 3.0;
+    const TIME_LINE: f32 = 15.0;
     const TITLE_LINE: f32 = 16.0;
     let height = (bottom - top) as f32 * HOUR - CARD_INSET;
-    (((height - ABOVE_AND_BELOW) / TITLE_LINE).floor() as i32).max(1)
+    (((height - PADDING - TIME_LINE * scale) / (TITLE_LINE * scale)).floor() as i32).max(1)
 }
 
 /// The tallest a short card in a shared column grows, in pixels: room for
@@ -199,12 +202,13 @@ const TWO_LINE_CARD: f32 = 42.0;
 /// [`TWO_LINE_CARD`] so a title too wide for its lane can take a second
 /// line, though never past `next`, the start of the next card in its
 /// lane. The card takes that extra only when its title needs it (see
-/// `size_allocate`).
-fn reach(top: f64, bottom: f64, lanes: usize, next: Option<f64>) -> f64 {
+/// `size_allocate`). The two lines are `scale` times taller than at
+/// Normal text.
+fn reach(top: f64, bottom: f64, lanes: usize, next: Option<f64>, scale: f32) -> f64 {
     if lanes <= 1 {
         return bottom;
     }
-    let two_lines = top + f64::from(TWO_LINE_CARD + CARD_INSET) / f64::from(HOUR);
+    let two_lines = top + f64::from(TWO_LINE_CARD * scale + CARD_INSET) / f64::from(HOUR);
     next.map_or(two_lines, |next| two_lines.min(next))
         .max(bottom)
 }
@@ -1027,6 +1031,7 @@ impl TimeGrid {
                 .collect();
 
             let mut in_day: Vec<(gtk::Widget, imp::Placement, f64)> = Vec::new();
+            let scale = crate::ui::text_scale::current() as f32;
             for p in placed {
                 let (occ_index, start, end) = pieces[p.index];
                 let o = &occurrences[occ_index];
@@ -1043,11 +1048,11 @@ impl TimeGrid {
                     .filter(|&&(lane, start)| lane == p.lane && start > top)
                     .map(|&(_, start)| start)
                     .reduce(f64::min);
-                let reach = reach(top, bottom, p.lanes, next);
+                let reach = reach(top, bottom, p.lanes, next, scale);
                 // A short card that may run on gets its second line.
                 let lines = match compact && reach > bottom {
                     true => 2,
-                    false => title_lines(top, bottom),
+                    false => title_lines(top, bottom, scale),
                 };
                 event_block.set_title_lines(lines);
                 let card = event_block.widget;
@@ -2896,17 +2901,24 @@ mod tests {
 
     #[test]
     fn an_hour_long_block_has_room_for_two_lines_of_title() {
-        assert_eq!(title_lines(10.0, 11.0), 2);
+        assert_eq!(title_lines(10.0, 11.0, 1.0), 2);
     }
 
     #[test]
     fn a_ninety_minute_block_lets_sprint_planning_wrap() {
-        assert!(title_lines(10.0, 11.5) >= 2);
+        assert!(title_lines(10.0, 11.5, 1.0) >= 2);
     }
 
     #[test]
     fn a_short_block_keeps_its_title_on_one_line() {
-        assert_eq!(title_lines(9.0, 9.75), 1);
+        assert_eq!(title_lines(9.0, 9.75, 1.0), 1);
+    }
+
+    #[test]
+    fn an_hour_long_block_at_large_text_keeps_one_line_and_its_time() {
+        assert_eq!(title_lines(10.0, 11.0, 1.15), 1);
+        assert_eq!(title_lines(10.0, 11.0, 1.3), 1);
+        assert_eq!(title_lines(10.0, 11.5, 1.3), 2);
     }
 
     /// Sprint planning at 13:10 and Call with Rita at 13:15, half an hour
@@ -2914,23 +2926,30 @@ mod tests {
     #[test]
     fn a_short_card_in_a_shared_column_may_run_on_for_a_second_line() {
         let top = 13.0 + 10.0 / 60.0;
-        let reach = reach(top, top + 0.5, 2, None);
+        let reach = reach(top, top + 0.5, 2, None, 1.0);
         assert!((reach - top) * f64::from(HOUR) >= f64::from(TWO_LINE_CARD));
     }
 
     #[test]
+    fn a_short_card_at_larger_text_runs_on_further_for_its_second_line() {
+        let top = 13.0 + 10.0 / 60.0;
+        let reach = reach(top, top + 0.5, 2, None, 1.3);
+        assert!((reach - top) * f64::from(HOUR) >= f64::from(TWO_LINE_CARD * 1.3));
+    }
+
+    #[test]
     fn a_card_alone_in_its_column_keeps_its_own_length() {
-        assert_eq!(reach(13.0, 13.5, 1, None), 13.5);
+        assert_eq!(reach(13.0, 13.5, 1, None, 1.0), 13.5);
     }
 
     #[test]
     fn a_card_runs_on_no_further_than_the_next_card_in_its_lane() {
-        assert_eq!(reach(13.0, 13.5, 2, Some(13.6)), 13.6);
+        assert_eq!(reach(13.0, 13.5, 2, Some(13.6), 1.0), 13.6);
     }
 
     #[test]
     fn a_card_already_tall_enough_keeps_its_own_length() {
-        assert_eq!(reach(13.0, 15.0, 2, None), 15.0);
+        assert_eq!(reach(13.0, 15.0, 2, None, 1.0), 15.0);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Text Size beyond the message page: every window's text grows by the
 //! factor the page zooms by, as the desktop's large text setting would.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 
 use gtk::gdk;
 
@@ -11,10 +11,14 @@ thread_local! {
     /// One stylesheet on the display for every window, so a composer that
     /// opens later starts at the chosen size.
     static SHEET: OnceCell<gtk::CssProvider> = const { OnceCell::new() };
+    /// The factor the last `apply` set, for layout code that measures
+    /// text in pixels and has no settings to ask.
+    static CURRENT: Cell<f64> = const { Cell::new(1.0) };
 }
 
 /// Sizes every window's text for `size`.
 pub fn apply(size: TextSize) {
+    CURRENT.set(factor(size));
     SHEET.with(|sheet| {
         let provider = sheet.get_or_init(|| {
             let provider = gtk::CssProvider::new();
@@ -44,6 +48,12 @@ fn stylesheet(size: TextSize) -> String {
 pub fn factor(size: TextSize) -> f64 {
     let dpi = gtk::Settings::default().map_or(-1, |settings| settings.gtk_xft_dpi());
     scale(size.zoom(), dpi)
+}
+
+/// The factor in force since the last `apply`: 1.0 until a window sets
+/// one, as in tests.
+pub fn current() -> f64 {
+    CURRENT.get()
 }
 
 fn scale(zoom: f64, xft_dpi: i32) -> f64 {

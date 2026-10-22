@@ -808,6 +808,12 @@ impl CalendarView {
         self.run.read_sidebar(false);
     }
 
+    /// Draws the grids' cards again after Text Size changes, since each
+    /// card's lines of title are budgeted from the text's height.
+    pub fn text_size_changed(self: &Rc<Self>) {
+        self.run.fill_all();
+    }
+
     /// Redraws everything that shows a time after GNOME's clock format
     /// changes: the header, the grids' hour labels, which a grid builds
     /// once, and the times on the cards and in the list, which come from
