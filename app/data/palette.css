@@ -1,0 +1,67 @@
+/* The desktop's palette in place of the mockup's. Loaded after style.css
+   at a higher priority, so these rules win over upstream's without
+   matching its selectors' weight. Surfaces come from the named colours a
+   GTK theme or ~/.config/gtk-4.0/gtk.css defines; pills, lines and tints
+   are the text colour over whatever surface they sit on, so they follow
+   too. */
+
+window.app-surfaces {
+  --window-bg-color: @window_bg_color;
+  --sidebar-bg-color: @sidebar_bg_color;
+  --view-bg-color: @view_bg_color;
+}
+
+/* Pills, the mockup's #e3e3e7 and #3a3a40: a chip surface one step up
+   from what they sit on. */
+.category-chips > button.category-toggle,
+button.invitation-answer,
+button.invitation-pill,
+.calendar-arrows,
+.toolbar-capsule,
+menubutton.view-menu > button,
+popover.event-popover button.popover-join,
+popover.event-popover button.popover-answer:not(.suggested-action) {
+  background-color: alpha(currentColor, 0.1);
+}
+.category-chips > button.category-toggle:hover,
+button.invitation-answer:hover,
+button.invitation-pill:hover,
+popover.event-popover button.popover-join:hover,
+popover.event-popover button.popover-answer:not(.suggested-action):hover {
+  background-color: alpha(currentColor, 0.16);
+}
+.category-chips > button.category-toggle:checked,
+button.invitation-answer.suggested-action {
+  background-color: var(--accent-fill);
+}
+
+/* Lines and card borders. A card is a tonal surface with a faint edge
+   rather than an outlined box. */
+.invitation-card {
+  background-color: alpha(currentColor, 0.04);
+  border-color: alpha(currentColor, 0.06);
+  border-radius: 16px;
+}
+.translation-card,
+.queued-card,
+.pgp-card { border-color: alpha(currentColor, 0.06); }
+.strip-grid { border-color: alpha(currentColor, 0.07); }
+.strip-cell.hour { border-left-color: alpha(currentColor, 0.07); }
+.toolbar-capsule > * + * {
+  background-image: linear-gradient(
+    to bottom, transparent 25%, alpha(currentColor, 0.15) 25%,
+    alpha(currentColor, 0.15) 75%, transparent 75%);
+}
+
+popover.event-popover > contents { background-color: var(--popover-bg-color); }
+
+/* State colours from the palette. */
+.strip-verdict.free { color: var(--success-color); }
+.server-space-row .subtitle.nearly-full { color: var(--warning-color); }
+.server-space-row .subtitle.full { color: var(--error-color); }
+levelbar.server-space.nearly-full block.filled { background-color: var(--warning-bg-color); }
+levelbar.server-space.full block.filled { background-color: var(--error-bg-color); }
+.server-space-chip {
+  color: var(--error-color);
+  background-color: alpha(var(--error-bg-color), 0.18);
+}
