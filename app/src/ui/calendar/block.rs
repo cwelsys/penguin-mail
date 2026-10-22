@@ -220,7 +220,7 @@ fn outline_colour(colour: &str) -> gdk::RGBA {
             f32::from(b) / 255.0,
             1.0,
         ),
-        None => adw::StyleManager::default().accent_color_rgba(),
+        None => crate::palette::accent(),
     }
 }
 
