@@ -3,9 +3,16 @@
 #
 # a11y-names.sh looks for the accessibility registry where Ubuntu keeps it,
 # so the name check runs from a copy that looks in /usr/lib.
+#
+# The Docker suites call plain `docker`, which follows the active context.
+# Pinning DOCKER_CONTEXT keeps them on this computer when another context,
+# such as a remote server, is selected.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+unset DOCKER_HOST
+export DOCKER_CONTEXT=default
 
 GDK_BACKEND=x11 xvfb-run -a cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
