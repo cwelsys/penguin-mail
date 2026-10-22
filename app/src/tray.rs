@@ -5,6 +5,7 @@ use mailrs_domain::AccountId;
 use mailrs_domain::translate::{fill, fill_plural, gettext};
 
 pub enum TrayCommand {
+    ReadAll,
     Toggle,
     Open,
     /// Show the window on this account's inbox.
@@ -248,15 +249,15 @@ impl ksni::Tray for MailTray {
         self.icon_theme_path.clone()
     }
 
-    /// The app's own envelope glyph, drawn by the host in the panel's
-    /// colour like its other icons. With mail unread it carries a dot,
-    /// for the hosts that leave out the label. With no name, every host
-    /// draws the penguin from the pixmaps.
+    /// A complete color icon keeps the unread dot orange on hosts that
+    /// recolor symbolic icons or omit overlays. The read icon follows the
+    /// panel's foreground color. With no name, every host draws the
+    /// penguin from the pixmaps.
     fn icon_name(&self) -> String {
         match (self.penguin, self.unread) {
             (true, _) => String::new(),
             (false, ..=0) => format!("{APP_ID}-symbolic"),
-            (false, _) => format!("{APP_ID}-unread-symbolic"),
+            (false, _) => format!("{APP_ID}-unread"),
         }
     }
 
@@ -338,6 +339,17 @@ impl ksni::Tray for MailTray {
             }
             .into()
         };
+        items.push(
+            StandardItem {
+                label: gettext("Mark All as Read"),
+                enabled: self.unread > 0,
+                activate: Box::new(|tray: &mut Self| {
+                    tray.send(TrayCommand::ReadAll);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
         items.push(item(&gettext("Open Penguin Mail"), || TrayCommand::Open));
         items.push(item(&gettext("New Message"), || TrayCommand::Compose));
         items.push(item(&gettext("Check for Mail"), || TrayCommand::Check));
@@ -475,6 +487,7 @@ mod tests {
         use ksni::Tray;
         let tray = tray(0);
         assert_eq!(tray.icon_name(), format!("{}-symbolic", crate::APP_ID));
+        assert_eq!(tray.overlay_icon_name(), "");
         assert_eq!(tray.x_ayatana_label(), "");
         assert_eq!(tray.x_ayatana_label_guide(), "");
         assert_eq!(tray.tool_tip().title, "Penguin Mail: No unread mail");
@@ -488,8 +501,9 @@ mod tests {
         let tray = tray(1);
         assert_eq!(
             tray.icon_name(),
-            format!("{}-unread-symbolic", crate::APP_ID)
+            format!("{}-unread", crate::APP_ID)
         );
+        assert_eq!(tray.overlay_icon_name(), "");
         assert_eq!(tray.x_ayatana_label(), "1");
         assert_eq!(tray.x_ayatana_label_guide(), "1");
         assert_eq!(tray.tool_tip().title, "Penguin Mail: 1 unread message");
@@ -506,7 +520,7 @@ mod tests {
         let tray = tray(120);
         assert_eq!(
             tray.icon_name(),
-            format!("{}-unread-symbolic", crate::APP_ID)
+            format!("{}-unread", crate::APP_ID)
         );
         assert_eq!(tray.x_ayatana_label(), "120");
         assert_eq!(tray.tool_tip().title, "Penguin Mail: 120 unread messages");
@@ -521,11 +535,13 @@ mod tests {
         tray.accounts = vec![unread(1, "a@example.com", 3)];
         assert_eq!(tray.x_ayatana_label(), "3");
         assert_eq!(tray.tool_tip().description, "a@example.com: 3");
+        assert_eq!(tray.overlay_icon_name(), "");
         tray.unread = 0;
         tray.accounts = vec![unread(1, "a@example.com", 0)];
         assert_eq!(tray.x_ayatana_label(), "");
         assert_eq!(tray.x_ayatana_label_guide(), "");
         assert_eq!(tray.icon_name(), format!("{}-symbolic", crate::APP_ID));
+        assert_eq!(tray.overlay_icon_name(), "");
         assert_eq!(tray.tool_tip().title, "Penguin Mail: No unread mail");
         assert_eq!(tray.tool_tip().description, "");
         assert_eq!(tray.icon_accessible_desc(), "Penguin Mail: No unread mail");
@@ -540,7 +556,7 @@ mod tests {
         assert_eq!(tray.tool_tip().title, "Penguin Mail: 4321 unread messages");
     }
 
-    /// Both glyphs ship with the app, under the names the tray sends.
+    /// All three glyphs ship with the app, under the names the tray sends.
     #[test]
     fn the_tray_glyphs_are_in_the_icon_folder() {
         let apps =
@@ -548,6 +564,7 @@ mod tests {
         for name in [
             "io.github.c9dev.PenguinMail-symbolic",
             "io.github.c9dev.PenguinMail-unread-symbolic",
+            "io.github.c9dev.PenguinMail-unread",
         ] {
             assert!(apps.join(format!("{name}.svg")).is_file(), "{name}");
         }
@@ -661,5 +678,51 @@ mod tests {
             Ok(super::TrayCommand::OpenInbox(2))
         ));
         assert!(matches!(menu[1], MenuItem::Separator));
+    }
+
+    #[test]
+    fn mark_all_read_becomes_disabled_when_the_unread_count_reaches_zero() {
+        use ksni::Tray;
+        use ksni::menu::MenuItem;
+
+        let mut tray = tray(0);
+        for count in [0, 1, 4, 0] {
+            tray.unread = count;
+            let menu = tray.menu();
+            let item = menu
+                .iter()
+                .find_map(|item| match item {
+                    MenuItem::Standard(item) if item.label == "Mark All as Read" => Some(item),
+                    _ => None,
+                })
+                .expect("the action stays visible even with no unread mail");
+            assert_eq!(item.enabled, count > 0, "unread count: {count}");
+        }
+    }
+
+    #[test]
+    fn choosing_mark_all_read_sends_one_read_all_command() {
+        use ksni::Tray;
+        use ksni::menu::MenuItem;
+
+        let (commands, received) = async_channel::unbounded();
+        let mut tray = tray(4);
+        tray.commands = commands;
+        tray.accounts = vec![unread(1, "a@example.com", 1), unread(2, "b@example.com", 3)];
+        let menu = tray.menu();
+        let item = menu
+            .iter()
+            .find_map(|item| match item {
+                MenuItem::Standard(item) if item.label == "Mark All as Read" => Some(item),
+                _ => None,
+            })
+            .expect("the menu offers to mark all inboxes read");
+        assert!(item.enabled);
+        (item.activate)(&mut tray);
+        assert!(matches!(
+            received.try_recv(),
+            Ok(super::TrayCommand::ReadAll)
+        ));
+        assert!(received.try_recv().is_err(), "one click sends one command");
     }
 }

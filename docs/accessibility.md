@@ -37,6 +37,15 @@ widget the list view wraps for itself cannot be named from outside
 without crashing GTK. The thread row takes the `ListItem` role instead,
 and then the name it builds is the one a reader hears.
 
+## Column widths
+
+The mailbox sidebar and message list have named, focusable dividers.
+Drag either divider, or Tab to it and use Left and Right to resize in
+12-pixel steps. Home and End select its minimum and maximum width.
+The widths are remembered between starts. In a narrow window, the
+existing sidebar overlay and one-page mail navigation take over, and
+hidden dividers leave the keyboard focus order.
+
 ## The message
 
 Hovering over a web or email link, or focusing it with Tab, shows its destination at the bottom-right of the reading pane. The preview is a status region for screen readers. It names the destination site before the full address and explains any signs of deception. A message with such links also has a warning above its body, outside the sender's styles. These local checks compare displayed addresses with destinations and look for disguised hosts and hidden characters. They make no network requests and do not certify that a site is safe.
@@ -82,6 +91,13 @@ card that says the copy cannot sign in to Microsoft. The page that waits
 for the browser lists each provider's own steps, two for Microsoft and
 three for Google, and the band above it is read as "Waiting for your
 browser, Microsoft".
+
+## Sender signatures
+
+Each additional address under Addresses You Send From has a Signature button.
+Its dialog offers the account signature, a custom signature, or no signature.
+The custom text field is named for the address and describes the Markdown and
+sender placeholders. Save applies the choice; Cancel leaves it unchanged.
 
 ## The composer from the keyboard
 
@@ -236,3 +252,5 @@ chip. Write a new gap down here when you find one, with why it was left.
 Preferences uses a single page-list Tab stop, with arrow keys to choose a page and Enter to open it. Search also finds controls inside folded account, Skills and MCP sections and expands the path to the selected control. Account drag handles have named Move Up and Move Down alternatives; after a move, focus stays on an available move button for that account.
 
 The model menu in the assistant's question box and the Tools menu in its header work from the keyboard. File chips have a named Remove button. What it did is one disclosure per turn, with nested thought and tool disclosures whose input and result remain selectable. Detach and Dock move the same widgets and return focus to the question field. Closing a detached assistant preserves the chat in the mail window.
+
+Trash rows offer Empty Trash in their Options menu, through right-click, Menu or Shift+F10. A confirmation names the accounts whose Trash will be emptied and warns that deletion cannot be undone.

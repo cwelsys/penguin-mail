@@ -13,10 +13,12 @@ mod accounts;
 mod change;
 mod file;
 pub mod mcp;
+mod signatures;
 
 pub use accounts::{AccountChoice, AccountDefaults, AccountUse, accounts_for, preferred_calendar};
 pub use change::{AiChange, Change, Effect, Effects, Setting};
 pub use file::{Opened, Saver};
+pub use signatures::SignatureMode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -46,6 +48,8 @@ pub struct Settings {
     pub account_defaults: AccountDefaults,
     /// Markdown signature per account address.
     pub signatures: BTreeMap<String, String>,
+    /// Whether a sender uses the account signature, its own, or none.
+    pub signature_modes: BTreeMap<String, SignatureMode>,
     /// How long Undo stays available after Send.
     pub undo_send: UndoSend,
     /// The colour a new flag gets: the last one chosen.
@@ -137,6 +141,9 @@ pub struct Settings {
     pub announced_update: Option<String>,
     /// Which space the window opened on last: mail or the calendar.
     pub space: Space,
+    /// Preferred pane widths in pixels; absent keeps the responsive defaults.
+    pub mailbox_width: Option<i32>,
+    pub message_list_width: Option<i32>,
     /// The view the calendar shows: a day, a week, a month or the agenda.
     pub calendar_view: CalendarView,
     /// Show events the person said No to, faded and struck through,
@@ -477,6 +484,7 @@ impl Default for Settings {
             default_account: None,
             account_defaults: AccountDefaults::default(),
             signatures: BTreeMap::new(),
+            signature_modes: BTreeMap::new(),
             undo_send: UndoSend::Ten,
             flag_color: mailrs_domain::FlagColor::Red,
             vips: BTreeMap::new(),
@@ -513,6 +521,8 @@ impl Default for Settings {
             last_update_check: None,
             announced_update: None,
             space: Space::Mail,
+            mailbox_width: None,
+            message_list_width: None,
             calendar_view: CalendarView::Week,
             show_declined_events: false,
             working_hours: mailrs_domain::calendar::hours::WorkingHours::default(),
@@ -520,6 +530,27 @@ impl Default for Settings {
             last_calendar_account: None,
             folded_calendar_accounts: Vec::new(),
         }
+    }
+}
+
+/// The two columns whose dividers remember the width the person chose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailColumn {
+    Mailboxes,
+    Messages,
+}
+
+impl MailColumn {
+    pub fn limits(self) -> (i32, i32) {
+        match self {
+            Self::Mailboxes => (220, 480),
+            Self::Messages => (300, 720),
+        }
+    }
+
+    pub fn clamp(self, width: i32) -> i32 {
+        let (least, most) = self.limits();
+        width.clamp(least, most)
     }
 }
 
@@ -988,27 +1019,6 @@ impl Settings {
         }
     }
 
-    /// What goes below a message sent from `email`. A signature written here
-    /// wins; failing that, the one Gmail keeps for that send-as address.
-    pub fn signature_for(&self, account: &str, email: &str) -> &str {
-        let written = self.signature(email);
-        if !written.is_empty() {
-            return written;
-        }
-        let Some(senders) = self.send_as.get(&account.to_lowercase()) else {
-            return "";
-        };
-        let Some(sender) = crate::compose::sender_for(senders, email) else {
-            return "";
-        };
-        let base = self.signature(&sender.email);
-        if base.is_empty() {
-            &sender.signature
-        } else {
-            base
-        }
-    }
-
     /// Whether the account's send-as addresses are a day old or were
     /// never read.
     pub fn send_as_due(&self, account: &str, now: i64) -> bool {
@@ -1085,6 +1095,18 @@ impl Settings {
                 return false;
             };
             senders.remove(at);
+        }
+        if let Some(old) = was.filter(|old| !old.eq_ignore_ascii_case(&sender.email)) {
+            if let Some(text) = self.signatures.get(&old.to_lowercase()).cloned() {
+                self.signatures
+                    .entry(sender.email.to_lowercase())
+                    .or_insert(text);
+            }
+            if let Some(mode) = self.signature_modes.get(&old.to_lowercase()).copied() {
+                self.signature_modes
+                    .entry(sender.email.to_lowercase())
+                    .or_insert(mode);
+            }
         }
         sender.name = sender
             .name
