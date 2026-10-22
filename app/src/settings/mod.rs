@@ -141,7 +141,8 @@ pub struct Settings {
     pub announced_update: Option<String>,
     /// Which space the window opened on last: mail or the calendar.
     pub space: Space,
-    /// Preferred pane widths in pixels; absent keeps the responsive defaults.
+    /// Preferred pane widths in pixels at Normal text size; absent keeps
+    /// the responsive defaults.
     pub mailbox_width: Option<i32>,
     pub message_list_width: Option<i32>,
     /// The view the calendar shows: a day, a week, a month or the agenda.

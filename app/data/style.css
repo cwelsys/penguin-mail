@@ -370,7 +370,7 @@ flowboxchild:focus-visible > .recipient-chip {
   min-height: 14px; min-width: 0; padding: 0 7px; border-radius: 7px;
   background: alpha(var(--view-fg-color), 0.12);
   color: alpha(var(--view-fg-color), 0.7);
-  font-weight: 700; font-size: 11px; letter-spacing: 1px;
+  font-weight: 700; font-size: 0.75em; letter-spacing: 1px;
   box-shadow: none;
 }
 .trimmed-pill:hover { background: alpha(var(--view-fg-color), 0.2); }
@@ -1636,11 +1636,11 @@ toolbarview.post-opaque { background-color: var(--dialog-bg-color); }
 .post-dialog button.suggested-action,
 .post-first button.suggested-action { background-color: var(--accent-fill); color: #ffffff; }
 
-.post-title { font-size: 20px; font-weight: 800; }
-.post-body.centered .post-title { font-size: 22px; }
-.post-lede { font-size: 14.5px; line-height: 1.07; color: var(--post-dim); margin-top: 5px; }
-.post-lede-small { font-size: 13px; color: var(--post-dim); margin-top: 4px; }
-.post-note { font-size: 12.5px; line-height: 1.07; color: var(--post-dim); margin-top: 16px; }
+.post-title { font-size: 1.36em; font-weight: 800; }
+.post-body.centered .post-title { font-size: 1.5em; }
+.post-lede { font-size: 0.99em; line-height: 1.07; color: var(--post-dim); margin-top: 5px; }
+.post-lede-small { font-size: 0.89em; color: var(--post-dim); margin-top: 4px; }
+.post-note { font-size: 0.85em; line-height: 1.07; color: var(--post-dim); margin-top: 16px; }
 
 /* A provider's mark: its initial on a tile of its colour, lit a little
    on its top half. */
@@ -1648,8 +1648,8 @@ toolbarview.post-opaque { background-color: var(--dialog-bg-color); }
   color: #fbf1c7; font-weight: 800;
   background-image: linear-gradient(to bottom, alpha(#ffffff, 0.07) 50%, alpha(#ffffff, 0) 50%);
 }
-.post-mark.mark-38 { font-size: 19px; border-radius: 11px; min-width: 38px; min-height: 38px; }
-.post-mark.mark-34 { font-size: 17px; border-radius: 9.5px; min-width: 34px; min-height: 34px; }
+.post-mark.mark-38 { font-size: 1.3em; border-radius: 11px; min-width: 38px; min-height: 38px; }
+.post-mark.mark-34 { font-size: 1.16em; border-radius: 9.5px; min-width: 34px; min-height: 34px; }
 .tint-076678 { background-color: #076678; }
 .tint-427b58 { background-color: #427b58; }
 .tint-8f3f71 { background-color: #8f3f71; }
@@ -1695,10 +1695,10 @@ button.post-tile {
 button.post-tile:focus-visible { outline: 2px solid #e8660c; outline-offset: 1px; }
 .app-dark button.post-tile:focus-visible { outline-color: #ff7a1a; }
 button.post-tile:hover { background-image: linear-gradient(alpha(currentColor, 0.04), alpha(currentColor, 0.04)); }
-.post-tile-name { font-size: 15px; font-weight: 800; margin-top: 9px; }
-.post-tile-sub { font-size: 12px; color: var(--post-dim); margin-top: 1px; }
+.post-tile-name { font-size: 1.02em; font-weight: 800; margin-top: 9px; }
+.post-tile-sub { font-size: 0.82em; color: var(--post-dim); margin-top: 1px; }
 .post-globe { color: var(--post-faint); -gtk-icon-size: 13px; }
-.post-legend { margin-top: 20px; font-size: 12.5px; font-weight: 500; color: var(--post-dim); }
+.post-legend { margin-top: 20px; font-size: 0.85em; font-weight: 500; color: var(--post-dim); }
 .post-legend image { color: var(--post-faint); -gtk-icon-size: 13px; margin-left: 2px; }
 separator.post-rule { margin-top: 17px; background-color: var(--post-line); min-height: 1px; }
 list.post-plain-list { background: none; margin: 2px -14px 0; }
@@ -1724,15 +1724,15 @@ list.post-field > row { min-height: 51px; }
 .post-card > .post-card-icon { margin-right: 10px; }
 .post-card-icon { color: var(--post-acc); margin-top: 3px; }
 .post-card.trouble .post-card-icon, .post-card.trouble .post-card-title { color: var(--post-err); }
-.post-card-title { font-size: 14.5px; font-weight: 800; }
-.post-card-body { font-size: 13px; line-height: 1.07; margin-top: 4px; }
-.post-card-source { font-size: 12.5px; line-height: 1.07; color: var(--post-dim); margin-top: 4px; }
+.post-card-title { font-size: 0.99em; font-weight: 800; }
+.post-card-body { font-size: 0.89em; line-height: 1.07; margin-top: 4px; }
+.post-card-source { font-size: 0.85em; line-height: 1.07; color: var(--post-dim); margin-top: 4px; }
 .post-said {
-  font-size: 12px; color: var(--post-dim); background-color: var(--post-code);
+  font-size: 0.82em; color: var(--post-dim); background-color: var(--post-code);
   border-radius: 6px; padding: 4px 8px; margin: 8px 16px 0 0;
 }
 .post-links { margin-top: 12px; }
-.post-links button.link { padding: 2px 0; min-height: 0; font-size: 14px; font-weight: 700; color: var(--post-acc); }
+.post-links button.link { padding: 2px 0; min-height: 0; font-size: 0.95em; font-weight: 700; color: var(--post-acc); }
 .post-card-buttons { margin-top: 22px; margin-bottom: 8px; }
 
 button.post-wide { min-height: 44px; padding: 0 16px; margin-top: 10px; font-weight: 700; }
@@ -1749,14 +1749,14 @@ button.post-cancel { font-weight: 700; }
 .post-body > list.post-list.post-closed-list { margin-top: 26px; }
 .post-body > list.post-list.post-folders { margin-top: 23px; }
 .post-body > list.post-list.post-checks { margin-top: 15px; }
-list.post-list row label.title { font-size: 14.5px; }
-list.post-list row label.subtitle { font-size: 12.5px; }
+list.post-list row label.title { font-size: 0.99em; }
+list.post-list row label.subtitle { font-size: 0.85em; }
 list.post-list row > box.header > image,
 list.post-list row > box.header > box.prefixes image { color: var(--post-dim); }
 .post-list > row.post-check-row { min-height: 0; padding: 0; }
 .post-check { min-height: 47px; padding: 0 16px 0 17px; }
 .post-status > * { min-height: 0; min-width: 0; }
-.post-check-title { font-size: 14.5px; font-weight: 500; }
+.post-check-title { font-size: 0.99em; font-weight: 500; }
 .post-spinner { color: var(--post-acc); }
 list.post-servers > row > box.header { min-height: 0; padding-top: 0; padding-bottom: 0; margin: -3px 12px -3px; }
 list.post-servers > row { min-height: 0; }
@@ -1774,7 +1774,7 @@ list.post-field > row:focus-within label.subtitle { color: var(--post-acc); }
 .post-ring.not-listed { border: 1.6px dashed var(--post-faint); }
 .post-done { color: #16774a; }
 .app-dark .post-done { color: #6fdc9f; }
-.post-check-state { font-size: 13px; font-weight: 500; color: var(--post-dim); }
+.post-check-state { font-size: 0.89em; font-weight: 500; color: var(--post-dim); }
 .post-check-state.asking { color: var(--post-acc); }
 
 /* The browser wait. */
@@ -1783,14 +1783,14 @@ list.post-field > row:focus-within label.subtitle { color: var(--post-acc); }
 .post-step:last-child { margin-bottom: 0; }
 .post-step-number {
   min-width: 22px; min-height: 22px; border-radius: 11px;
-  font-size: 12.5px; font-weight: 800; color: var(--post-acc);
+  font-size: 0.85em; font-weight: 800; color: var(--post-acc);
   background-color: alpha(#a84000, 0.2);
 }
 .app-dark .post-step-number { background-color: alpha(#ffa35c, 0.3); }
-.post-step-text { font-size: 14px; line-height: 1.05; }
+.post-step-text { font-size: 0.95em; line-height: 1.05; }
 .post-waiting separator.post-rule { margin-top: 0; margin-bottom: 15px; }
-.post-wait-title { font-size: 14.5px; font-weight: 700; }
-.post-left { font-size: 13px; font-weight: 500; color: var(--post-dim); }
+.post-wait-title { font-size: 0.99em; font-weight: 700; }
+.post-left { font-size: 0.89em; font-weight: 500; color: var(--post-dim); }
 progressbar.post-progress > trough { min-height: 6px; border-radius: 3px; background-color: var(--post-pill); }
 progressbar.post-progress > trough > progress { min-height: 6px; border-radius: 3px; background-color: var(--post-acc); }
 .post-waiting progressbar.post-progress { margin-top: 8px; margin-bottom: 10px; }
@@ -1798,16 +1798,16 @@ progressbar.post-progress > trough > progress { min-height: 6px; border-radius: 
 /* The last page. */
 .post-folder { padding: 10px 16px 14px; }
 list.post-folders + .post-note { margin-top: 9px; }
-.post-folder-name { font-size: 14.5px; font-weight: 600; }
-.post-folder-state { font-size: 12.5px; font-weight: 500; color: var(--post-dim); }
+.post-folder-name { font-size: 0.99em; font-weight: 600; }
+.post-folder-state { font-size: 0.85em; font-weight: 500; color: var(--post-dim); }
 .post-folder progressbar.post-progress { margin: 5px 0 0 26px; }
 list.post-list > row.post-down .subtitle { color: var(--post-err); opacity: 1; }
 list.post-list row image.post-down-icon { color: var(--post-err); }
 .post-fields > list.post-list.post-tight { margin-top: 15px; }
 
 /* The first-run window. */
-.post-first-title { font-size: 26px; font-weight: 800; margin-top: 23px; }
-.post-first-lede { font-size: 14.5px; color: var(--post-dim); margin-top: 4px; }
+.post-first-title { font-size: 1.77em; font-weight: 800; margin-top: 23px; }
+.post-first-lede { font-size: 0.99em; color: var(--post-dim); margin-top: 4px; }
 .post-first .post-tiles { margin-top: 27px; margin-bottom: 32px; }
 .post-waiting .post-note { margin-top: 0; }
 list.post-closed-list > row > box.header { margin: -2px 12px -1px; }
