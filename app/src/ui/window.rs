@@ -952,14 +952,17 @@ impl MainWindow {
             stack.set_vexpand(true);
             let toasts = adw::ToastOverlay::new();
             toasts.set_child(Some(&content));
+            // The window opens at the mockup's size for Normal text, and
+            // grows with the text so the panes keep their shape.
+            let factor = text_factor_of(&Rc::downgrade(app));
             let window = adw::Window::builder()
                 .title(if app.core.demo {
                     gettext("Penguin Mail (Demo)")
                 } else {
                     gettext("Penguin Mail")
                 })
-                .default_width(1320)
-                .default_height(840)
+                .default_width((1320.0 * factor).round() as i32)
+                .default_height((840.0 * factor).round() as i32)
                 .width_request(360)
                 .height_request(480)
                 .content(&toasts)
