@@ -181,29 +181,55 @@ pub fn choose_with_body(
         .or_else(|| html.and_then(body_link).map(Unsubscribe::BodyLink))
 }
 
+/// Classes and ids a mail program puts on the quoted history or forwarded
+/// message it appends, as `app/src/quoted.rs` reads them.
+const HISTORY_CLASSES: [&str; 6] = [
+    "gmail_quote",
+    "gmail_quote_container",
+    "moz-forward-container",
+    "moz-cite-prefix",
+    "yahoo_quoted",
+    "protonmail_quote",
+];
+const HISTORY_IDS: [&str; 2] = ["divrplyfwdmsg", "appendonsend"];
+
 /// The first web link in `html` whose text or description reads as
-/// leaving a list.
+/// leaving a list, among what the writer wrote. A link in a quote or a
+/// forwarded message belongs to someone else's subscription.
 ///
-/// The reader walks `<a>` tags rather than parsing the document, which is
+/// The reader walks tags rather than parsing the document, which is
 /// what mail HTML allows: it is written by every marketing tool there is,
 /// and it does not have to be well formed to show a link.
 fn body_link(html: &str) -> Option<String> {
     // Tag and attribute names are ASCII, so lower-casing that way keeps
     // every position the same as in the original.
     let lower = html.to_ascii_lowercase();
+    let mut quoted = 0usize;
     let mut at = 0;
-    while let Some(found) = lower[at..].find("<a") {
+    while let Some(found) = lower[at..].find('<') {
         let open = at + found;
-        let mut after = lower[open + 2..].chars();
-        at = open + 2;
-        if !matches!(after.next(), Some(c) if c.is_ascii_whitespace() || c == '>') {
-            continue;
-        }
         let Some(shut) = lower[open..].find('>') else {
             break;
         };
-        let tag = &html[open + 2..open + shut];
+        let inner = &lower[open + 1..open + shut];
+        let name_end = inner
+            .char_indices()
+            .skip(1)
+            .find(|(_, c)| c.is_ascii_whitespace() || *c == '/')
+            .map_or(inner.len(), |(i, _)| i);
+        let tag = &html[open + 1 + name_end..open + shut];
         at = open + shut + 1;
+        if opens_history(&inner[name_end..]) {
+            break;
+        }
+        match &inner[..name_end] {
+            "blockquote" => quoted += 1,
+            "/blockquote" => quoted = quoted.saturating_sub(1),
+            _ => {}
+        }
+        if quoted > 0 || &inner[..name_end] != "a" {
+            continue;
+        }
         let end = lower[at..].find("</a").map_or(html.len(), |i| at + i);
         let Some(href) = attribute(tag, "href") else {
             continue;
@@ -221,6 +247,16 @@ fn body_link(html: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Whether a tag's lower-cased attributes mark the start of the history a
+/// mail program appends.
+fn opens_history(attributes: &str) -> bool {
+    attribute(attributes, "class").is_some_and(|class| {
+        class
+            .split_whitespace()
+            .any(|c| HISTORY_CLASSES.contains(&c))
+    }) || attribute(attributes, "id").is_some_and(|id| HISTORY_IDS.contains(&id.as_str()))
 }
 
 /// Whether `text` says, in either language, that the link leaves a list.
@@ -518,6 +554,42 @@ mod tests {
             Some(Unsubscribe::BodyLink(
                 "HTTPS://shop.example/o?a=1&b=2".into()
             ))
+        );
+    }
+
+    #[test]
+    fn a_body_link_in_a_quoted_reply_is_not_the_writers() {
+        let html = r#"<body>Sounds fun<div><blockquote type="cite">On Oct 22 wrote:
+            <blockquote type="cite"><p>Our news</p>
+            <a href="https://news.example/unsubscribe?e=9">Unsubscribe</a>
+            </blockquote></blockquote></div></body>"#;
+        assert_eq!(choose_with_body(None, false, Some(html)), None);
+    }
+
+    #[test]
+    fn a_body_link_in_a_forward_is_not_the_writers() {
+        let gmail = r#"<div dir="ltr"><div class="gmail_quote gmail_quote_container">
+            <div class="gmail_attr">---------- Forwarded message ---------</div>
+            <a href="https://news.example/unsubscribe?e=9">Unsubscribe</a></div></div>"#;
+        assert_eq!(choose_with_body(None, false, Some(gmail)), None);
+        let outlook = r#"<p>See below</p><hr><div id="divRplyFwdMsg"><b>From:</b> News</div>
+            <div><a href="https://news.example/o?e=9">Unsubscribe</a></div>"#;
+        assert_eq!(choose_with_body(None, false, Some(outlook)), None);
+    }
+
+    #[test]
+    fn a_body_link_above_or_after_a_quote_is_still_found() {
+        let above = r#"<a href="https://news.example/o">Unsubscribe</a>
+            <div class="gmail_quote"><a href="https://old.example/o">Unsubscribe</a></div>"#;
+        assert_eq!(
+            choose_with_body(None, false, Some(above)),
+            Some(Unsubscribe::BodyLink("https://news.example/o".into()))
+        );
+        let after = r#"<blockquote>A reader writes</blockquote>
+            <a href="https://news.example/o">Unsubscribe</a>"#;
+        assert_eq!(
+            choose_with_body(None, false, Some(after)),
+            Some(Unsubscribe::BodyLink("https://news.example/o".into()))
         );
     }
 }
