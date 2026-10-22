@@ -133,7 +133,7 @@ pub fn install(buffer: &gtk::TextBuffer) {
     add(gtk::TextTag::builder()
         .name("quote")
         .left_margin(26)
-        .foreground("#777777")
+        .foreground(crate::palette::quote())
         .style(pango::Style::Italic)
         .build());
     add(gtk::TextTag::builder()
@@ -153,7 +153,7 @@ pub fn link_tag(buffer: &gtk::TextBuffer, url: &str) -> gtk::TextTag {
     }
     let tag = gtk::TextTag::builder()
         .name(&name)
-        .foreground("#1c71d8")
+        .foreground(crate::palette::link())
         .underline(pango::Underline::Single)
         .build();
     buffer.tag_table().add(&tag);

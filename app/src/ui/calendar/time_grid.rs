@@ -664,7 +664,7 @@ mod imp {
             }
 
             if let Some((column, y)) = self.now_line(&days) {
-                let accent = adw::StyleManager::default().accent_color_rgba();
+                let accent = crate::palette::accent();
                 let x = super::GUTTER + column as f32 * column_width;
                 snapshot.append_color(&accent, &graphene::Rect::new(x, y - 1.0, column_width, 2.0));
                 let dot_bounds = graphene::Rect::new(x - 4.5, y - 4.5, 9.0, 9.0);

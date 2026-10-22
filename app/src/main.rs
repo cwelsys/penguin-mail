@@ -37,6 +37,7 @@ mod offered;
 mod old_id;
 mod open_thread;
 mod packaging;
+mod palette;
 mod permission;
 mod pgp;
 mod photos;
@@ -366,6 +367,7 @@ pub fn ensure_gtk() {
             &css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+        palette::load(&display);
         #[cfg(target_os = "macos")]
         {
             let css = gtk::CssProvider::new();

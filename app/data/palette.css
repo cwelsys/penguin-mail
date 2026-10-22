@@ -1,0 +1,103 @@
+/* The desktop's palette in place of the mockup's. Loaded after style.css
+   at a higher priority, so these rules win over upstream's without
+   matching its selectors' weight. Surfaces come from the named colours a
+   GTK theme or ~/.config/gtk-4.0/gtk.css defines; pills, lines and tints
+   are the text colour over whatever surface they sit on, so they follow
+   too. */
+
+window.app-surfaces {
+  --window-bg-color: @window_bg_color;
+  --sidebar-bg-color: @sidebar_bg_color;
+  --view-bg-color: @view_bg_color;
+}
+
+/* Pills, the mockup's #e3e3e7 and #3a3a40: a chip surface one step up
+   from what they sit on. */
+.category-chips > button.category-toggle,
+button.invitation-answer,
+button.invitation-pill,
+.calendar-arrows,
+.toolbar-capsule,
+menubutton.view-menu > button,
+popover.event-popover button.popover-join,
+popover.event-popover button.popover-answer:not(.suggested-action) {
+  background-color: alpha(currentColor, 0.1);
+}
+.category-chips > button.category-toggle:hover,
+button.invitation-answer:hover,
+button.invitation-pill:hover,
+popover.event-popover button.popover-join:hover,
+popover.event-popover button.popover-answer:not(.suggested-action):hover {
+  background-color: alpha(currentColor, 0.16);
+}
+.category-chips > button.category-toggle:checked,
+button.invitation-answer.suggested-action {
+  background-color: var(--accent-fill);
+}
+
+/* Lines and card borders. A card is a tonal surface with a faint edge
+   rather than an outlined box. */
+.invitation-card {
+  background-color: alpha(currentColor, 0.04);
+  border-color: alpha(currentColor, 0.06);
+  border-radius: 16px;
+}
+.translation-card,
+.queued-card,
+.pgp-card { border-color: alpha(currentColor, 0.06); }
+.strip-grid { border-color: alpha(currentColor, 0.07); }
+.strip-cell.hour { border-left-color: alpha(currentColor, 0.07); }
+.toolbar-capsule > * + * {
+  background-image: linear-gradient(
+    to bottom, transparent 25%, alpha(currentColor, 0.15) 25%,
+    alpha(currentColor, 0.15) 75%, transparent 75%);
+}
+
+popover.event-popover > contents { background-color: var(--popover-bg-color); }
+
+/* State colours from the palette. */
+.strip-verdict.free { color: var(--success-color); }
+.server-space-row .subtitle.nearly-full { color: var(--warning-color); }
+.server-space-row .subtitle.full { color: var(--error-color); }
+levelbar.server-space.nearly-full block.filled { background-color: var(--warning-bg-color); }
+levelbar.server-space.full block.filled { background-color: var(--error-bg-color); }
+.server-space-chip {
+  color: var(--error-color);
+  background-color: alpha(var(--error-bg-color), 0.18);
+}
+
+/* The selected mailbox as a navigation drawer marks it: a full pill. */
+.mailboxes > row { border-radius: 999px; }
+
+/* Catppuccin Mocha's hues for the flags, accounts and avatars in dark
+   mode. GNOME's palette is saturated for a white page and glares on a
+   dark one; avatars take dark letters, which read on the pastel fills. */
+.app-dark .flag-red { color: #f38ba8; }
+.app-dark .flag-orange { color: #fab387; }
+.app-dark .flag-yellow { color: #f9e2af; }
+.app-dark .flag-green { color: #a6e3a1; }
+.app-dark .flag-blue { color: #89b4fa; }
+.app-dark .flag-purple { color: #cba6f7; }
+.app-dark .flag-gray { color: #9399b2; }
+.app-dark .thread-row .vip.marker,
+.app-dark .sidebar-vip { color: #f9e2af; }
+
+.app-dark .account-0 { background: #89b4fa; }
+.app-dark .account-1 { background: #94e2d5; }
+.app-dark .account-2 { background: #a6e3a1; }
+.app-dark .account-3 { background: #f9e2af; }
+.app-dark .account-4 { background: #fab387; }
+.app-dark .account-5 { background: #f38ba8; }
+.app-dark .account-6 { background: #f5c2e7; }
+.app-dark .account-7 { background: #cba6f7; }
+.app-dark .account-8 { background: #9399b2; }
+
+.app-dark .avatar-hue-0 avatar { background-color: #89b4fa; color: #11111b; }
+.app-dark .avatar-hue-1 avatar { background-color: #94e2d5; color: #11111b; }
+.app-dark .avatar-hue-2 avatar { background-color: #a6e3a1; color: #11111b; }
+.app-dark .avatar-hue-3 avatar { background-color: #f9e2af; color: #11111b; }
+.app-dark .avatar-hue-4 avatar { background-color: #fab387; color: #11111b; }
+.app-dark .avatar-hue-5 avatar { background-color: #f38ba8; color: #11111b; }
+.app-dark .avatar-hue-6 avatar { background-color: #f5c2e7; color: #11111b; }
+.app-dark .avatar-hue-7 avatar { background-color: #cba6f7; color: #11111b; }
+.app-dark .avatar-hue-8 avatar { background-color: #9399b2; color: #11111b; }

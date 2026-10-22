@@ -1549,6 +1549,7 @@ impl ConversationView {
     pub fn render(&self, scroll: bool) {
         let theme = self.theme();
         crate::dark_messages::set_window_dark(theme.dark);
+        crate::palette::follow();
         let drawn = {
             let mut open = self.open.borrow_mut();
             let Some(open) = open.as_mut() else { return };
@@ -1577,6 +1578,7 @@ impl ConversationView {
         } else {
             gdk::RGBA::WHITE
         };
+        let background = crate::palette::view_bg().unwrap_or(background);
         self.webview.set_background(&background);
         match drawn.page {
             Page::Whole(document) => {

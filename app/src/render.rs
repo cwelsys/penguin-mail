@@ -176,7 +176,12 @@ pub fn head(conversation: &Head, theme: &Theme) -> String {
         "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'none'; \
          style-src 'unsafe-inline'{remote}; img-src data: mailrs-cid:{remote}; font-src data:{remote}\">"
     );
-    let _ = write!(html, "<style>{}</style></head><body>", page_css(theme));
+    let _ = write!(
+        html,
+        "<style>{}{}</style></head><body>",
+        page_css(theme),
+        crate::palette::page()
+    );
     html.push_str("<div id=\"mailrs-link-preview\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\" hidden></div>");
     let subject = if conversation.subject.trim().is_empty() {
         gettext("(no subject)")
