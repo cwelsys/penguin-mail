@@ -4047,6 +4047,7 @@ impl MainWindow {
                 }
                 super::text_scale::apply(settings.text_size);
                 self.scale_columns();
+                self.calendar.text_size_changed();
             }
             Effect::Contacts => {
                 self.list.photos_changed();
