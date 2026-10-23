@@ -188,7 +188,10 @@ pub fn tag_runs(from: &gtk::TextIter, to: &gtk::TextIter) -> Vec<(i32, Vec<gtk::
     runs
 }
 
-/// Puts `runs`, as [`tag_runs`] read them, on the text from offset `at`.
+/// Puts `runs`, as [`tag_runs`] read them, on the text from offset `at`,
+/// in place of the body tags there. Text goes in with the tags of the
+/// text around it, so words put back between two list markers would
+/// otherwise come back as markers.
 pub fn apply_runs(buffer: &gtk::TextBuffer, at: i32, runs: &[(i32, Vec<gtk::TextTag>)]) {
     let mut start = at;
     for (length, tags) in runs {
@@ -196,6 +199,11 @@ pub fn apply_runs(buffer: &gtk::TextBuffer, at: i32, runs: &[(i32, Vec<gtk::Text
             buffer.iter_at_offset(start),
             buffer.iter_at_offset(start + length),
         );
+        for (_, there) in tag_runs(&from, &to) {
+            for tag in there.iter().filter(|tag| !tags.contains(tag)) {
+                buffer.remove_tag(tag, &from, &to);
+            }
+        }
         for tag in tags {
             buffer.apply_tag(tag, &from, &to);
         }

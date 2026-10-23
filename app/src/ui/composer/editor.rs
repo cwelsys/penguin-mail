@@ -1749,6 +1749,7 @@ pub(super) mod checks {
         backspace_before_an_item_leaves_the_list();
         a_list_closes_up_the_blank_lines_between_its_items();
         a_list_takes_the_place_of_typed_markers();
+        undo_gives_a_deleted_list_its_words_back();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2596,6 +2597,31 @@ pub(super) mod checks {
         editor.list(BlockKind::Numbered);
         assert_eq!(screen(&editor), "1. typed\n2. by hand\n3. dashed");
         assert_eq!(editor.rich().to_plain(), "1. typed\n2. by hand\n3. dashed");
+    }
+
+    fn undo_gives_a_deleted_list_its_words_back() {
+        let (view, editor) = opened("");
+        editor
+            .buffer
+            .set_text("Where things stand\nLeaving: wait\nBilling: June");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Bullet);
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        view.emit_by_name::<()>("backspace", &[]);
+        editor.buffer.undo();
+        assert_eq!(
+            editor.rich().to_plain(),
+            "- Where things stand\n- Leaving: wait\n- Billing: June"
+        );
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Quote);
+        assert_eq!(
+            editor.rich().to_plain(),
+            "> Where things stand\n> Leaving: wait\n> Billing: June"
+        );
     }
 
     /// The buffer's text as the writer sees it, list markers and all.
