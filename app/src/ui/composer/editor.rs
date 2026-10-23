@@ -93,6 +93,10 @@ pub struct Editor {
     on_described: RefCell<Option<Box<dyn Fn()>>>,
     /// True while an Undo or Redo changes the buffer.
     replaying: Cell<bool>,
+    /// True between the buffer's outermost begin and end of a user action.
+    in_action: Cell<bool>,
+    /// True when the buffer changed during the user action under way.
+    edited_in_action: Cell<bool>,
     /// Where the history the writer unfolded starts in the buffer, and
     /// its blocks, to style them again after a Redo.
     history_start: RefCell<Option<(gtk::TextMark, RichBody)>>,
@@ -126,6 +130,8 @@ impl Editor {
             describing: RefCell::new(None),
             on_described: RefCell::new(None),
             replaying: Cell::new(false),
+            in_action: Cell::new(false),
+            edited_in_action: Cell::new(false),
             history_start: RefCell::new(None),
             touched: Cell::new(None),
             #[cfg(test)]
@@ -178,10 +184,33 @@ impl Editor {
                 });
             }
         }
+        // GTK's interactive delete walks the selection with an iterator
+        // it keeps across each deletion, so a renumbered marker in the
+        // middle of one leaves that iterator stale and the walk never
+        // ends. The edit waits for the action to end, which is still
+        // inside its step of Undo.
+        let weak = Rc::downgrade(self);
+        self.buffer.connect_begin_user_action(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                editor.in_action.set(true);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.buffer.connect_end_user_action(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                editor.in_action.set(false);
+                if editor.edited_in_action.replace(false) {
+                    editor.after_edit();
+                }
+            }
+        });
         let weak = Rc::downgrade(self);
         self.buffer.connect_changed(move |_| {
             if let Some(editor) = weak.upgrade() {
-                editor.after_edit();
+                match editor.in_action.get() {
+                    true => editor.edited_in_action.set(true),
+                    false => editor.after_edit(),
+                }
             }
         });
         // After GTK's own handler, once the text is back.
@@ -1616,6 +1645,7 @@ pub(super) mod checks {
         a_link_goes_where_the_held_words_were();
         the_body_moves_to_markdown_and_back();
         clearing_formatting_takes_the_list_markers_too();
+        deleting_across_list_markers_finishes();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2365,6 +2395,13 @@ pub(super) mod checks {
         select(&editor, 3, 5);
         editor.clear();
         assert_eq!(editor.rich().to_plain(), "one\n1. two\n2. three");
+    }
+
+    fn deleting_across_list_markers_finishes() {
+        let (_view, editor) = opened("1. one\n2. two\n3. three");
+        select(&editor, 4, 18);
+        assert!(editor.buffer.delete_selection(true, true));
+        assert_eq!(editor.rich().to_plain(), "1. ohree");
     }
 
     fn markdown_signature_quotes_follow_the_sender() {
