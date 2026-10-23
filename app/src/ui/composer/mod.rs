@@ -1121,7 +1121,8 @@ impl Composer {
         self.body.add_controller(formatting);
 
         // Enter carries a list on, and leaves it when the line is empty.
-        // Backspace before an item's words leaves the list.
+        // Backspace before an item's words leaves the list, and so do
+        // Backspace and Delete on a selection of nothing but its marker.
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = Rc::downgrade(self);
@@ -1135,6 +1136,7 @@ impl Composer {
             let handled = match key {
                 gdk::Key::Return | gdk::Key::KP_Enter => c.editor.enter(),
                 gdk::Key::BackSpace => c.editor.backspace(),
+                gdk::Key::Delete | gdk::Key::KP_Delete => c.editor.delete(),
                 _ => false,
             };
             if !handled {

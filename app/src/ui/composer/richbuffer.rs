@@ -456,11 +456,23 @@ fn holds_other_kind(start: &gtk::TextIter, end: &gtk::TextIter, wanted: &str) ->
     false
 }
 
-/// Deletes the markers on `line` past the one it starts with.
+/// Deletes the markers on `line` past the one it starts with. Markers
+/// that end up side by side share one run of the tag, and each ends in
+/// its one space, so the first space ends the one to keep.
 fn drop_stray_markers(buffer: &gtk::TextBuffer, line: i32) {
     let Some(tag) = buffer.tag_table().lookup(MARKER) else {
         return;
     };
+    if let Some((start, _)) = line_bounds(buffer, line) {
+        let mut lead = text_start(buffer, line);
+        let marker = buffer.text(&start, &lead, false);
+        if let Some(space) = marker.chars().position(|c| c == ' ')
+            && space + 1 < marker.chars().count()
+        {
+            let mut from = buffer.iter_at_offset(start.offset() + space as i32 + 1);
+            buffer.delete(&mut from, &mut lead);
+        }
+    }
     loop {
         let Some((_, end)) = line_bounds(buffer, line) else {
             return;

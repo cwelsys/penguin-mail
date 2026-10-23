@@ -893,15 +893,24 @@ impl Editor {
         true
     }
 
-    /// Backspace before a list item's words: the line leaves the list, as
-    /// its marker cannot be deleted. False when Backspace should do what it
-    /// always does.
+    /// Backspace before a list item's words, or on a selection of nothing
+    /// but its marker: the line leaves the list, as its marker cannot be
+    /// deleted. False when Backspace should do what it always does.
     pub fn backspace(&self) -> bool {
-        if self.format.get() != ComposeFormat::Rich || self.buffer.has_selection() {
+        if self.format.get() != ComposeFormat::Rich {
             return false;
         }
         let buffer = &self.buffer;
-        let cursor = buffer.iter_at_mark(&buffer.get_insert());
+        let cursor = match buffer.selection_bounds() {
+            None => buffer.iter_at_mark(&buffer.get_insert()),
+            Some((start, end))
+                if start.line() == end.line()
+                    && end <= richbuffer::text_start(buffer, start.line()) =>
+            {
+                start
+            }
+            Some(_) => return false,
+        };
         let line = cursor.line();
         let kind = richbuffer::kind_at(buffer, line);
         if !matches!(kind, BlockKind::Bullet | BlockKind::Numbered)
@@ -917,6 +926,12 @@ impl Editor {
         buffer.end_user_action();
         self.busy.set(false);
         true
+    }
+
+    /// Delete on a selection of nothing but a list item's marker, which
+    /// takes the line out of the list as Backspace does there.
+    pub fn delete(&self) -> bool {
+        self.buffer.has_selection() && self.backspace()
     }
 
     /// Moves the body to the other way of writing. Rich text reads the
@@ -1750,6 +1765,7 @@ pub(super) mod checks {
         a_list_closes_up_the_blank_lines_between_its_items();
         a_list_takes_the_place_of_typed_markers();
         undo_gives_a_deleted_list_its_words_back();
+        deleting_a_whole_list_leaves_one_empty_item();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2622,6 +2638,23 @@ pub(super) mod checks {
             editor.rich().to_plain(),
             "> Where things stand\n> Leaving: wait\n> Billing: June"
         );
+    }
+
+    fn deleting_a_whole_list_leaves_one_empty_item() {
+        let (view, editor) = opened("- one\n- two\n- three");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        view.emit_by_name::<()>("backspace", &[]);
+        assert_eq!(screen(&editor), "• ");
+        assert!(editor.backspace());
+        assert_eq!(screen(&editor), "");
+        let (view, editor) = opened("1. one\n2. two");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        view.emit_by_name::<()>("delete-from-cursor", &[&gtk::DeleteType::Chars, &1i32]);
+        assert_eq!(screen(&editor), "1. ");
+        assert!(editor.delete());
+        assert_eq!(screen(&editor), "");
     }
 
     /// The buffer's text as the writer sees it, list markers and all.
