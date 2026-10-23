@@ -702,21 +702,61 @@ impl Editor {
         self.set_block_lines(kind, false);
     }
 
+    /// A list made of separate lines closes up the blank lines between
+    /// them, since a blank line would end the list and start the count
+    /// again, and takes the place of the markers typed at their starts.
     fn set_block_lines(&self, kind: BlockKind, toggles: bool) {
         let buffer = &self.buffer;
         let (first, last) = self.lines_touched();
-        let same = (first..=last).all(|line| richbuffer::kind_at(buffer, line) == kind);
+        let list = matches!(kind, BlockKind::Bullet | BlockKind::Numbered);
+        let blank = |line: i32| list && first < last && richbuffer::is_empty_line(buffer, line);
+        let written: Vec<i32> = (first..=last).filter(|line| !blank(*line)).collect();
+        let same = written
+            .iter()
+            .all(|line| richbuffer::kind_at(buffer, *line) == kind);
         let wanted = if toggles && same {
             BlockKind::Paragraph
         } else {
             kind
         };
+        let making = wanted == kind && list;
+        let between = |line: i32| {
+            written.first().is_some_and(|top| *top < line)
+                && written.last().is_some_and(|bottom| line < *bottom)
+        };
         self.busy.set(true);
         buffer.begin_user_action();
-        for line in first..=last {
+        let mut kept = last;
+        for line in (first..=last).rev() {
+            if making && blank(line) {
+                if between(line) {
+                    let mut from = buffer
+                        .iter_at_line(line)
+                        .unwrap_or_else(|| buffer.end_iter());
+                    let mut to = from;
+                    to.forward_line();
+                    buffer.delete(&mut from, &mut to);
+                    kept -= 1;
+                }
+                continue;
+            }
+            if making
+                && !matches!(
+                    richbuffer::kind_at(buffer, line),
+                    BlockKind::Bullet | BlockKind::Numbered
+                )
+            {
+                let mut from = richbuffer::text_start(buffer, line);
+                let text = buffer.text(&from, &line_end(buffer, line), false);
+                if let Some(typed) = stray_markdown::list_prefix(&text) {
+                    let mut to =
+                        buffer.iter_at_offset(from.offset() + text[..typed].chars().count() as i32);
+                    buffer.delete(&mut from, &mut to);
+                }
+            }
             richbuffer::set_kind(buffer, line, wanted);
         }
-        richbuffer::renumber(buffer, first, last);
+        richbuffer::renumber(buffer, first, kept);
         buffer.end_user_action();
         self.busy.set(false);
     }
@@ -1707,6 +1747,8 @@ pub(super) mod checks {
         joined_lines_keep_one_marker();
         undo_leaves_no_list_without_its_markers();
         backspace_before_an_item_leaves_the_list();
+        a_list_closes_up_the_blank_lines_between_its_items();
+        a_list_takes_the_place_of_typed_markers();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2518,6 +2560,42 @@ pub(super) mod checks {
         let (_view, editor) = opened("one\ntwo");
         cursor_at(&editor, 4);
         assert!(!editor.backspace());
+    }
+
+    fn a_list_closes_up_the_blank_lines_between_its_items() {
+        let (_view, editor) = opened("alpha\n\nbeta\n\ngamma");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Numbered);
+        assert_eq!(screen(&editor), "1. alpha\n2. beta\n3. gamma");
+        editor.buffer.undo();
+        assert_eq!(screen(&editor), "alpha\n\nbeta\n\ngamma");
+        assert_eq!(editor.rich().to_plain(), "alpha\n\nbeta\n\ngamma");
+        // A blank line in a selection of list items does not stop the
+        // list coming off again.
+        let (_view, editor) = opened("1. one\n2. two");
+        cursor_at(&editor, 6);
+        assert!(editor.enter());
+        assert_eq!(screen(&editor), "1. one\n2. \n3. two");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Numbered);
+        assert_eq!(screen(&editor), "one\n\ntwo");
+        // An empty line on its own starts a list.
+        let (_view, editor) = opened("one\n\ntwo");
+        cursor_at(&editor, 4);
+        editor.list(BlockKind::Numbered);
+        assert_eq!(screen(&editor), "one\n1. \ntwo");
+    }
+
+    fn a_list_takes_the_place_of_typed_markers() {
+        let (_view, editor) = opened("");
+        editor.buffer.set_text("1. typed\n2) by hand\n- dashed");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Numbered);
+        assert_eq!(screen(&editor), "1. typed\n2. by hand\n3. dashed");
+        assert_eq!(editor.rich().to_plain(), "1. typed\n2. by hand\n3. dashed");
     }
 
     /// The buffer's text as the writer sees it, list markers and all.

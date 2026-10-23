@@ -69,13 +69,20 @@ fn is_heading(line: &str) -> bool {
 
 /// `- item`, `* item`, `+ item`, `1. item` or `1) item`.
 fn is_list_line(line: &str) -> bool {
+    list_prefix(line).is_some()
+}
+
+/// How many characters the list marker typed at the start of `line`
+/// takes, with the spaces after it, when `line` is a list line.
+pub fn list_prefix(line: &str) -> Option<usize> {
     let digits = line.chars().take_while(char::is_ascii_digit).count();
     let rest = match digits {
         0 => line.strip_prefix(['-', '*', '+']),
         1..=9 => line[digits..].strip_prefix(['.', ')']),
         _ => None,
-    };
-    rest.is_some_and(|rest| rest.starts_with(' ') && !rest.trim().is_empty())
+    }?;
+    let spaces = rest.chars().take_while(|c| *c == ' ').count();
+    (spaces > 0 && !rest.trim().is_empty()).then(|| line.len() - rest.len() + spaces)
 }
 
 /// The line under a table's header: `---|---`, with or without the
@@ -320,6 +327,16 @@ mod tests {
     fn a_heading_line_is_markdown() {
         assert!(reads_as_markdown("# Plan\n\nWe ship on Friday."));
         assert!(reads_as_markdown("Notes\n\n### Next steps"));
+    }
+
+    #[test]
+    fn a_typed_list_marker_is_measured_with_its_spaces() {
+        assert_eq!(list_prefix("1. one"), Some(3));
+        assert_eq!(list_prefix("10) ten"), Some(4));
+        assert_eq!(list_prefix("-  two spaces"), Some(3));
+        assert_eq!(list_prefix("1.5 kg of flour"), None);
+        assert_eq!(list_prefix("-dash"), None);
+        assert_eq!(list_prefix("- "), None);
     }
 
     #[test]
