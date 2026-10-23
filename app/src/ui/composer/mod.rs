@@ -1121,6 +1121,7 @@ impl Composer {
         self.body.add_controller(formatting);
 
         // Enter carries a list on, and leaves it when the line is empty.
+        // Backspace before an item's words leaves the list.
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = Rc::downgrade(self);
@@ -1128,10 +1129,15 @@ impl Composer {
             let Some(c) = weak.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            if !matches!(key, gdk::Key::Return | gdk::Key::KP_Enter)
-                || modifiers.contains(crate::ui::PRIMARY)
-                || !c.editor.enter()
-            {
+            if modifiers.contains(crate::ui::PRIMARY) {
+                return glib::Propagation::Proceed;
+            }
+            let handled = match key {
+                gdk::Key::Return | gdk::Key::KP_Enter => c.editor.enter(),
+                gdk::Key::BackSpace => c.editor.backspace(),
+                _ => false,
+            };
+            if !handled {
                 return glib::Propagation::Proceed;
             }
             c.dirty.set(true);

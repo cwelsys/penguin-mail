@@ -853,6 +853,32 @@ impl Editor {
         true
     }
 
+    /// Backspace before a list item's words: the line leaves the list, as
+    /// its marker cannot be deleted. False when Backspace should do what it
+    /// always does.
+    pub fn backspace(&self) -> bool {
+        if self.format.get() != ComposeFormat::Rich || self.buffer.has_selection() {
+            return false;
+        }
+        let buffer = &self.buffer;
+        let cursor = buffer.iter_at_mark(&buffer.get_insert());
+        let line = cursor.line();
+        let kind = richbuffer::kind_at(buffer, line);
+        if !matches!(kind, BlockKind::Bullet | BlockKind::Numbered)
+            || cursor > richbuffer::text_start(buffer, line)
+        {
+            return false;
+        }
+        self.busy.set(true);
+        buffer.begin_user_action();
+        richbuffer::set_kind(buffer, line, BlockKind::Paragraph);
+        richbuffer::renumber(buffer, line, line + 1);
+        buffer.place_cursor(&richbuffer::text_start(buffer, line));
+        buffer.end_user_action();
+        self.busy.set(false);
+        true
+    }
+
     /// Moves the body to the other way of writing. Rich text reads the
     /// buffer's text as Markdown and styles it, which is also how Format
     /// Markdown works while already in rich text. Markdown writes the
@@ -1680,6 +1706,7 @@ pub(super) mod checks {
         deleting_across_list_markers_finishes();
         joined_lines_keep_one_marker();
         undo_leaves_no_list_without_its_markers();
+        backspace_before_an_item_leaves_the_list();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2472,6 +2499,25 @@ pub(super) mod checks {
         editor.buffer.undo();
         assert_eq!(screen(&editor), "alpha\n\nbeta");
         assert_eq!(editor.rich().to_plain(), "alpha\n\nbeta");
+    }
+
+    fn backspace_before_an_item_leaves_the_list() {
+        let (_view, editor) = opened("1. one\n2. two\n3. three");
+        cursor_at(&editor, 10);
+        assert!(editor.backspace());
+        assert_eq!(screen(&editor), "1. one\ntwo\n1. three");
+        assert_eq!(editor.rich().to_plain(), "1. one\ntwo\n1. three");
+        let (_view, editor) = opened("- one\n- two");
+        cursor_at(&editor, 0);
+        assert!(editor.backspace());
+        assert_eq!(screen(&editor), "one\n• two");
+        // Inside the words, or on a plain line, Backspace is GTK's.
+        let (_view, editor) = opened("1. one");
+        cursor_at(&editor, 5);
+        assert!(!editor.backspace());
+        let (_view, editor) = opened("one\ntwo");
+        cursor_at(&editor, 4);
+        assert!(!editor.backspace());
     }
 
     /// The buffer's text as the writer sees it, list markers and all.
