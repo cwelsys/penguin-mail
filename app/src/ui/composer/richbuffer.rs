@@ -376,6 +376,99 @@ pub fn renumber(buffer: &gtk::TextBuffer, first: i32, last: i32) -> usize {
     looked
 }
 
+/// Makes lines `first` to `last` agree with their kind, then counts the
+/// numbered lists again. A list line starts with its marker and holds no
+/// other, any other line holds none, and the line's kind covers all of
+/// it. Returns how many lines it looked at.
+///
+/// GTK deletes around the markers the writer cannot edit, so a deletion
+/// that joins two lines leaves the second line's marker inside the first.
+/// GTK's Undo puts text back but not tags, so a line can keep a list's
+/// kind after its marker is gone. With `text` false only that is put
+/// right, which is all an Undo or a Redo leaves room for: text changed
+/// then would put GTK's history out of step with the buffer, and the
+/// editor gives back the other tags itself.
+pub fn tidy(buffer: &gtk::TextBuffer, first: i32, last: i32, text: bool) -> usize {
+    let count = buffer.line_count();
+    let (first, last) = (first.clamp(0, count - 1), last.clamp(0, count - 1));
+    for line in first..=last {
+        if text {
+            drop_stray_markers(buffer, line);
+        }
+        let Some((start, _)) = line_bounds(buffer, line) else {
+            continue;
+        };
+        let marked = text_start(buffer, line).offset() > start.offset();
+        let tagged = kind_at(buffer, line);
+        let kind = match tagged {
+            BlockKind::Bullet | BlockKind::Numbered if !marked => BlockKind::Paragraph,
+            _ if !text => continue,
+            kind => kind,
+        };
+        if text && marked && marker_text(kind, 1).is_none() {
+            let (mut from, mut to) = (start, text_start(buffer, line));
+            buffer.delete(&mut from, &mut to);
+        }
+        // Text goes in with the tags around it, so a line is tagged only
+        // when it holds another kind, and a Redo's text takes no stray one.
+        let wanted = block_tag(kind);
+        if let Some((start, end)) = line_bounds(buffer, line)
+            && (kind != tagged || holds_other_kind(&start, &end, wanted))
+        {
+            for tag in BLOCKS.iter().filter(|tag| **tag != wanted) {
+                buffer.remove_tag_by_name(tag, &start, &end);
+            }
+            buffer.apply_tag_by_name(wanted, &start, &end);
+        }
+    }
+    // The list after the last line may have lost its first item to it.
+    let looked = (last - first + 1) as usize;
+    match text {
+        true => looked + renumber(buffer, first, last + 1),
+        false => looked,
+    }
+}
+
+/// Whether any text from `start` to `end` carries a line kind's tag
+/// other than `wanted`.
+fn holds_other_kind(start: &gtk::TextIter, end: &gtk::TextIter, wanted: &str) -> bool {
+    let mut at = *start;
+    while at < *end {
+        let other = at.tags().iter().any(|tag| {
+            tag.name()
+                .is_some_and(|name| name != wanted && BLOCKS.contains(&name.as_str()))
+        });
+        if other {
+            return true;
+        }
+        if !at.forward_to_tag_toggle(None::<&gtk::TextTag>) {
+            break;
+        }
+    }
+    false
+}
+
+/// Deletes the markers on `line` past the one it starts with.
+fn drop_stray_markers(buffer: &gtk::TextBuffer, line: i32) {
+    let Some(tag) = buffer.tag_table().lookup(MARKER) else {
+        return;
+    };
+    loop {
+        let Some((_, end)) = line_bounds(buffer, line) else {
+            return;
+        };
+        let mut from = text_start(buffer, line);
+        if !from.forward_to_tag_toggle(Some(&tag)) || from >= end {
+            return;
+        }
+        let mut to = from;
+        if !to.forward_to_tag_toggle(Some(&tag)) || to > end {
+            to = end;
+        }
+        buffer.delete(&mut from, &mut to);
+    }
+}
+
 /// The whole buffer as a rich body.
 ///
 /// It reads a run of characters at a time, from one tag toggle to the

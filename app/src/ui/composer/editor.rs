@@ -93,6 +93,8 @@ pub struct Editor {
     on_described: RefCell<Option<Box<dyn Fn()>>>,
     /// True while an Undo or Redo changes the buffer.
     replaying: Cell<bool>,
+    /// The lines an Undo or a Redo under way has changed.
+    replayed: Cell<Option<(i32, i32)>>,
     /// True between the buffer's outermost begin and end of a user action.
     in_action: Cell<bool>,
     /// True when the buffer changed during the user action under way.
@@ -130,6 +132,7 @@ impl Editor {
             describing: RefCell::new(None),
             on_described: RefCell::new(None),
             replaying: Cell::new(false),
+            replayed: Cell::new(None),
             in_action: Cell::new(false),
             edited_in_action: Cell::new(false),
             history_start: RefCell::new(None),
@@ -221,6 +224,15 @@ impl Editor {
             }
             None
         });
+        for signal in ["undo", "redo"] {
+            let weak = Rc::downgrade(self);
+            self.buffer.connect_local(signal, true, move |_| {
+                if let Some(editor) = weak.upgrade() {
+                    editor.tidy_replayed();
+                }
+                None
+            });
+        }
         let weak = Rc::downgrade(self);
         self.buffer.connect_cursor_position_notify(move |_| {
             if let Some(editor) = weak.upgrade() {
@@ -1486,12 +1498,32 @@ impl Editor {
         }
         // Undo and Redo bring the markers back as text with the rest, and
         // a change of ours in between would leave GTK's history out of
-        // step with the buffer.
-        if !replaying {
-            let _looked = richbuffer::renumber(buffer, first, last);
+        // step with the buffer. Their lines are tidied once they are done.
+        if replaying {
+            let replayed = match self.replayed.get() {
+                Some((from, to)) => (from.min(first), to.max(last)),
+                None => (first, last),
+            };
+            self.replayed.set(Some(replayed));
+        } else {
+            let _looked = richbuffer::tidy(buffer, first, last, true);
             #[cfg(test)]
             self.looked_at.set(self.looked_at.get() + _looked);
         }
+        self.busy.set(false);
+    }
+
+    /// Gives the lines an Undo or a Redo changed the kinds their text
+    /// says they have.
+    fn tidy_replayed(&self) {
+        let Some((first, last)) = self.replayed.take() else {
+            return;
+        };
+        if self.format.get() != ComposeFormat::Rich {
+            return;
+        }
+        self.busy.set(true);
+        richbuffer::tidy(&self.buffer, first, last, false);
         self.busy.set(false);
     }
 
@@ -1646,6 +1678,8 @@ pub(super) mod checks {
         the_body_moves_to_markdown_and_back();
         clearing_formatting_takes_the_list_markers_too();
         deleting_across_list_markers_finishes();
+        joined_lines_keep_one_marker();
+        undo_leaves_no_list_without_its_markers();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2402,6 +2436,50 @@ pub(super) mod checks {
         select(&editor, 4, 18);
         assert!(editor.buffer.delete_selection(true, true));
         assert_eq!(editor.rich().to_plain(), "1. ohree");
+    }
+
+    fn joined_lines_keep_one_marker() {
+        let (_view, editor) = opened("1. one\n2. two\n3. three");
+        select(&editor, 4, 18);
+        editor.buffer.delete_selection(true, true);
+        assert_eq!(screen(&editor), "1. ohree");
+        assert_eq!(editor.rich().to_plain(), "1. ohree");
+        // Delete at the end of an item takes the next item's words up.
+        let (_view, editor) = opened("1. one\n2. two\n3. three");
+        let (mut from, mut to) = (
+            editor.buffer.iter_at_offset(6),
+            editor.buffer.iter_at_offset(7),
+        );
+        editor.buffer.delete_interactive(&mut from, &mut to, true);
+        assert_eq!(screen(&editor), "1. onetwo\n2. three");
+        assert_eq!(editor.rich().to_plain(), "1. onetwo\n2. three");
+        // A paragraph that takes up an item's words stays a paragraph.
+        let (_view, editor) = opened("para\n\n1. one\n2. two");
+        let (mut from, mut to) = (
+            editor.buffer.iter_at_offset(4),
+            editor.buffer.iter_at_offset(9),
+        );
+        editor.buffer.delete_interactive(&mut from, &mut to, true);
+        assert_eq!(screen(&editor), "paraone\n1. two");
+        assert_eq!(editor.rich().to_plain(), "paraone\n1. two");
+    }
+
+    fn undo_leaves_no_list_without_its_markers() {
+        let (_view, editor) = opened("alpha\n\nbeta");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Numbered);
+        editor.buffer.undo();
+        assert_eq!(screen(&editor), "alpha\n\nbeta");
+        assert_eq!(editor.rich().to_plain(), "alpha\n\nbeta");
+    }
+
+    /// The buffer's text as the writer sees it, list markers and all.
+    fn screen(editor: &Editor) -> String {
+        let buffer = &editor.buffer;
+        buffer
+            .text(&buffer.start_iter(), &buffer.end_iter(), true)
+            .to_string()
     }
 
     fn markdown_signature_quotes_follow_the_sender() {
