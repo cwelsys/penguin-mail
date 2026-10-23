@@ -392,10 +392,10 @@ pub fn renumber(buffer: &gtk::TextBuffer, first: i32, last: i32) -> usize {
 /// GTK deletes around the markers the writer cannot edit, so a deletion
 /// that joins two lines leaves the second line's marker inside the first.
 /// GTK's Undo puts text back but not tags, so a line can keep a list's
-/// kind after its marker is gone. With `text` false only that is put
-/// right, which is all an Undo or a Redo leaves room for: text changed
-/// then would put GTK's history out of step with the buffer, and the
-/// editor gives back the other tags itself.
+/// kind after its marker is gone, or a marker that came back can sit on
+/// a line whose words keep another kind. With `text` false only tags
+/// change, which is all an Undo or a Redo leaves room for: text changed
+/// then would put GTK's history out of step with the buffer.
 pub fn tidy(buffer: &gtk::TextBuffer, first: i32, last: i32, text: bool) -> usize {
     let count = buffer.line_count();
     let (first, last) = (first.clamp(0, count - 1), last.clamp(0, count - 1));
@@ -410,7 +410,6 @@ pub fn tidy(buffer: &gtk::TextBuffer, first: i32, last: i32, text: bool) -> usiz
         let tagged = kind_at(buffer, line);
         let kind = match tagged {
             BlockKind::Bullet | BlockKind::Numbered if !marked => BlockKind::Paragraph,
-            _ if !text => continue,
             kind => kind,
         };
         if text && marked && marker_text(kind, 1).is_none() {

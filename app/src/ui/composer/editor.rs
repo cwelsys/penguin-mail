@@ -1766,6 +1766,7 @@ pub(super) mod checks {
         a_list_takes_the_place_of_typed_markers();
         undo_gives_a_deleted_list_its_words_back();
         deleting_a_whole_list_leaves_one_empty_item();
+        undo_takes_a_quote_off_a_list_again();
         a_new_signature_leaves_the_cursor_and_undo_alone();
         a_new_signature_keeps_the_quote_below_it();
         markdown_signature_quotes_follow_the_sender();
@@ -2655,6 +2656,20 @@ pub(super) mod checks {
         assert_eq!(screen(&editor), "1. ");
         assert!(editor.delete());
         assert_eq!(screen(&editor), "");
+    }
+
+    fn undo_takes_a_quote_off_a_list_again() {
+        let (_view, editor) = opened("- one\n- two");
+        let end = editor.buffer.end_iter().offset();
+        select(&editor, 0, end);
+        editor.list(BlockKind::Quote);
+        editor.buffer.undo();
+        assert_eq!(screen(&editor), "• one\n• two");
+        let quote = editor.buffer.tag_table().lookup("quote").unwrap();
+        let mut at = editor.buffer.start_iter();
+        while at.forward_char() {
+            assert!(!at.has_tag(&quote), "quoted at {}", at.offset());
+        }
     }
 
     /// The buffer's text as the writer sees it, list markers and all.
