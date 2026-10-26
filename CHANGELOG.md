@@ -16,6 +16,9 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 
 ### Fixed
 
+- Google Calendar edits can switch events between timed and all-day without reverting.
+- Microsoft 365 searches show each matching message once and open mail outside the local sync window.
+- Message list settings, sender signature settings, and Empty Trash controls now appear in Traditional Chinese.
 - A conversation opened in its own window keeps working after the main window closes, instead of vanishing when the app goes to the background a minute later.
 - A message with no Date header shows no date instead of 1 January 1970.
 - With Attachments includes queued messages with files in Send Later and Outbox, even right after scheduling them.
