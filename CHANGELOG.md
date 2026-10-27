@@ -7,8 +7,10 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 
 ### New
 
+- New ways to sign in to Gmail: a Google project of your own, set up step by step inside Penguin Mail, or this computer's Online Accounts on Linux or a password from Google.
+- Adding a Google account asks how it signs in, and lists the ways this computer offers.
+- A Gmail account made before keeps working, and signs in again through your own Google project when it has to.
 - Download recent Inbox message text in the background for faster opening and offline reading, with an optional limit in Sync preferences.
-
 - Filter the message list to unread mail, flagged mail, or mail with attachments.
 - Open .eml files from Files or the command line, and messages attached to other messages, in a window of their own, with Reply and Forward.
 - Choose message preview lines, hide avatars, and control bold text for unread messages and senders.
@@ -17,6 +19,9 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 - Empty Trash from its mailbox menu, including older mail outside the local cache, with bounded memory use and a fresh check before each delete batch.
 
 ### Fixed
+
+- Choose where to save a single attachment, including in Flatpak, and see errors when its default application cannot open it.
+- Show shared and group calendars discovered through CalDAV or JMAP, with their read-only and editing permissions.
 
 - Google Calendar edits can switch events between timed and all-day without reverting.
 - Microsoft 365 searches show each matching message once and open mail outside the local sync window.
