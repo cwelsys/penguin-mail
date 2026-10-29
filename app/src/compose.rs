@@ -552,34 +552,25 @@ pub fn forwarded_file(
     }
 }
 
-/// Plain text ready to render as Markdown: every character that Markdown
-/// reads as syntax is escaped, so a line of dashes stays a line of dashes
-/// and `*` keeps its asterisks.
+/// Plain text ready to render as Markdown: what Markdown reads as syntax
+/// is escaped, so a line of dashes stays a line of dashes and `*` keeps
+/// its asterisks. Only what counts is escaped, because a writer in
+/// Markdown and the text part see this text as it is: a mark that opens
+/// a block is escaped at the start of its line, a number's `.` or `)`
+/// where it would open a list, a run's marks wherever they fall, and an
+/// `&` where it would read as a character reference.
 fn plain_as_markdown(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + text.len() / 8);
     for line in text.replace("\r\n", "\n").lines() {
-        for ch in line.chars() {
-            if matches!(
-                ch,
-                '\\' | '`'
-                    | '*'
-                    | '_'
-                    | '{'
-                    | '}'
-                    | '['
-                    | ']'
-                    | '('
-                    | ')'
-                    | '#'
-                    | '+'
-                    | '-'
-                    | '.'
-                    | '!'
-                    | '>'
-                    | '|'
-                    | '~'
-                    | '='
-            ) {
+        let words = line.trim_start();
+        out.push_str(&line[..line.len() - words.len()]);
+        let digits = words.bytes().take_while(u8::is_ascii_digit).count();
+        let list_mark = (digits > 0 && words[digits..].starts_with(['.', ')'])).then_some(digits);
+        for (at, ch) in words.char_indices() {
+            let opens_block = at == 0 && matches!(ch, '#' | '>' | '-' | '+' | '=' | '|' | ':');
+            let styles = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '~');
+            let reference = ch == '&' && character_reference_follows(&words[at..]);
+            if opens_block || list_mark == Some(at) || styles || reference {
                 out.push('\\');
             }
             out.push(ch);
@@ -587,6 +578,13 @@ fn plain_as_markdown(text: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Whether `text`, which starts with `&`, goes on like `&amp;` or `&#160;`.
+fn character_reference_follows(text: &str) -> bool {
+    let name = text[1..].trim_start_matches('#');
+    let len = name.bytes().take_while(u8::is_ascii_alphanumeric).count();
+    len > 0 && name[len..].starts_with(';')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1073,14 +1071,24 @@ fn prefixed(prefix: &str, subject: &str, existing: &[&str]) -> String {
     }
 }
 
+/// `text` quoted one level deeper, as RFC 3676 §4.5 reads it: a line's
+/// leading `>` marks count its depth, so a line the original already
+/// quoted gets another `>` in front of its own instead of being read as
+/// text that happens to start with one. The words themselves are escaped
+/// for Markdown, which is how the quote is held until it goes out, so a
+/// line of dashes under a sentence stays a line of dashes and not a
+/// heading.
 fn quote(text: &str) -> String {
     text.trim_end()
         .lines()
         .map(|line| {
-            if line.is_empty() {
-                ">".to_string()
-            } else {
-                format!("> {line}")
+            let depth = line.bytes().take_while(|b| *b == b'>').count();
+            let words = plain_as_markdown(&line[depth..]);
+            let words = words.trim_end();
+            match (depth, words.is_empty()) {
+                (0, true) => ">".to_string(),
+                (0, false) => format!("> {words}"),
+                (_, _) => format!(">{}{words}", &line[..depth]),
             }
         })
         .collect::<Vec<_>>()
@@ -2052,6 +2060,45 @@ mod tests {
     }
 
     #[test]
+    fn a_quote_deepens_quoted_lines_and_leaves_the_rest_as_text() {
+        assert_eq!(quote("> a\n>\n> > b\n\nc"), ">> a\n>>\n>> \\> b\n>\n> c");
+        assert_eq!(quote("--\n* x\n# h"), "> \\--\n> \\* x\n> \\# h");
+    }
+
+    #[test]
+    fn plain_text_escapes_only_what_markdown_would_read() {
+        assert_eq!(
+            plain_as_markdown(
+                "Noon works. R&D (see 1.2) a_b *c* <b>&amp;\n1. one\n  2) two\n- x\n#h\n~~z~~"
+            ),
+            "Noon works. R&D (see 1.2) a\\_b \\*c\\* \\<b>\\&amp;\n1\\. one\n  2\\) two\n\\- x\n\\#h\n\\~\\~z\\~\\~\n"
+        );
+    }
+
+    #[test]
+    fn a_quoted_line_of_dashes_does_not_make_a_heading() {
+        let original = message(
+            "m2",
+            addr(Some("Ann"), "ann@example.com"),
+            vec![me()],
+            vec![],
+        );
+        let text = "I'm happy to go with whatever works.\n--\nWarm regards,";
+        for rich in [None, Some(RichBody::from_markdown("Thanks."))] {
+            let mut draft = respond(ReplyKind::Reply, 1, &[me()], &original, text, None, &[]);
+            draft.markdown = "Thanks.".into();
+            draft.rich = rich.clone();
+            let (text, html) = parts(&build_mime(&draft, 0, "id@example.com").unwrap());
+            assert!(!html.contains("<h2"), "{html}");
+            assert_eq!(html.matches("<blockquote").count(), 1, "{html}");
+            assert!(html.contains("--"), "{html}");
+            if rich.is_some() {
+                assert!(text.contains("> --\n> Warm regards,"), "{text}");
+            }
+        }
+    }
+
+    #[test]
     fn a_reply_from_another_account_keeps_reply_headers_but_not_a_foreign_thread() {
         let original = message("m2", addr(None, "ann@example.com"), vec![me()], vec![]);
         let mut draft = respond(ReplyKind::Reply, 1, &[me()], &original, "hello", None, &[]);
@@ -2739,16 +2786,30 @@ mod tests {
 
     #[test]
     fn a_link_in_a_signature_is_sent_and_survives_the_rich_body() {
-        let old = "Dana\nFollow us on [LinkedIn](https://l.example/dana) or call [555 0100](tel:5550100)";
+        let old =
+            "Dana\nFollow us on [LinkedIn](https://l.example/dana) or call [555 0100](tel:5550100)";
         let signed = with_signature("Hi Ann", old);
         let html = markdown_to_html(&signed);
-        assert!(html.contains(r#"<a href="https://l.example/dana">LinkedIn</a>"#), "{html}");
-        assert!(html.contains(r#"<a href="tel:5550100">555 0100</a>"#), "{html}");
+        assert!(
+            html.contains(r#"<a href="https://l.example/dana">LinkedIn</a>"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"<a href="tel:5550100">555 0100</a>"#),
+            "{html}"
+        );
         let rich = crate::richtext::RichBody::from_markdown(&signed);
-        assert!(rich.to_html().contains(r#"href="https://l.example/dana""#), "{}", rich.to_html());
+        assert!(
+            rich.to_html().contains(r#"href="https://l.example/dana""#),
+            "{}",
+            rich.to_html()
+        );
         let round_tripped = rich.to_markdown();
         let swapped = restyle_signature(&round_tripped, old, "Dana, Sales");
-        assert!(swapped.contains("\n\n-- \nDana, Sales"), "{swapped:?} came from {round_tripped:?}");
+        assert!(
+            swapped.contains("\n\n-- \nDana, Sales"),
+            "{swapped:?} came from {round_tripped:?}"
+        );
     }
 
     #[test]
