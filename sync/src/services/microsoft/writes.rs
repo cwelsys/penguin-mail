@@ -7,11 +7,11 @@
 
 use std::collections::BTreeSet;
 
-use mailrs_domain::mailbox::keyword::{FLAGGED, SEEN};
+use mailrs_domain::mailbox::keyword::{ANSWERED, FLAGGED, FORWARDED, SEEN};
 use mailrs_domain::translate::gettext;
 use mailrs_domain::{MailboxKind, RemoteMailbox, Role, category};
 use mailrs_gmail::LabelColor;
-use mailrs_graph::{GraphError, MessagePatch, Write};
+use mailrs_graph::{GraphError, MessagePatch, Verb, Write};
 
 use super::folders::PRESETS;
 use super::{GraphApi, Microsoft, backend, tag_name};
@@ -30,6 +30,7 @@ struct Plan {
     read: Option<bool>,
     flagged: Option<bool>,
     other: Option<bool>,
+    verb: Option<Verb>,
     tags_on: Vec<String>,
     tags_off: Vec<String>,
     to: Option<Destination>,
@@ -46,6 +47,15 @@ fn plan(ops: &[MailOp]) -> Result<Plan, BackendError> {
             MailOp::Destroy => plan.destroy = true,
             MailOp::SetKeyword { keyword, on } if keyword == SEEN => plan.read = Some(*on),
             MailOp::SetKeyword { keyword, on } if keyword == FLAGGED => plan.flagged = Some(*on),
+            // Outlook records what was done with a message as its last
+            // verb, which is never taken back (RFC 5788 says the same of
+            // `$forwarded`), so only setting these writes anything.
+            MailOp::SetKeyword { keyword, on: true } if keyword == ANSWERED => {
+                plan.verb = Some(Verb::Replied)
+            }
+            MailOp::SetKeyword { keyword, on: true } if keyword == FORWARDED => {
+                plan.verb = Some(Verb::Forwarded)
+            }
             // Any other keyword stays on this computer (`split_keywords`).
             MailOp::SetKeyword { .. } => {}
             MailOp::SetCategory { category: c, on } if c == category::OTHER => {
@@ -113,6 +123,7 @@ impl<G: GraphApi> Microsoft<G> {
                     flagged: plan.flagged,
                     other: plan.other,
                     categories,
+                    verb: plan.verb,
                 },
             })
             .filter(

@@ -28,7 +28,7 @@ pub use http::{
 };
 pub use mail::{
     AttachmentInfo, ExtendedProperty, Fields, Flag, Header, Listing, MailFolder, MasterCategory,
-    Message, MessageBody, MessagePatch, Override, SIZE_PROPERTY, Write,
+    Message, MessageBody, MessagePatch, Override, SIZE_PROPERTY, Verb, Write,
 };
 pub use model::{DateTimeZone, EmailAddress, ItemBody, Recipient, Removed};
 pub use people::{ContactFolder, GraphContact};
