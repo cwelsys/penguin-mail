@@ -426,9 +426,9 @@ impl Stale {
 pub struct ThreadRun {
     desk: Rc<dyn Desk>,
     effects: Rc<dyn Effects>,
-    /// Set once this run has marked the conversation read, so the bodies
-    /// arriving does not mark it again: the store may not show the mark
-    /// yet when the fresh messages are read.
+    /// Set once this run has set out to mark the conversation read, so
+    /// the bodies arriving during the delay does not set out again: the
+    /// store may not show the mark yet when the fresh messages are read.
     marked_read: std::cell::Cell<bool>,
 }
 
@@ -849,16 +849,14 @@ impl ThreadRun {
         let Some(delay) = self.desk.preferences().mark_read_delay else {
             return;
         };
-        if wanted.wait(|effects| effects.sleep(delay)).await.is_none() {
+        self.marked_read.set(true);
+        // Marking at once goes before the page is drawn, not after it: a
+        // timeout of nothing would still wait its turn behind the draw.
+        if delay > 0 && wanted.wait(|effects| effects.sleep(delay)).await.is_none() {
             return;
         }
         let target = wanted.target().clone();
-        if wanted
-            .on_screen(|effects| effects.mark_read(target))
-            .is_some()
-        {
-            self.marked_read.set(true);
-        }
+        wanted.on_screen(|effects| effects.mark_read(target));
     }
 
     /// Fetches the pictures the bodies name by `cid:`. Their text is on
