@@ -499,6 +499,12 @@ impl Builder {
                 self.gap();
             }
             Event::Start(Tag::List(start)) => {
+                // A nested list opens inside its parent item, after the
+                // item's words and before any end of its paragraph, so the
+                // words still on the line go out as the parent's own.
+                if !self.spans.is_empty() {
+                    self.line();
+                }
                 self.lists.push(match start {
                     Some(_) => BlockKind::Numbered,
                     None => BlockKind::Bullet,
@@ -1237,6 +1243,22 @@ mod tests {
                 .spans
                 .iter()
                 .all(|s| s.style.bold || s.text == " | ")
+        );
+    }
+
+    #[test]
+    fn a_nested_list_item_starts_its_own_line() {
+        let doc = RichBody::from_markdown("1. First\n2. Second\n   - nested one\n   - nested two");
+        let lines: Vec<(BlockKind, String)> =
+            doc.blocks.iter().map(|b| (b.kind, b.text())).collect();
+        assert_eq!(
+            lines,
+            [
+                (BlockKind::Numbered, "First".into()),
+                (BlockKind::Numbered, "Second".into()),
+                (BlockKind::Bullet, "nested one".into()),
+                (BlockKind::Bullet, "nested two".into()),
+            ]
         );
     }
 
