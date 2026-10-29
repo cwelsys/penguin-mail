@@ -131,6 +131,60 @@ X-Penguin-Mail-Forwarded: <orig@example.com>\r\n\r\nSee below\r\n"
     assert!(!held.contains("X-Penguin-Mail-Forwarded"), "{held}");
 }
 
+const ORIGINAL: &[u8] = b"From: Ada <ada@example.com>\r\nTo: me@example.com\r\nSubject: Trip\r\n\
+Message-ID: <orig@example.com>\r\n\r\nComing?\r\n";
+
+/// Ada's message, synced, and a held answer to it built from `headers`,
+/// which name it. Returns Ada's message in the store.
+async fn held_answer(h: &Harness, headers: &str) -> String {
+    let original = h.fake.deliver("inbox", ORIGINAL, now_millis());
+    h.bootstrap_all().await;
+    let raw = format!(
+        "From: me@example.com\r\nTo: ada@example.com\r\nSubject: Re: Trip\r\n\
+Message-ID: <trip@example.com>\r\n{headers}\r\n\r\nYes\r\n"
+    );
+    put(
+        h,
+        Queued {
+            raw: Some(raw.into_bytes()),
+            ..later(h, now_millis() + HOUR)
+        },
+    )
+    .await;
+    original
+}
+
+fn marked(h: &Harness, id: &str, keyword: &str) -> bool {
+    h.fake.with(|s| s.emails[id].keywords.contains(keyword))
+}
+
+#[tokio::test]
+async fn a_held_reply_marks_its_original_answered_once_the_server_sends_it() {
+    let h = holding().await;
+    let original = held_answer(&h, "In-Reply-To: <orig@example.com>").await;
+    assert!(
+        !marked(&h, &original, "$answered"),
+        "not while the server still holds it: Cancel Send may still call it back"
+    );
+
+    h.fake.release_due(i64::MAX);
+    queue(&h).send_due(now_millis() + 2 * HOUR).await.unwrap();
+
+    assert!(marked(&h, &original, "$answered"));
+}
+
+#[tokio::test]
+async fn a_held_forward_marks_its_original_forwarded_once_the_server_sends_it() {
+    let h = holding().await;
+    let original = held_answer(&h, "X-Penguin-Mail-Forwarded: <orig@example.com>").await;
+    assert!(!marked(&h, &original, "$forwarded"));
+
+    h.fake.release_due(i64::MAX);
+    queue(&h).send_due(now_millis() + 2 * HOUR).await.unwrap();
+
+    assert!(marked(&h, &original, "$forwarded"));
+}
+
 #[tokio::test]
 async fn the_hour_passing_files_the_held_message_in_sent() {
     let h = holding().await;
