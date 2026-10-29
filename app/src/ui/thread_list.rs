@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib, graphene};
-use mailrs_domain::{AccountId, ThreadSummary};
+use mailrs_domain::{AccountId, Target, ThreadSummary};
 
 use super::list_feed::order;
 use super::sidebar::DRAG_MAIL;
@@ -744,6 +744,32 @@ impl ThreadList {
         }
     }
 
+    /// Shows the row of `target` read now, ahead of the store's change
+    /// event, so a thread the reader opened loses its dot as it opens
+    /// rather than after the list catches up. A row the list lacks
+    /// changes nothing.
+    pub fn mark_read(&self, target: &Target) {
+        let wanted = (
+            target.account_id,
+            target.thread_id.clone(),
+            target.message_id.clone(),
+        );
+        let fresh = {
+            let mut rows = self.rows.borrow_mut();
+            let Some(position) = rows.iter().position(|row| key(row) == wanted) else {
+                return;
+            };
+            if !rows[position].unread {
+                return;
+            }
+            let mut row = (*rows[position]).clone();
+            row.unread = false;
+            rows[position] = Rc::new(row);
+            (position as u32, Rc::clone(&rows[position]))
+        };
+        self.redraw(fresh.0, std::slice::from_ref(&fresh.1));
+    }
+
     /// Adds a page of older rows at the end, leaving the selection alone.
     pub fn append(&self, rows: Vec<Row>) {
         if rows.is_empty() {
@@ -1108,7 +1134,11 @@ fn neighbour(len: usize, first: usize, last: usize) -> Option<usize> {
 /// Whether `fresh` holds the threads of `old`, each in its old place, so
 /// the rows can be drawn again where they are.
 fn same_threads(old: &[Row], fresh: &[Row]) -> bool {
-    old.len() == fresh.len() && old.iter().zip(fresh).all(|(old, fresh)| key(old) == key(fresh))
+    old.len() == fresh.len()
+        && old
+            .iter()
+            .zip(fresh)
+            .all(|(old, fresh)| key(old) == key(fresh))
 }
 
 /// Whether the list header shows `subtitle`: the layout has room, and it
@@ -1153,6 +1183,18 @@ pub(crate) mod checks {
             vec![Rc::new(row.clone())],
             "No Mail",
             "mail-unread-symbolic",
+        );
+        list.mark_read(&mailrs_domain::Target::from_row(&row));
+        assert!(!list.rows.borrow()[0].unread, "the row shows read at once");
+        assert!(
+            !list
+                .store
+                .item(0)
+                .unwrap()
+                .downcast::<glib::BoxedAnyObject>()
+                .unwrap()
+                .borrow::<Row>()
+                .unread
         );
         list.selection.select_item(0, false);
         let mut empty = row.clone();
