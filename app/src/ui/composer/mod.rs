@@ -1214,11 +1214,19 @@ impl Composer {
     /// The body as HTML, with the folded quote or the message it forwards
     /// under it, as it goes out.
     fn html(&self) -> String {
-        let quoted = self.base.borrow().quoted.clone();
+        let (quoted, quoted_html) = {
+            let base = self.base.borrow();
+            (base.quoted.clone(), base.quoted_html.clone())
+        };
         let mut html = match quoted {
             Some(quoted) => {
                 let written = self.editor.written();
-                html_to_send(&written.markdown, written.rich.as_ref(), Some(&quoted))
+                html_to_send(
+                    &written.markdown,
+                    written.rich.as_ref(),
+                    Some(&quoted),
+                    quoted_html.as_deref(),
+                )
             }
             None => self.editor.html(),
         };

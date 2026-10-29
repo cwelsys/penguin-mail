@@ -33,8 +33,11 @@ pub struct Answering {
     pub target: MessageMeta,
     /// The words to quote.
     pub text: String,
+    /// The original's HTML, which a reply quotes and a forward carries.
     pub html: Option<String>,
     pub thread: Vec<MessageMeta>,
+    /// The original's files. A forward takes them all, a reply only the
+    /// pictures its quote shows.
     pub attachments: Vec<mailrs_domain::Attachment>,
     /// Whether the message arrived encrypted, which makes the new message
     /// start with Encrypt on. The composer then asks before it sends the
@@ -216,7 +219,7 @@ impl OpenThread {
     /// What a reply to or a forward of one message starts from: `only`, or
     /// the message a reply answers when it names none. `None` when there
     /// is no such message.
-    pub fn answering(&self, only: Option<&str>, forward: bool) -> Option<Answering> {
+    pub fn answering(&self, only: Option<&str>) -> Option<Answering> {
         let target = match only {
             Some(id) => self.messages.iter().find(|m| m.id == id)?.clone(),
             None => self.reply_target()?.clone(),
@@ -231,11 +234,11 @@ impl OpenThread {
                 Some(body) => crate::compose::body_text(body),
                 None => target.snippet.clone(),
             },
-            // A forward keeps the original's HTML and its files, so what
-            // goes out is the message that arrived.
-            html: body.filter(|_| forward).and_then(|body| body.html.clone()),
+            // A reply quotes the original's HTML and a forward carries it
+            // through, so what goes out is the message that arrived. The
+            // window picks the files each takes along.
+            html: body.and_then(|body| body.html.clone()),
             attachments: body
-                .filter(|_| forward)
                 .map(|body| body.attachments.clone())
                 .unwrap_or_default(),
             secret: self.sealed.contains(&target.id),
@@ -704,13 +707,10 @@ mod tests {
             engine_read("The key is under the mat.", true),
         );
 
-        let answering = open.answering(None, false).expect("something to answer");
+        let answering = open.answering(None).expect("something to answer");
         assert!(answering.secret);
         assert_eq!(answering.text, "The key is under the mat.");
-        assert!(
-            open.answering(Some("m1"), true)
-                .is_some_and(|forward| forward.secret)
-        );
+        assert!(open.answering(Some("m1")).is_some_and(|one| one.secret));
     }
 
     #[test]
@@ -718,8 +718,22 @@ mod tests {
         let mut open = thread(vec![message("m1", false)]);
         open.take_engine_answer("m1".to_string(), engine_read("Meet at six.", false));
 
-        let answering = open.answering(None, false).expect("something to answer");
+        let answering = open.answering(None).expect("something to answer");
         assert!(!answering.secret);
+    }
+
+    #[test]
+    fn a_reply_carries_the_original_html_to_quote() {
+        let mut open = thread(vec![message("m1", false)]);
+        let body = mailrs_domain::MessageBody {
+            text: Some("Hi".to_string()),
+            html: Some("<p>Hi</p>".to_string()),
+            ..mailrs_domain::MessageBody::default()
+        };
+        open.bodies.insert("m1".to_string(), Ok(body.into()));
+
+        let answering = open.answering(None).expect("something to answer");
+        assert_eq!(answering.html.as_deref(), Some("<p>Hi</p>"));
     }
 
     #[test]
