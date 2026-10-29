@@ -1,6 +1,6 @@
 mod common;
 
-use mailrs_graph::{Fields, GraphError, Listing, MessagePatch, Write};
+use mailrs_graph::{Fields, GraphError, Listing, MessagePatch, Verb, Write};
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -267,6 +267,7 @@ async fn writes_go_as_one_batch_in_graphs_shapes() {
                 flagged: Some(false),
                 categories: Some(vec!["Red".into()]),
                 other: Some(true),
+                verb: None,
             },
         },
         Write::Delete { id: "m3".into() },
@@ -415,4 +416,57 @@ async fn an_unread_listing_filters_on_the_read_state() {
         .url;
     let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(pairs["$filter"], "isRead eq false");
+}
+
+#[tokio::test]
+async fn a_verb_patch_writes_outlooks_three_properties() {
+    let server = MockServer::start().await;
+    common::token_endpoint(&server, "r").await;
+    Mock::given(method("POST"))
+        .and(path("/v1.0/$batch"))
+        .respond_with(|request: &Request| {
+            let batch: Value = serde_json::from_slice(&request.body).unwrap();
+            let answers: Vec<Value> = batch["requests"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| json!({"id": r["id"], "status": 200, "body": {}}))
+                .collect();
+            ResponseTemplate::new(200).set_body_json(json!({"responses": answers}))
+        })
+        .mount(&server)
+        .await;
+    let writes = [Write::Patch {
+        id: "m1".into(),
+        patch: MessagePatch {
+            verb: Some(Verb::Forwarded),
+            ..MessagePatch::default()
+        },
+    }];
+    common::graph(&server).apply(&writes).await.unwrap();
+    let asked = server.received_requests().await.unwrap();
+    let batch: Value = serde_json::from_slice(
+        &asked
+            .iter()
+            .find(|r| r.url.path() == "/v1.0/$batch")
+            .unwrap()
+            .body,
+    )
+    .unwrap();
+    let body = &batch["requests"][0]["body"];
+    let props = body["singleValueExtendedProperties"].as_array().unwrap();
+    let value = |id: &str| {
+        props
+            .iter()
+            .find(|p| p["id"] == id)
+            .map(|p| p["value"].as_str().unwrap().to_string())
+    };
+    assert_eq!(value("Integer 0x1081").as_deref(), Some("104"));
+    assert_eq!(value("Integer 0x1080").as_deref(), Some("262"));
+    let when = value("SystemTime 0x1082").expect("when it was forwarded");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&when).is_ok(),
+        "{when}"
+    );
+    assert_eq!(body.as_object().unwrap().len(), 1, "{body}");
 }

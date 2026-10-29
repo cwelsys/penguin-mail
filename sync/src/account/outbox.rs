@@ -68,8 +68,9 @@ impl AccountSync {
     }
 
     /// `keyword` on the messages `msgids` name, on IMAP and JMAP, for the
-    /// person's other mail programs. Gmail has no such flags, and Outlook
-    /// keeps its own, which this does not write. Every copy in the account
+    /// person's other mail programs. Gmail has no such flags. Outlook
+    /// keeps its own record of what was done with a message, which its
+    /// adapter writes from the same keyword. Every copy in the account
     /// is marked, which on IMAP means each mailbox the message is filed
     /// in, and only in a mailbox that stores the keyword: `\Answered` is
     /// a system flag every mailbox has, and `$forwarded` is one a mailbox
@@ -77,10 +78,13 @@ impl AccountSync {
     /// that named them has gone out by now, so a miss or a refusal only
     /// goes to the log.
     async fn mark(&self, msgids: &[String], keyword: &str) {
-        if !matches!(
-            self.mail.untranslated(),
-            AnyMail::Imap(_) | AnyMail::Jmap(_)
-        ) {
+        let outlook = matches!(self.mail.untranslated(), AnyMail::Microsoft(_));
+        if !outlook
+            && !matches!(
+                self.mail.untranslated(),
+                AnyMail::Imap(_) | AnyMail::Jmap(_)
+            )
+        {
             return;
         }
         if msgids.is_empty() {
@@ -106,7 +110,10 @@ impl AccountSync {
             );
             return;
         }
-        let ids = self.where_stored(ids, keyword).await;
+        let ids = match outlook {
+            true => ids,
+            false => self.where_stored(ids, keyword).await,
+        };
         if ids.is_empty() {
             tracing::info!(
                 account = self.account_id,

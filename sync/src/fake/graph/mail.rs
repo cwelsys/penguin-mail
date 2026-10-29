@@ -4,7 +4,7 @@ use mail_builder::MessageBuilder;
 use mail_parser::MimeHeaders;
 use mailrs_graph::{
     AttachmentInfo, DeltaPage, EmailAddress, Flag, GraphError, ItemBody, Listing, MailFolder,
-    MasterCategory, Message, MessageBody, Page, Recipient, Removed, Write,
+    MasterCategory, Message, MessageBody, Page, Recipient, Removed, Verb, Write,
 };
 use serde_json::Value;
 
@@ -633,6 +633,31 @@ fn write_one(s: &mut GraphState, write: &Write) -> Answer<()> {
             }
             if let Some(other) = patch.other {
                 held.message.inference_classification = Some(classification(other));
+            }
+            if let Some(verb) = patch.verb {
+                let (last, icon) = match verb {
+                    Verb::Replied => ("102", "261"),
+                    Verb::Forwarded => ("104", "262"),
+                };
+                let props = held
+                    .message
+                    .single_value_extended_properties
+                    .get_or_insert_with(Vec::new);
+                props.retain(|p| {
+                    !p.id.ends_with("0x1081")
+                        && !p.id.ends_with("0x1080")
+                        && !p.id.ends_with("0x1082")
+                });
+                for (id, value) in [
+                    ("Integer 0x1081", last),
+                    ("Integer 0x1080", icon),
+                    ("SystemTime 0x1082", "2026-10-29T00:00:00Z"),
+                ] {
+                    props.push(mailrs_graph::ExtendedProperty {
+                        id: id.into(),
+                        value: value.into(),
+                    });
+                }
             }
             let folder = held.folder.clone();
             log(s, &folder, id);

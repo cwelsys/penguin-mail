@@ -193,6 +193,36 @@ pub struct Listing {
     pub fields: Fields,
 }
 
+/// What the person did with a message, as Outlook records it on the
+/// message itself (MS-OXOMSG): the last verb run on it, `PidTagLastVerbExecuted`
+/// (`0x1081`), the icon it shows, `PidTagIconIndex` (`0x1080`), and when,
+/// `PidTagLastVerbExecutionTime` (`0x1082`). A send with raw MIME sets
+/// none of them, so the app writes them as Evolution and DavMail do.
+/// Outlook keeps one verb, so a forward after a reply shows the forward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verb {
+    /// Reply and reply all alike: the bytes do not tell them apart, and
+    /// DavMail writes the same.
+    Replied,
+    Forwarded,
+}
+
+impl Verb {
+    fn last_verb(self) -> &'static str {
+        match self {
+            Verb::Replied => "102",
+            Verb::Forwarded => "104",
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Verb::Replied => "261",
+            Verb::Forwarded => "262",
+        }
+    }
+}
+
 /// What `MessagePatch` changes; a field left `None` stays.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessagePatch {
@@ -202,6 +232,8 @@ pub struct MessagePatch {
     pub categories: Option<Vec<String>>,
     /// `true` files it under Other, `false` under Focused.
     pub other: Option<bool>,
+    /// What the person did with the message, for Outlook's arrow.
+    pub verb: Option<Verb>,
 }
 
 impl MessagePatch {
@@ -221,6 +253,17 @@ impl MessagePatch {
             body.insert(
                 "inferenceClassification".into(),
                 (if other { "other" } else { "focused" }).into(),
+            );
+        }
+        if let Some(verb) = self.verb {
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            body.insert(
+                "singleValueExtendedProperties".into(),
+                json!([
+                    { "id": "Integer 0x1081", "value": verb.last_verb() },
+                    { "id": "Integer 0x1080", "value": verb.icon() },
+                    { "id": "SystemTime 0x1082", "value": now },
+                ]),
             );
         }
         Value::Object(body)

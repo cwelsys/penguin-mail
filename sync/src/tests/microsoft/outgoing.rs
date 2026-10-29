@@ -22,6 +22,85 @@ async fn a_message_goes_out_as_written_and_graph_files_it() {
     );
 }
 
+fn verb(h: &super::Outlook, id: &str, property: &str) -> Option<String> {
+    h.fake.with(|s| {
+        s.messages[id]
+            .message
+            .single_value_extended_properties
+            .as_ref()?
+            .iter()
+            .find(|p| p.id == property)
+            .map(|p| p.value.clone())
+    })
+}
+
+/// Ann's message, synced, and an answer to it sent with the header
+/// `names_it` naming it. Returns Ann's message's Graph id.
+async fn answered(h: &super::Outlook, names_it: &str) -> String {
+    let id = h.fake.deliver(
+        "inbox",
+        FakeMail {
+            from: ("Ann", "ann@example.com"),
+            subject: "Hi",
+            at: now_millis(),
+            ..FakeMail::default()
+        },
+    );
+    h.bootstrap_all().await;
+    let raw = format!(
+        "From: me@outlook.com\r\nTo: ann@example.com\r\nSubject: Re: Hi\r\n\
+Message-ID: <re@outlook.example>\r\n{names_it}: <{id}@outlook.example>\r\n\r\nHello back\r\n"
+    );
+    h.sync.send(raw.into_bytes(), None, None).await.unwrap();
+    id
+}
+
+#[tokio::test]
+async fn sending_a_reply_marks_the_original_replied_for_outlook() {
+    let h = outlook().await;
+    let bystander = h.fake.deliver(
+        "inbox",
+        FakeMail {
+            at: now_millis(),
+            ..FakeMail::default()
+        },
+    );
+    let original = answered(&h, "In-Reply-To").await;
+    assert_eq!(
+        verb(&h, &original, "Integer 0x1081").as_deref(),
+        Some("102")
+    );
+    assert_eq!(
+        verb(&h, &original, "Integer 0x1080").as_deref(),
+        Some("261")
+    );
+    assert!(
+        verb(&h, &original, "SystemTime 0x1082").is_some(),
+        "when it was answered"
+    );
+    assert_eq!(verb(&h, &bystander, "Integer 0x1081"), None);
+}
+
+#[tokio::test]
+async fn sending_a_forward_marks_the_original_forwarded_for_outlook() {
+    let h = outlook().await;
+    let original = answered(&h, "X-Penguin-Mail-Forwarded").await;
+    assert_eq!(
+        verb(&h, &original, "Integer 0x1081").as_deref(),
+        Some("104")
+    );
+    assert_eq!(
+        verb(&h, &original, "Integer 0x1080").as_deref(),
+        Some("262")
+    );
+    let sent = h.fake.with(|s| s.sent.clone());
+    assert_eq!(sent.len(), 1);
+    assert!(
+        !String::from_utf8_lossy(&sent[0]).contains("X-Penguin-Mail"),
+        "the server never sees the app's own header"
+    );
+}
+
 #[tokio::test]
 async fn saving_a_draft_twice_leaves_one() {
     let h = outlook().await;
