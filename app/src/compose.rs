@@ -14,10 +14,12 @@ pub use senders::{Suffixes, reply_addresses, sender_address, sender_for};
 use mail_builder::MessageBuilder;
 use mail_builder::headers::address::Address as MimeAddress;
 use mail_builder::headers::content_type::ContentType;
+use mail_builder::headers::message_id::MessageId;
 use mail_builder::headers::raw::Raw;
 use mail_builder::mime::MimePart;
 use mailrs_domain::{AccountId, Address, EpochMillis, MessageBody, MessageMeta};
 use mailrs_mime::address::parse_address_list_keeping_invalid;
+use mailrs_mime::head::FORWARDED_HEADER;
 use pulldown_cmark::{Event, Options, Parser, html};
 use serde::{Deserialize, Serialize};
 
@@ -299,6 +301,12 @@ pub struct Forwarded {
     /// Set when `html` and `text` already carry the header block, because
     /// they came back out of a draft this composer saved.
     pub whole: bool,
+    /// The original's `Message-ID`, with angle brackets, for the account
+    /// to mark it forwarded once the forward has gone. `None` for a
+    /// forward that came back out of a saved draft, which no longer says
+    /// which message it carries.
+    #[serde(default)]
+    pub message_id: Option<String>,
 }
 
 /// The marker around a forwarded message in a saved draft, so reopening
@@ -803,6 +811,7 @@ impl Draft {
                     html,
                     text,
                     whole: true,
+                    message_id: None,
                 }))
             }
         };
@@ -1103,6 +1112,7 @@ pub fn respond(
                     .map(str::to_string),
                 text: original_text.trim_end().to_string(),
                 whole: false,
+                message_id: original.rfc822_msgid.clone(),
             }));
         }
     }
@@ -1689,7 +1699,7 @@ pub async fn off_thread<T: Send + 'static>(
 /// The RFC 822 bytes for `draft`.
 pub fn build_mime(draft: &Draft, date_secs: i64, message_id: &str) -> Result<Vec<u8>, String> {
     let (text, html) = written(draft, Purpose::Send);
-    envelope(draft, date_secs, message_id)
+    forwarding(envelope(draft, date_secs, message_id), draft)
         .body(body_tree(draft, text, html))
         .write_to_vec()
         .map_err(|e| e.to_string())
@@ -1785,10 +1795,25 @@ pub fn build_protected(
     message_id: &str,
     entity: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    envelope(draft, date_secs, message_id)
+    forwarding(envelope(draft, date_secs, message_id), draft)
         .body(MimePart::raw(entity))
         .write_to_vec()
         .map_err(|e| e.to_string())
+}
+
+/// `builder` with [`FORWARDED_HEADER`] naming the message `draft`
+/// forwards, when it forwards one it can name. Only a message on its way
+/// out carries it: the account reads it, marks the original, and strips
+/// it, and a draft a server keeps never gets it.
+fn forwarding<'a>(builder: MessageBuilder<'a>, draft: &Draft) -> MessageBuilder<'a> {
+    match draft
+        .forwarded
+        .as_ref()
+        .and_then(|f| f.message_id.as_deref())
+    {
+        Some(id) => builder.header(FORWARDED_HEADER, MessageId::new(bare_id(id))),
+        None => builder,
+    }
 }
 
 /// A draft for Gmail to keep while its message is meant to go out
@@ -3034,6 +3059,49 @@ mod tests {
         );
         assert!(forwarded.to_plain().ends_with("Menu attached."));
         assert!(draft.in_reply_to.is_none() && draft.thread_id.is_none());
+    }
+
+    #[test]
+    fn a_forward_on_its_way_out_names_its_original_and_a_kept_one_does_not() {
+        let original = message(
+            "m1",
+            addr(Some("Ann"), "ann@example.com"),
+            vec![me()],
+            vec![],
+        );
+        let mut draft = respond(
+            ReplyKind::Forward,
+            1,
+            &[me()],
+            &original,
+            "Menu attached.",
+            None,
+            &[],
+        );
+        draft.to = vec![addr(None, "bob@example.com")];
+        let named = "X-Penguin-Mail-Forwarded: <m1@mail.example.com>\r\n";
+        let sent = build_mime(&draft, 0, "id@example.com").unwrap();
+        assert!(String::from_utf8_lossy(&sent).contains(named));
+        let entity = b"Content-Type: text/plain\r\n\r\nSigned\r\n".to_vec();
+        let signed = build_protected(&draft, 0, "id@example.com", entity).unwrap();
+        assert!(String::from_utf8_lossy(&signed).contains(named));
+
+        let kept = build_saved_draft(&draft, 0, "id@example.com").unwrap();
+        assert!(!String::from_utf8_lossy(&kept).contains("X-Penguin-Mail-Forwarded"));
+        let parsed = MessageParser::default().parse(&kept).unwrap();
+        let saved = MessageBody {
+            html: Some(parsed.body_html(0).unwrap().to_string()),
+            text: Some(parsed.body_text(0).unwrap().to_string()),
+            ..Default::default()
+        };
+        let mut reopened = Draft::new(1, me());
+        reopened.take_body(&saved);
+        reopened.to = vec![addr(None, "bob@example.com")];
+        let sent_again = build_mime(&reopened, 0, "id@example.com").unwrap();
+        assert!(
+            !String::from_utf8_lossy(&sent_again).contains("X-Penguin-Mail-Forwarded"),
+            "a reopened draft no longer knows which message it forwards"
+        );
     }
 
     #[test]

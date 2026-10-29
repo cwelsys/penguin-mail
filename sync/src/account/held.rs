@@ -4,15 +4,19 @@
 //! message.
 
 use mailrs_domain::EpochMillis;
+use mailrs_mime::head::{FORWARDED_HEADER, without_header};
 
 use super::AccountSync;
 use crate::{BackendError, Claimed, Held, Settled, SyncError, Unheld};
 
 impl AccountSync {
     /// Hands `raw` to the server to send at `at`. `None` when the server
-    /// cannot hold it, which leaves the message to the outbox.
+    /// cannot hold it, which leaves the message to the outbox. The
+    /// composer's header naming the message forwarded goes no further,
+    /// and a held forward marks no original.
     pub async fn hold(&self, raw: &[u8], at: EpochMillis) -> Result<Option<Held>, SyncError> {
-        match self.mail.schedule(raw, at).await {
+        let raw = without_header(raw, FORWARDED_HEADER);
+        match self.mail.schedule(&raw, at).await {
             Ok(held) => {
                 self.held_draft(&held).await;
                 Ok(Some(held))

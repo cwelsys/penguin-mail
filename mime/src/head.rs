@@ -117,6 +117,12 @@ pub fn message_id(raw: &[u8]) -> Option<String> {
     head(raw).message_id()
 }
 
+/// The header a forward carries from the composer to the account that
+/// sends it, naming the message forwarded by its Message-ID, so the
+/// account can mark that message forwarded once the forward has gone.
+/// The account strips it before any server or reader sees the bytes.
+pub const FORWARDED_HEADER: &str = "X-Penguin-Mail-Forwarded";
+
 /// `raw` without the header `name` and the lines folded under it. Borrowed
 /// as it is when the header is absent; otherwise one copy, with the body
 /// appended once.

@@ -63,6 +63,7 @@ async fn the_capabilities_are_jmap_s() {
                 "$answered",
                 "$draft",
                 "$muted",
+                "$forwarded",
                 "$mdnsent"
             ],
             native_search: false,

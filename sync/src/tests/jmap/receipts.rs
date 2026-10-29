@@ -325,3 +325,25 @@ Message-ID: <re-rota@example.com>\r\nIn-Reply-To: <rota@allotment.example>\r\n\r
         "other mail programs show the reply arrow"
     );
 }
+
+#[tokio::test]
+async fn sending_a_forward_marks_the_original_forwarded() {
+    let h = over(FakeJmap::new()).await;
+    let id = asked(&h).await;
+    let forward = b"From: me@example.com\r\nTo: ada@example.com\r\nSubject: Fwd: Rota\r\n\
+Message-ID: <fwd-rota@example.com>\r\nX-Penguin-Mail-Forwarded: <rota@allotment.example>\r\n\r\nSee below.\r\n";
+
+    h.sync.send(forward.to_vec(), None, None).await.unwrap();
+
+    assert!(
+        h.fake
+            .with(|s| s.emails[&id].keywords.contains("$forwarded")),
+        "other mail programs show the forwarded arrow"
+    );
+    let sent = h.fake.with(|s| s.sent.clone());
+    assert_eq!(sent.len(), 1);
+    assert!(
+        !String::from_utf8_lossy(&sent[0].raw).contains("X-Penguin-Mail-Forwarded"),
+        "the server never sees the app's own header"
+    );
+}
