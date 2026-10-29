@@ -355,11 +355,22 @@ impl OpenThread {
             .collect()
     }
 
-    /// Whether a reply can quote the message it answers: that message's
-    /// body has arrived, or failed for good.
-    pub fn quotable(&self) -> bool {
-        self.reply_target()
-            .is_some_and(|m| self.bodies.contains_key(&m.id))
+    /// Whether a reply to `only`, or to the newest message when `only`
+    /// names none, can quote what it answers: that message's body has
+    /// arrived, or failed for good.
+    pub fn quotable(&self, only: Option<&str>) -> bool {
+        match only {
+            Some(id) => self.bodies.contains_key(id),
+            None => self
+                .reply_target()
+                .is_some_and(|m| self.bodies.contains_key(&m.id)),
+        }
+    }
+
+    /// Whether the body of `id` failed to load, so an answer to it quotes
+    /// the snippet.
+    pub fn body_failed(&self, id: &str) -> bool {
+        self.bodies.get(id).is_some_and(Result::is_err)
     }
 
     /// The newest message and its body, when that message offers a way

@@ -2729,18 +2729,39 @@ impl MainWindow {
     }
 
     /// Replies to or forwards the newest message in `view`.
-    pub(super) fn reply(self: &Rc<Self>, view: &ConversationView, kind: ReplyKind) {
+    pub(super) fn reply(self: &Rc<Self>, view: &Rc<ConversationView>, kind: ReplyKind) {
         self.reply_to(view, kind, None)
     }
 
     /// Replies to or forwards one message of `view`, or its newest one
-    /// when `only` names none.
+    /// when `only` names none. A body still on its way is waited for, up
+    /// to [`reveal::REVEAL_WAIT`], so the answer quotes it rather than the
+    /// snippet.
     pub(super) fn reply_to(
         self: &Rc<Self>,
-        view: &ConversationView,
+        view: &Rc<ConversationView>,
         kind: ReplyKind,
         only: Option<&str>,
     ) {
+        if view.read(|open| open.quotable(only)) == Some(false) {
+            let Some(target) = view.read(OpenThread::target) else {
+                return;
+            };
+            let (this, view, only) = (Rc::clone(self), Rc::clone(view), only.map(str::to_string));
+            glib::spawn_future_local(async move {
+                let waiting = Replying(Rc::clone(&this));
+                if reveal::body_settles(&waiting, &target, only.as_deref(), reveal::REVEAL_WAIT)
+                    .await
+                {
+                    this.reply_now(&view, kind, only.as_deref());
+                }
+            });
+            return;
+        }
+        self.reply_now(view, kind, only);
+    }
+
+    fn reply_now(self: &Rc<Self>, view: &ConversationView, kind: ReplyKind, only: Option<&str>) {
         let Some(app) = self.app.upgrade() else {
             return;
         };
@@ -2751,6 +2772,11 @@ impl MainWindow {
         let Some(answering) = view.find(|open| open.answering(only)) else {
             return;
         };
+        if view.read(|open| open.body_failed(&answering.target.id)) == Some(true) {
+            self.toast(&gettext(
+                "The message did not load, so only its preview is quoted.",
+            ));
+        }
         let crate::open_thread::Answering {
             account_id,
             target,
@@ -4598,10 +4624,10 @@ impl reveal::Waiting for Replying {
         self.0.conversation.read(OpenThread::target)
     }
 
-    fn quotable(&self) -> bool {
+    fn quotable(&self, message: Option<&str>) -> bool {
         self.0
             .conversation
-            .read(OpenThread::quotable)
+            .read(|open| open.quotable(message))
             .unwrap_or(false)
     }
 

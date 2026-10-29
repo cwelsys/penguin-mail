@@ -1,13 +1,15 @@
-//! A reply asked for from outside the window, such as the Reply button on
-//! a new-mail notification.
+//! Waiting for a body before a reply quotes it.
 //!
-//! The window selects the thread's row and the thread run opens it, which
-//! takes a store read and then a trip to Gmail for the bodies. The reply
-//! waits for that, so it can quote the body rather than the snippet, but
-//! no longer than [`REVEAL_WAIT`]. By then the reader may have clicked
-//! another conversation, and a reply to that one is a reply nobody asked
-//! for. [`reply_when_open`] holds the target the thread opened as and
-//! replies only while that target is still on screen.
+//! Opening a thread takes a store read and then a trip to Gmail for the
+//! bodies. A reply waits for that, so it can quote the body rather than
+//! the snippet, but no longer than [`REVEAL_WAIT`]. By then the reader
+//! may have clicked another conversation, and a reply to that one is a
+//! reply nobody asked for, so the wait holds the target it started on
+//! and gives up once that target leaves the screen. [`body_settles`] is
+//! the wait the Reply button makes; [`reply_when_open`] is the one a
+//! reply asked for from outside the window makes, such as the Reply
+//! button on a new-mail notification, which first waits for the thread
+//! to open at all.
 
 use std::time::Duration;
 
@@ -26,8 +28,10 @@ pub(super) const REVEAL_STEP: Duration = Duration::from_millis(100);
 pub(super) trait Waiting: Screen {
     /// The conversation on screen, if any.
     fn target(&self) -> Option<Target>;
-    /// Whether the conversation on screen holds a body to quote.
-    fn quotable(&self) -> bool;
+    /// Whether the conversation on screen holds the body `message` would
+    /// quote, or its newest message's when `message` names none. A body
+    /// that failed for good counts: nothing more will come.
+    fn quotable(&self, message: Option<&str>) -> bool;
     /// Waits `step`.
     fn sleep(&self, step: Duration) -> Answer<'_, ()>;
     /// Opens a reply to the newest message on screen.
@@ -46,7 +50,7 @@ pub(super) async fn reply_when_open(
     thread_id: &str,
     wait: Duration,
 ) {
-    let steps = (wait.as_millis() / REVEAL_STEP.as_millis().max(1)) as u32;
+    let steps = steps_in(wait);
     let mut held: Option<Target> = None;
     for step in 0..=steps {
         if held.is_none() {
@@ -59,7 +63,7 @@ pub(super) async fn reply_when_open(
             if !window.is_showing(target) {
                 return;
             }
-            if window.quotable() {
+            if window.quotable(None) {
                 break;
             }
         }
@@ -75,6 +79,34 @@ pub(super) async fn reply_when_open(
             "Could not open the conversation to reply to it",
         )),
     }
+}
+
+/// Waits up to `wait` for the body a reply to `message` of the
+/// conversation `target` would quote. True when the reply may go ahead:
+/// the body came or failed, or the wait ran out and the snippet will do,
+/// with the conversation still on screen. False once the reader has
+/// moved on.
+pub(super) async fn body_settles(
+    window: &dyn Waiting,
+    target: &Target,
+    message: Option<&str>,
+    wait: Duration,
+) -> bool {
+    let steps = steps_in(wait);
+    for step in 0..=steps {
+        if !window.is_showing(target) {
+            return false;
+        }
+        if window.quotable(message) || step == steps {
+            return true;
+        }
+        window.sleep(REVEAL_STEP).await;
+    }
+    false
+}
+
+fn steps_in(wait: Duration) -> u32 {
+    (wait.as_millis() / REVEAL_STEP.as_millis().max(1)) as u32
 }
 
 #[cfg(test)]
@@ -122,7 +154,7 @@ mod tests {
             self.frame().map(|(target, _)| target)
         }
 
-        fn quotable(&self) -> bool {
+        fn quotable(&self, _: Option<&str>) -> bool {
             self.frame().is_some_and(|(_, quotable)| quotable)
         }
 
@@ -185,6 +217,33 @@ mod tests {
         let window = Window::playing(vec![Some((thread("t1"), false))]);
         reply_when_open(&window, 1, "t1", WAIT).await;
         assert_eq!(*window.replied.borrow(), vec![thread("t1")]);
+    }
+
+    #[tokio::test]
+    async fn a_reply_from_the_button_waits_for_the_body() {
+        let window = Window::playing(vec![
+            Some((thread("t1"), false)),
+            Some((thread("t1"), false)),
+            Some((thread("t1"), true)),
+        ]);
+        assert!(body_settles(&window, &thread("t1"), None, WAIT).await);
+        assert_eq!(window.at.get(), 2, "it stopped waiting once the body came");
+    }
+
+    #[tokio::test]
+    async fn a_reply_from_the_button_is_dropped_when_the_reader_moves_on() {
+        let window = Window::playing(vec![
+            Some((thread("t1"), false)),
+            Some((thread("t2"), true)),
+        ]);
+        assert!(!body_settles(&window, &thread("t1"), None, WAIT).await);
+    }
+
+    #[tokio::test]
+    async fn a_body_that_never_comes_lets_the_reply_go_with_the_snippet() {
+        let window = Window::playing(vec![Some((thread("t1"), false))]);
+        assert!(body_settles(&window, &thread("t1"), None, WAIT).await);
+        assert_eq!(window.at.get(), 5, "the whole wait");
     }
 
     #[tokio::test]
