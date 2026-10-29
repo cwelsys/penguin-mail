@@ -116,7 +116,10 @@ async fn a_reader_who_moves_on_while_the_bodies_load_gets_none_of_them() {
     window.with(|screen| screen.moves_on = Some(Step::Bodies));
     window.run().open(row(THREAD)).await;
     assert!(!window.took(Step::BodiesArrived));
-    assert!(!window.took(Step::MarkRead));
+    assert!(
+        window.took(Step::MarkRead),
+        "the reader sat through the delay before moving on"
+    );
 }
 
 #[tokio::test]
@@ -151,6 +154,28 @@ async fn pictures_for_a_thread_the_reader_left_go_nowhere() {
 #[tokio::test]
 async fn an_unread_thread_is_marked_read_after_the_delay() {
     let window = FakeWindow::new();
+    window.run().open(row(THREAD)).await;
+    assert_eq!(window.0.borrow().marked, [target(None)]);
+}
+
+/// The stored copy says the thread is unread, so the mark goes out as
+/// the thread shows, before the server is asked for anything, and once.
+#[tokio::test]
+async fn the_read_mark_does_not_wait_for_the_server() {
+    let window = FakeWindow::new();
+    window.run().open(row(THREAD)).await;
+    let steps = window.steps();
+    let at = |step: Step| steps.iter().position(|s| *s == step).unwrap();
+    assert!(at(Step::MarkRead) < at(Step::Ensure), "{steps:?}");
+    assert_eq!(window.0.borrow().marked, [target(None)]);
+}
+
+#[tokio::test]
+async fn a_thread_the_store_lacks_is_marked_once_its_messages_arrive() {
+    let window = FakeWindow::new();
+    window.with(|screen| {
+        screen.stored.remove(THREAD);
+    });
     window.run().open(row(THREAD)).await;
     assert_eq!(window.0.borrow().marked, [target(None)]);
 }
@@ -191,7 +216,10 @@ async fn a_reader_who_marks_mail_by_hand_is_left_to_it() {
 #[tokio::test]
 async fn a_thread_already_read_is_not_marked_again() {
     let window = FakeWindow::new();
-    window.with(|screen| screen.messages = vec![meta("m1", false)]);
+    window.with(|screen| {
+        screen.messages = vec![meta("m1", false)];
+        screen.stored.get_mut(THREAD).unwrap().messages = vec![meta("m1", false)];
+    });
     window.run().open(row(THREAD)).await;
     assert!(!window.took(Step::Sleep));
 }

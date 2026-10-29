@@ -361,11 +361,14 @@ impl Stale {
         match event {
             // The store keeps bodies and no pictures, so a thread read
             // before asks for them as it goes on screen.
+            // The stored copy knows whether the thread is unread, so the
+            // read mark goes out now rather than after the server answers.
             Event::Shown => Stale {
                 translation: true,
                 protection: true,
                 invitation: true,
                 images: true,
+                unread: true,
                 receipt: true,
                 ..Stale::default()
             },
@@ -423,13 +426,21 @@ impl Stale {
 pub struct ThreadRun {
     desk: Rc<dyn Desk>,
     effects: Rc<dyn Effects>,
+    /// Set once this run has marked the conversation read, so the bodies
+    /// arriving does not mark it again: the store may not show the mark
+    /// yet when the fresh messages are read.
+    marked_read: std::cell::Cell<bool>,
 }
 
 type Want<'a> = Wanted<'a, dyn Effects>;
 
 impl ThreadRun {
     pub fn new(desk: Rc<dyn Desk>, effects: Rc<dyn Effects>) -> ThreadRun {
-        ThreadRun { desk, effects }
+        ThreadRun {
+            desk,
+            effects,
+            marked_read: std::cell::Cell::new(false),
+        }
     }
 
     fn wanted(&self, target: Target) -> Want<'_> {
@@ -777,6 +788,7 @@ impl ThreadRun {
             wanted.on_screen(|effects| effects.start_engines());
         }
         let unread = stale.unread
+            && !self.marked_read.get()
             && wanted.on_screen(|_| self.thread(OpenThread::unread)) == Some(Some(true));
         futures::join!(
             async {
@@ -830,7 +842,9 @@ impl ThreadRun {
     }
 
     /// Marks the conversation read after the delay the setting asks for,
-    /// if it is still the one on screen by then.
+    /// if it is still the one on screen by then. The delay counts from
+    /// the thread going on screen, as it does in Thunderbird and
+    /// Evolution, not from its bodies arriving.
     async fn mark_read_later(&self, wanted: &Want<'_>) {
         let Some(delay) = self.desk.preferences().mark_read_delay else {
             return;
@@ -839,7 +853,12 @@ impl ThreadRun {
             return;
         }
         let target = wanted.target().clone();
-        wanted.on_screen(|effects| effects.mark_read(target));
+        if wanted
+            .on_screen(|effects| effects.mark_read(target))
+            .is_some()
+        {
+            self.marked_read.set(true);
+        }
     }
 
     /// Fetches the pictures the bodies name by `cid:`. Their text is on
