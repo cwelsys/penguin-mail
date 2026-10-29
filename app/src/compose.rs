@@ -533,10 +533,10 @@ impl CidRefs {
     }
 }
 
-/// A file of the message a forward carries, with the bytes fetched for it.
-/// An image the forwarded HTML shows keeps its id, so the `cid:` in that
-/// HTML still finds it. One the HTML never names travels as a file, which
-/// is how it arrived.
+/// A file of the message a forward or a reply carries, with the bytes
+/// fetched for it. An image the original's HTML shows keeps its id, so the
+/// `cid:` in that HTML still finds it. One the HTML never names travels as
+/// a file, which is how it arrived.
 pub fn forwarded_file(
     found: mailrs_domain::Attachment,
     data: Vec<u8>,
@@ -550,6 +550,47 @@ pub fn forwarded_file(
         mime_type: found.mime_type,
         data: data.into(),
     }
+}
+
+/// The files a reply carries into its quote: the pictures `html`, the
+/// original's HTML, shows inline, each with its place in the original's
+/// list of files, which is how the window finds the bytes it already
+/// holds. The original's other files stay behind, as in every other mail
+/// client's reply.
+pub fn inline_files(
+    files: Vec<mailrs_domain::Attachment>,
+    html: Option<&str>,
+) -> Vec<(usize, mailrs_domain::Attachment)> {
+    let shown = CidRefs::of(html.unwrap_or_default());
+    files
+        .into_iter()
+        .enumerate()
+        .filter(|(_, file)| {
+            file.content_id
+                .as_deref()
+                .is_some_and(|cid| shown.names(cid))
+        })
+        .collect()
+}
+
+/// `html` with the source taken off every picture whose file is not among
+/// `attachments`: one the window could not fetch, or one the writer took
+/// off. A `cid:` that names no part would show as a broken picture. The
+/// HTML is the cleaner's, which writes every attribute in double quotes.
+fn without_lost_pictures(html: &str, attachments: &[OutgoingAttachment]) -> String {
+    let mut html = html.to_string();
+    for value in CidRefs::of(&html).0 {
+        let Some(cid) = value.strip_prefix("cid:") else {
+            continue;
+        };
+        if !attachments
+            .iter()
+            .any(|a| a.content_id.as_deref() == Some(cid))
+        {
+            html = html.replace(&format!("\"{value}\""), "\"\"");
+        }
+    }
+    html
 }
 
 /// Plain text ready to render as Markdown: what Markdown reads as syntax
@@ -610,10 +651,19 @@ pub struct Draft {
     pub forwarded: Option<Box<Forwarded>>,
     /// The attribution line and the quote a reply carries, as Markdown,
     /// while they stay folded out of the editor. They go out under the
-    /// writer's words all the same. `None` once the writer unfolds them,
-    /// which puts them in `markdown`, or drops them.
+    /// writer's words all the same, as the text part and, without
+    /// `quoted_html`, rendered as the HTML too. `None` once the writer
+    /// unfolds them, which puts them in `markdown`, or drops them.
     #[serde(default)]
     pub quoted: Option<String>,
+    /// The quote as its HTML goes out while `quoted` stays folded: the
+    /// attribution line over the original's own HTML in a cite block, so
+    /// the reader's client folds it and shows the original as it was. Set
+    /// once by [`respond`] and never cleared, it counts only while `quoted`
+    /// is `Some`. `None` for a draft built without it, whose quote goes
+    /// out as `quoted` renders.
+    #[serde(default)]
+    pub quoted_html: Option<String>,
     /// The Gmail draft this composer saves into.
     pub draft_id: Option<String>,
     /// When a scheduled draft is due to go out.
@@ -659,6 +709,7 @@ impl Draft {
             attachments: vec![],
             forwarded: None,
             quoted: None,
+            quoted_html: None,
             draft_id: None,
             send_at: None,
             sign: false,
@@ -706,8 +757,8 @@ impl Draft {
     /// saved draft is a round trip like any other.
     ///
     /// A quote saved folded comes back folded: the HTML says where it
-    /// starts with [`QUOTE_MARK`], and the text part gives it back as the
-    /// Markdown it was.
+    /// starts with [`QUOTE_MARK`] and gives back the HTML it goes out as,
+    /// and the text part gives back the Markdown it was.
     pub fn take_body(&mut self, body: &MessageBody) {
         let (html, forwarded_html) = match body.html.as_deref() {
             Some(html) => {
@@ -721,7 +772,8 @@ impl Draft {
         let quote_at = folded.and_then(|_| trailing_quote_at(&text));
         let (text, html) = match (quote_at, folded, html) {
             (Some(at), Some(mark), Some(html)) => {
-                self.quoted = Some(text[at..].trim_end().to_string());
+                self.quoted = Some(escaped_quote(text[at..].trim_end()));
+                self.quoted_html = Some(html[mark + QUOTE_MARK.len()..].to_string());
                 (
                     text[..at].trim_end_matches('\n').to_string(),
                     Some(html[..mark].to_string()),
@@ -729,6 +781,7 @@ impl Draft {
             }
             (_, _, html) => {
                 self.quoted = None;
+                self.quoted_html = None;
                 (text, html)
             }
         };
@@ -756,7 +809,7 @@ impl Draft {
     }
 
     /// Whether the message still shows the inline image `cid`, in what the
-    /// writer wrote or in the message being forwarded.
+    /// writer wrote, in the folded quote or in the message being forwarded.
     fn shows_image(&self, cid: &str) -> bool {
         let needle = format!("cid:{cid}");
         let written = match &self.rich {
@@ -767,7 +820,13 @@ impl Draft {
                 .any(|s| s.image.as_deref() == Some(needle.as_str())),
             None => self.markdown.contains(&needle),
         };
+        let quoted = self
+            .quoted
+            .as_ref()
+            .and(self.quoted_html.as_deref())
+            .is_some_and(|html| refers_to_cid(html, cid));
         written
+            || quoted
             || self
                 .forwarded
                 .as_ref()
@@ -963,8 +1022,9 @@ pub enum ReplyKind {
 /// the account sends as, preferred first: the reply comes from whichever one
 /// the original was written to, and none of them lands in To or Cc.
 /// `thread` is the whole conversation, oldest first. `original_text` and
-/// `original_html` are the original's body; a forward carries the HTML
-/// through unchanged, so what goes out is the message that arrived.
+/// `original_html` are the original's body; a reply quotes the HTML
+/// cleaned, and a forward carries it through unchanged, so what goes out
+/// is the message that arrived.
 pub fn respond(
     kind: ReplyKind,
     account_id: AccountId,
@@ -1016,6 +1076,12 @@ pub fn respond(
                 ),
             };
             draft.quoted = Some(format!("{attributed}\n{}", quote(original_text)));
+            draft.quoted_html = Some(quoted_html(
+                &attributed,
+                original.rfc822_msgid.as_deref(),
+                original_html,
+                original_text,
+            ));
             draft.in_reply_to = original.rfc822_msgid.clone();
             draft.references = references(original, thread);
             // A loose message's thread id is the app's own, which no server
@@ -1081,18 +1147,97 @@ fn prefixed(prefix: &str, subject: &str, existing: &[&str]) -> String {
 fn quote(text: &str) -> String {
     text.trim_end()
         .lines()
-        .map(|line| {
-            let depth = line.bytes().take_while(|b| *b == b'>').count();
-            let words = plain_as_markdown(&line[depth..]);
-            let words = words.trim_end();
-            match (depth, words.is_empty()) {
-                (0, true) => ">".to_string(),
-                (0, false) => format!("> {words}"),
-                (_, _) => format!(">{}{words}", &line[..depth]),
-            }
+        .map(|line| quoted_line(line, true))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The quote a saved draft's text part gives back, escaped for Markdown
+/// again the way [`quote`] wrote it. The attribution line over it, and
+/// any other line without a `>`, stays as it is.
+fn escaped_quote(text: &str) -> String {
+    text.lines()
+        .map(|line| match line.starts_with('>') {
+            true => quoted_line(line, false),
+            false => line.to_string(),
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// One line of a quote: its `>` marks, one more when `deeper`, and its
+/// words escaped for Markdown.
+fn quoted_line(line: &str, deeper: bool) -> String {
+    let depth = line.bytes().take_while(|b| *b == b'>').count();
+    let marks = &line[..depth];
+    let words = plain_as_markdown(&line[depth..]);
+    let words = words.trim_end();
+    match (deeper, depth, words.is_empty()) {
+        (false, _, _) => format!("{marks}{words}"),
+        (true, 0, true) => ">".to_string(),
+        (true, 0, false) => format!("> {words}"),
+        (true, _, _) => format!(">{marks}{words}"),
+    }
+}
+
+/// `text` with its Markdown escapes taken out, for the text part: the
+/// words as the original had them.
+fn unescaped_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' && chars.peek().is_some_and(char::is_ascii_punctuation) {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// The quote block a reply's HTML carries under the writer's words, in the
+/// shape Gmail writes and every client folds: the attribution over a
+/// `<blockquote type="cite">` holding the original's own HTML, cleaned
+/// of anything that runs or submits, and of its `<style>` elements, whose
+/// rules were written for a whole page and would restyle the reply
+/// around them. Its inline pictures keep their `cid:` sources, so the
+/// files the reply carries still show. `cite` names the original by its
+/// Message-ID (RFC 2392). An original with no HTML is quoted from its
+/// text.
+fn quoted_html(attribution: &str, msgid: Option<&str>, html: Option<&str>, text: &str) -> String {
+    let original = match html.filter(|html| !html.trim().is_empty()) {
+        Some(html) => without_styles(&crate::sanitize::sanitize_html(html, Some("cid:"))),
+        None => markdown_to_html(&plain_as_markdown(text)),
+    };
+    let cite = msgid
+        .map(|id| {
+            let id = url::form_urlencoded::byte_serialize(bare_id(id).as_bytes())
+                .collect::<String>()
+                .replace("%40", "@");
+            format!(" cite=\"mid:{id}\"")
+        })
+        .unwrap_or_default();
+    format!(
+        "<div class=\"gmail_quote gmail_quote_container\"><div class=\"gmail_attr\">{}<br></div>\
+         <blockquote class=\"gmail_quote\" type=\"cite\"{cite} style=\"{}\">{original}</blockquote></div>",
+        richtext::escape(attribution),
+        richtext::QUOTE,
+    )
+}
+
+/// `html` without its `<style>` elements. The HTML is the cleaner's, so
+/// every one of them is closed.
+fn without_styles(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find("<style") {
+        out.push_str(&rest[..start]);
+        rest = match rest[start..].find("</style>") {
+            Some(end) => &rest[start + end + "</style>".len()..],
+            None => "",
+        };
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Message ids of the thread up to and including `original`.
@@ -1673,15 +1818,21 @@ enum Purpose {
 /// The two ways of reading what the writer wrote, with the folded quote
 /// or whatever the draft forwards after them.
 ///
-/// A folded quote goes out as the same body the writer would have sent
-/// with it unfolded and untouched. A draft kept in Gmail renders the words
-/// and the quote apart, with [`QUOTE_MARK`] between them, so reopening it
-/// can fold the quote again.
+/// A folded quote goes out under the writer's words as the original's
+/// HTML when the draft holds it, and as the Markdown quote rendered when
+/// it does not; an unfolded one goes out as the writer left it. A draft
+/// kept in Gmail renders the words and the quote apart, with
+/// [`QUOTE_MARK`] between them, so reopening it can fold the quote again.
 fn written(draft: &Draft, purpose: Purpose) -> (String, String) {
+    let quoted_html = draft
+        .quoted_html
+        .as_deref()
+        .map(|html| without_lost_pictures(html, &draft.attachments));
     let (mut text, mut html) = written_body(
         &draft.markdown,
         draft.rich.as_ref(),
         draft.quoted.as_deref(),
+        quoted_html.as_deref(),
         purpose,
     );
     if let Some(forwarded) = &draft.forwarded {
@@ -1693,8 +1844,13 @@ fn written(draft: &Draft, purpose: Purpose) -> (String, String) {
 
 /// The HTML a message goes out with for these words and this folded
 /// quote, without anything forwarded. The composer's preview shows it.
-pub fn html_to_send(markdown: &str, rich: Option<&RichBody>, quoted: Option<&str>) -> String {
-    written_body(markdown, rich, quoted, Purpose::Send).1
+pub fn html_to_send(
+    markdown: &str,
+    rich: Option<&RichBody>,
+    quoted: Option<&str>,
+    quoted_html: Option<&str>,
+) -> String {
+    written_body(markdown, rich, quoted, quoted_html, Purpose::Send).1
 }
 
 /// [`written`] without the forwarded message.
@@ -1702,12 +1858,24 @@ fn written_body(
     markdown: &str,
     rich: Option<&RichBody>,
     quoted: Option<&str>,
+    quoted_html: Option<&str>,
     purpose: Purpose,
 ) -> (String, String) {
-    match (rich, quoted) {
-        (Some(rich), None) => (rich.to_plain(), rich.to_html()),
-        (None, None) => (markdown.to_string(), markdown_to_html(markdown)),
-        (Some(rich), Some(quoted)) => {
+    match (rich, quoted, quoted_html) {
+        (Some(rich), None, _) => (rich.to_plain(), rich.to_html()),
+        (None, None, _) => (markdown.to_string(), markdown_to_html(markdown)),
+        (rich, Some(quoted), Some(quoted_html)) => {
+            let (plain, html) = match rich {
+                Some(rich) => (rich.to_plain(), rich.to_html()),
+                None => (markdown.to_string(), markdown_to_html(markdown)),
+            };
+            let html = match purpose {
+                Purpose::Send => format!("{html}{quoted_html}"),
+                Purpose::Keep => format!("{html}{QUOTE_MARK}{quoted_html}"),
+            };
+            (unfolded_markdown(&plain, &unescaped_markdown(quoted)), html)
+        }
+        (Some(rich), Some(quoted), None) => {
             let history = RichBody::from_markdown(quoted);
             let whole = unfolded_rich(rich, &history);
             let html = match purpose {
@@ -1716,7 +1884,7 @@ fn written_body(
             };
             (whole.to_plain(), html)
         }
-        (None, Some(quoted)) => {
+        (None, Some(quoted), None) => {
             let whole = unfolded_markdown(markdown, quoted);
             let html = match purpose {
                 Purpose::Send => markdown_to_html(&whole),
@@ -3692,40 +3860,179 @@ mod tests {
         (reopened, (text, html))
     }
 
-    #[test]
-    fn a_folded_quote_goes_out_as_the_open_quote_did() {
-        let folded = folded_reply();
-        let quoted = folded.quoted.clone().expect("a reply folds its quote");
-        // The body as the composer held it before folding: words, signature,
-        // then the quote, all in the editor.
-        let mut open = folded.clone();
-        open.quoted = None;
-        open.markdown = format!("Thanks.\n\n-- \nDana\n\n{quoted}");
-        assert_eq!(
-            parts(&build_mime(&folded, 0, "id@example.com").unwrap()),
-            parts(&build_mime(&open, 0, "id@example.com").unwrap())
+    /// Ann's message as its HTML part arrived: a stylesheet in the head, a
+    /// picture the message carries, one it does not, and a script.
+    const ORIGINAL_HTML: &str = "<html><head><style>p{color:red}</style></head>\
+        <body><p>Noon <b>works</b>.</p><img src=\"cid:logo\"><img src=\"cid:gone\">\
+        <script>x()</script></body></html>";
+
+    /// A reply to Ann's HTML message, with her logo attached as the window
+    /// attaches it.
+    fn folded_html_reply() -> Draft {
+        let original = message(
+            "m2",
+            addr(Some("Ann"), "ann@example.com"),
+            vec![me()],
+            vec![],
         );
+        let mut draft = respond(
+            ReplyKind::Reply,
+            1,
+            &[me()],
+            &original,
+            "Noon works.\n\nSee you",
+            Some(ORIGINAL_HTML),
+            &[],
+        );
+        draft.markdown = "Thanks.".into();
+        draft.attachments.push(OutgoingAttachment {
+            filename: "logo.png".into(),
+            mime_type: "image/png".into(),
+            data: vec![1, 2, 3].into(),
+            content_id: Some("logo".into()),
+        });
+        draft
+    }
+
+    #[test]
+    fn a_folded_quote_sends_the_original_html_as_a_cite() {
+        let draft = folded_html_reply();
+        let raw = build_mime(&draft, 0, "id@example.com").unwrap();
+        let (text, html) = parts(&raw);
+        let quote = html
+            .find("<div class=\"gmail_quote gmail_quote_container\">")
+            .map(|at| &html[at..])
+            .expect("the quote block");
+        assert!(quote.contains("class=\"gmail_attr\">On "), "{quote}");
+        assert!(quote.contains("Ann wrote:<br></div>"), "{quote}");
+        assert!(
+            quote.contains(
+                "<blockquote class=\"gmail_quote\" type=\"cite\" cite=\"mid:m2@mail.example.com\""
+            ),
+            "{quote}"
+        );
+        assert!(quote.contains("<p>Noon <b>works</b>.</p>"), "{quote}");
+        assert!(quote.contains("src=\"cid:logo\""), "{quote}");
+        for gone in ["cid:gone", "<style", "<script", "<head", "<body"] {
+            assert!(!quote.contains(gone), "{gone} in {quote}");
+        }
+        assert!(text.ends_with("Thanks.\n\nOn Thursday, 4 September 2025 at 11:33, Ann wrote:\n> Noon works.\n>\n> See you"), "{text}");
+        let raw = String::from_utf8_lossy(&raw);
+        assert!(raw.contains("multipart/related"), "{raw}");
+        assert!(raw.contains("Content-ID: <logo>"), "{raw}");
     }
 
     #[test]
     fn a_folded_quote_in_rich_text_goes_out_under_the_words() {
-        let mut folded = folded_reply();
-        let quoted = folded.quoted.clone().unwrap();
+        let mut folded = folded_html_reply();
         folded.rich = Some(RichBody::from_markdown("Thanks."));
-        let mut open = folded.clone();
-        open.quoted = None;
-        let mut blocks = RichBody::from_markdown("Thanks.").blocks;
-        blocks.push(crate::richtext::Block::default());
-        blocks.extend(RichBody::from_markdown(&quoted).blocks);
-        open.rich = Some(RichBody { blocks });
         let (text, html) = parts(&build_mime(&folded, 0, "id@example.com").unwrap());
         assert!(text.contains("Thanks.\n\nOn "), "{text}");
         assert!(text.contains("> Noon works."), "{text}");
-        assert!(html.contains("<blockquote"), "{html}");
-        assert_eq!(
-            (text, html),
-            parts(&build_mime(&open, 0, "id@example.com").unwrap())
+        let words = html.find("Thanks.").expect("the words");
+        let quote = html.find("gmail_quote").expect("the quote");
+        assert!(words < quote, "{html}");
+    }
+
+    #[test]
+    fn a_text_only_original_is_quoted_in_one_cite_block() {
+        let original = message(
+            "m2",
+            addr(Some("Ann"), "ann@example.com"),
+            vec![me()],
+            vec![],
         );
+        let text = "I'm happy to go with whatever works.\n--\nWarm regards,";
+        let mut draft = respond(ReplyKind::Reply, 1, &[me()], &original, text, None, &[]);
+        draft.markdown = "Thanks.".into();
+        let (text, html) = parts(&build_mime(&draft, 0, "id@example.com").unwrap());
+        assert!(!html.contains("<h2"), "{html}");
+        assert_eq!(html.matches("<blockquote").count(), 1, "{html}");
+        assert!(html.contains("type=\"cite\""), "{html}");
+        assert!(html.contains("whatever works.<br"), "{html}");
+        assert!(text.ends_with("> --\n> Warm regards,"), "{text}");
+    }
+
+    #[test]
+    fn unfolding_sends_the_markdown_quote_and_undo_brings_the_html_back() {
+        let mut draft = folded_html_reply();
+        let history = draft.unfold().expect("a quote to unfold");
+        let (_, html) = parts(&build_mime(&draft, 0, "id@example.com").unwrap());
+        assert!(!html.contains("gmail_quote"), "{html}");
+        assert!(html.contains("<blockquote"), "{html}");
+        assert!(html.contains("Noon works."), "{html}");
+        // Undo folds it again, as the composer does, and the original's
+        // HTML goes out once more.
+        draft.quoted = Some(history.markdown);
+        let (_, html) = parts(&build_mime(&draft, 0, "id@example.com").unwrap());
+        assert!(html.contains("<p>Noon <b>works</b>.</p>"), "{html}");
+    }
+
+    #[test]
+    fn a_quote_whose_picture_was_not_attached_loses_its_source() {
+        let mut draft = folded_html_reply();
+        draft.attachments.clear();
+        let (_, html) = parts(&build_mime(&draft, 0, "id@example.com").unwrap());
+        assert!(!html.contains("cid:logo"), "{html}");
+        assert!(html.contains("<img"), "{html}");
+    }
+
+    #[test]
+    fn a_draft_saved_without_the_html_quote_sends_as_it_did() {
+        let mut draft = folded_reply();
+        draft.quoted_html = None;
+        let (text, html) = parts(&build_mime(&draft, 0, "id@example.com").unwrap());
+        assert!(!html.contains("gmail_quote"), "{html}");
+        assert!(html.contains("<blockquote"), "{html}");
+        assert!(text.contains("> Noon works."), "{text}");
+        let mut stored = serde_json::to_value(&draft).unwrap();
+        stored.as_object_mut().unwrap().remove("quoted_html");
+        let read: Draft = serde_json::from_value(stored).unwrap();
+        assert_eq!(read.quoted_html, None);
+    }
+
+    #[test]
+    fn a_folded_html_quote_reopens_and_sends_the_same_bytes() {
+        let mut folded = folded_html_reply();
+        folded.rich = Some(RichBody::from_markdown("Thanks."));
+        let (mut reopened, _) = saved_and_reopened(&folded);
+        reopened.attachments = folded.attachments.clone();
+        assert_eq!(reopened.quoted, folded.quoted);
+        assert!(
+            reopened
+                .quoted_html
+                .as_deref()
+                .is_some_and(|html| html.contains("<p>Noon <b>works</b>.</p>")),
+            "{:?}",
+            reopened.quoted_html
+        );
+        assert_eq!(
+            parts(&build_mime(&reopened, 0, "id@example.com").unwrap()),
+            parts(&build_mime(&folded, 0, "id@example.com").unwrap())
+        );
+    }
+
+    #[test]
+    fn a_reply_carries_only_the_pictures_its_quote_shows() {
+        let file = |name: &str, cid: Option<&str>| mailrs_domain::Attachment {
+            part_id: name.to_string(),
+            filename: name.to_string(),
+            mime_type: "application/octet-stream".to_string(),
+            size: 1,
+            attachment_id: None,
+            content_id: cid.map(str::to_string),
+        };
+        let files = vec![
+            file("report.pdf", None),
+            file("logo.png", Some("logo")),
+            file("old.png", Some("unused")),
+        ];
+        let kept: Vec<(usize, String)> = inline_files(files.clone(), Some(ORIGINAL_HTML))
+            .into_iter()
+            .map(|(index, file)| (index, file.filename))
+            .collect();
+        assert_eq!(kept, [(1, "logo.png".to_string())]);
+        assert!(inline_files(files, None).is_empty());
     }
 
     #[test]

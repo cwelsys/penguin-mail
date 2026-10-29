@@ -2748,8 +2748,7 @@ impl MainWindow {
         if view.read(|open| open.loose.as_ref().is_some_and(|l| !l.has_account)) == Some(true) {
             return self.toast(&gettext("Add an account to reply or forward"));
         }
-        let Some(answering) = view.find(|open| open.answering(only, kind == ReplyKind::Forward))
-        else {
+        let Some(answering) = view.find(|open| open.answering(only)) else {
             return;
         };
         let crate::open_thread::Answering {
@@ -2799,6 +2798,12 @@ impl MainWindow {
         }
         // A message that arrived encrypted is answered encrypted.
         draft.encrypt |= secret;
+        // A forward takes every file; a reply only the pictures its quote
+        // shows. Each keeps its place in the original's list.
+        let attachments: Vec<(usize, mailrs_domain::Attachment)> = match kind {
+            ReplyKind::Forward => attachments.into_iter().enumerate().collect(),
+            _ => compose::inline_files(attachments, html.as_deref()),
+        };
         if attachments.is_empty() {
             app.open_composer(draft, Signature::Add);
             return;
@@ -2817,14 +2822,13 @@ impl MainWindow {
         let sync = self.core.account(account_id);
         let fetches = attachments
             .iter()
-            .enumerate()
-            .any(|(index, a)| held.get(index).is_none() && a.attachment_id.is_some());
+            .any(|(index, a)| held.get(*index).is_none() && a.attachment_id.is_some());
         if fetches && sync.is_none() {
             return;
         }
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
-            for (index, attachment) in attachments.into_iter().enumerate() {
+            for (index, attachment) in attachments {
                 if let Some(bytes) = held.get_mut(index).and_then(Option::take) {
                     draft.attachments.push(compose::forwarded_file(
                         attachment,
