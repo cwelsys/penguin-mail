@@ -1,9 +1,14 @@
+mod common;
+
 use mailrs_graph::{
     Granted, GraphError, Loopback, Me, MicrosoftClient, PERSONAL_TENANT, Pkce, SCOPES, Tenant,
-    client_from, parse_redirect,
+    client_from, mailbox_address, parse_redirect,
 };
+use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use url::Url;
+use wiremock::matchers::{method, path, query_param};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const CLIENT: &str = "00000000-0000-0000-0000-000000000000";
 
@@ -99,19 +104,104 @@ fn granted_scopes_read_with_or_without_graphs_prefix() {
 }
 
 #[test]
-fn an_address_comes_from_mail_or_the_sign_in_name() {
-    let personal = Me {
-        display_name: None,
-        mail: None,
-        user_principal_name: Some("Dana@Outlook.com".into()),
-    };
-    assert_eq!(personal.address().as_deref(), Some("dana@outlook.com"));
+fn an_address_is_the_mail_the_tenant_sets_never_the_sign_in_name() {
     let work = Me {
         display_name: None,
-        mail: Some("d.reyes@contoso.com".into()),
+        mail: Some("D.Reyes@contoso.com".into()),
         user_principal_name: Some("dreyes@contoso.onmicrosoft.com".into()),
     };
     assert_eq!(work.address().as_deref(), Some("d.reyes@contoso.com"));
+    // A personal account can sign in with an address from outside
+    // Microsoft, which reaches another mailbox altogether.
+    let personal = Me {
+        display_name: None,
+        mail: None,
+        user_principal_name: Some("cwel@cwel.sh".into()),
+    };
+    assert_eq!(personal.address(), None);
+}
+
+fn personal(sign_in_name: &str) -> Me {
+    Me {
+        display_name: None,
+        mail: None,
+        user_principal_name: Some(sign_in_name.into()),
+    }
+}
+
+async fn sent_items(server: &MockServer, messages: serde_json::Value, times: u64) {
+    Mock::given(method("GET"))
+        .and(path("/v1.0/me/mailFolders/sentitems/messages"))
+        .and(query_param("$top", "1"))
+        .and(query_param("$select", "from"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": messages })))
+        .expect(times)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn an_account_with_mail_is_not_asked_what_it_sent() {
+    let server = MockServer::start().await;
+    common::token_endpoint(&server, "r").await;
+    sent_items(&server, json!([]), 0).await;
+    let me = Me {
+        mail: Some("d.reyes@contoso.com".into()),
+        ..personal("dreyes@contoso.onmicrosoft.com")
+    };
+    let address = mailbox_address(&common::graph(&server), &me, Some("typed@example.com"))
+        .await
+        .unwrap();
+    assert_eq!(address, "d.reyes@contoso.com");
+}
+
+#[tokio::test]
+async fn a_personal_account_sends_as_the_from_of_its_newest_sent_message() {
+    let server = MockServer::start().await;
+    common::token_endpoint(&server, "r").await;
+    sent_items(
+        &server,
+        json!([{"from": {"emailAddress": {"name": "Connor", "address": "Connor.W@Outlook.com"}}}]),
+        1,
+    )
+    .await;
+    let address = mailbox_address(
+        &common::graph(&server),
+        &personal("cwel@cwel.sh"),
+        Some("cwel@cwel.sh"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(address, "connor.w@outlook.com");
+}
+
+#[tokio::test]
+async fn a_mailbox_that_sent_nothing_takes_the_address_the_person_typed() {
+    let server = MockServer::start().await;
+    common::token_endpoint(&server, "r").await;
+    sent_items(&server, json!([]), 1).await;
+    let address = mailbox_address(
+        &common::graph(&server),
+        &personal("cwel@cwel.sh"),
+        Some("Connor.W@Outlook.com"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(address, "connor.w@outlook.com");
+}
+
+#[tokio::test]
+async fn with_nothing_else_the_sign_in_name_stands_in_when_it_is_an_address() {
+    let server = MockServer::start().await;
+    common::token_endpoint(&server, "r").await;
+    sent_items(&server, json!([]), 2).await;
+    let graph = common::graph(&server);
+    let address = mailbox_address(&graph, &personal("Dana@Outlook.com"), None)
+        .await
+        .unwrap();
+    assert_eq!(address, "dana@outlook.com");
+    let none = mailbox_address(&graph, &personal("dana"), None).await;
+    assert!(matches!(none, Err(GraphError::OAuth(_))), "{none:?}");
 }
 
 #[tokio::test]

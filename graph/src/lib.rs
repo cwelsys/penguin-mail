@@ -13,8 +13,8 @@ pub mod settings;
 
 pub use auth::{
     AccessToken, Authorized, Granted, IdToken, Loopback, Me, MicrosoftClient, PERSONAL_TENANT,
-    Pkce, SCOPES, Session, Tenant, Tokens, authorize, built_in_client, client_from, parse_redirect,
-    random_token,
+    Pkce, SCOPES, Session, Tenant, Tokens, authorize, built_in_client, client_from,
+    mailbox_address, parse_redirect, random_token,
 };
 pub use calendar::{
     Attendee, CALENDAR_COLORS, GraphCalendar, GraphEvent, Location, OnlineMeeting,

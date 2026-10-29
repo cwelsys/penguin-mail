@@ -19,7 +19,8 @@ use url::Url;
 use mailrs_domain::sign_in_page::{self, Finished};
 
 use crate::error::GraphError;
-use crate::http::Graph;
+use crate::http::{Graph, Page};
+use crate::mail::Message;
 
 /// The most a token endpoint's answer may take; a real one is a few hundred bytes.
 const TOKEN_LIMIT: usize = 64 << 10;
@@ -603,15 +604,51 @@ pub struct Me {
 }
 
 impl Me {
-    /// The mail address, in lower case: `mail` where the tenant sets it,
-    /// else the sign-in name, which is the address for a personal account.
+    /// The mail address, in lower case, where the tenant sets `mail`. A
+    /// personal account often has none, and its sign-in name is no
+    /// substitute: it can be an address outside Microsoft that reaches
+    /// another mailbox altogether. See [`mailbox_address`].
     pub fn address(&self) -> Option<String> {
-        self.mail
-            .as_deref()
-            .or(self.user_principal_name.as_deref())
-            .filter(|a| a.contains('@'))
-            .map(str::to_ascii_lowercase)
+        as_address(self.mail.as_deref())
     }
+}
+
+fn as_address(text: Option<&str>) -> Option<String> {
+    text.filter(|a| a.contains('@'))
+        .map(str::to_ascii_lowercase)
+}
+
+/// The address the signed-in mailbox sends as, in lower case. `mail` when
+/// the tenant sets it, as GNOME Online Accounts reads it. Else the From
+/// of the newest message in Sent Items, which carries the address the
+/// mailbox sent as. Else `login_hint`, the address the person typed or
+/// the account signs in again as, which is what Evolution and
+/// Thunderbird go by. The sign-in name stands in last, for a new mailbox
+/// nobody typed an address for.
+pub async fn mailbox_address(
+    graph: &Graph,
+    me: &Me,
+    login_hint: Option<&str>,
+) -> Result<String, GraphError> {
+    if let Some(address) = me.address() {
+        return Ok(address);
+    }
+    let sent: Page<Message> = graph
+        .get(
+            "me/mailFolders/sentitems/messages",
+            &[("$top", "1"), ("$select", "from")],
+        )
+        .await?;
+    let sent_as = sent
+        .value
+        .into_iter()
+        .next()
+        .and_then(|m| m.from)
+        .and_then(|from| from.email_address.address);
+    as_address(sent_as.as_deref())
+        .or_else(|| as_address(login_hint))
+        .or_else(|| as_address(me.user_principal_name.as_deref()))
+        .ok_or_else(|| GraphError::OAuth("Microsoft named no mail address for this account".into()))
 }
 
 /// What a finished sign-in hands the app.
@@ -624,7 +661,7 @@ pub struct Authorized {
 }
 
 /// The whole sign-in: the loopback, the consent page through `open`, the
-/// code exchange, the address from `/me`, and one call to the Inbox that
+/// code exchange, the mailbox's address, and one call to the Inbox that
 /// an on-premises mailbox refuses with `MailboxOnPremises`, so such an
 /// account is never added.
 pub async fn authorize(
@@ -657,9 +694,7 @@ pub async fn authorize(
     let _: serde_json::Value = graph
         .get("me/mailFolders/inbox", &[("$select", "id")])
         .await?;
-    let email = me.address().ok_or_else(|| {
-        GraphError::OAuth("Microsoft named no mail address for this account".into())
-    })?;
+    let email = mailbox_address(&graph, &me, login_hint).await?;
     Ok(Authorized {
         email,
         name: me.display_name,
