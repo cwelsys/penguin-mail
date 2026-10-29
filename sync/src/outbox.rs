@@ -1204,6 +1204,9 @@ impl<A: Accounts> Outbox<A> {
             }
             Ok(Settled::Sent) => {
                 self.forget(&message).await?;
+                if let Some(raw) = &message.raw {
+                    sync.mark_sent(raw).await;
+                }
                 drained.sent.push(message);
                 drained.changed = true;
             }

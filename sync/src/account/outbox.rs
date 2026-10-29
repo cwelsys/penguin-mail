@@ -28,8 +28,8 @@ impl AccountSync {
         thread_id: Option<String>,
         draft_id: Option<String>,
     ) -> Result<String, SyncError> {
-        let forwarded = ids_in(&raw, FORWARDED_HEADER);
-        let raw = without_header(&raw, FORWARDED_HEADER);
+        let composed = raw;
+        let raw = without_header(&composed, FORWARDED_HEADER);
         let sent = self.mail.send(&raw, thread_id.as_deref()).await?;
         let message_id = self.file_sent(&raw).await.unwrap_or_else(|| sent.clone());
         if let Some(draft_id) = draft_id {
@@ -45,10 +45,21 @@ impl AccountSync {
             }
             self.forget_draft(&draft_id).await;
         }
-        self.mark_answered(&raw).await;
-        self.mark(&forwarded, FORWARDED).await;
+        self.mark_sent(&composed).await;
         self.tell_local(&message_id).await;
         Ok(message_id)
+    }
+
+    /// The marks the message `composed` leaves on the mail it answers,
+    /// once it has gone: `\Answered` on the message its `In-Reply-To`
+    /// names, `$forwarded` on the one the composer's own header names.
+    /// The outbox calls this for a message the server held and sent at
+    /// its hour, from the bytes the row kept, since a hold may still be
+    /// called back until then.
+    pub async fn mark_sent(&self, composed: &[u8]) {
+        self.mark_answered(composed).await;
+        self.mark(&ids_in(composed, FORWARDED_HEADER), FORWARDED)
+            .await;
     }
 
     /// `\Answered` on the message `raw` replies to, found by `In-Reply-To`.
