@@ -46,30 +46,33 @@ impl AccountSync {
         Ok(message_id)
     }
 
-    /// `\Answered` on the message `raw` replies to, on IMAP and JMAP,
-    /// for the person's other mail programs. Gmail has no such flag, and
-    /// Outlook keeps its own, which this does not write. The original is
-    /// found by `In-Reply-To`, so every copy of it in the account is
-    /// marked, which on IMAP means each mailbox it is filed in. The
-    /// message has gone out by now, so a miss or a refusal only goes to
-    /// the log.
+    /// `\Answered` on the message `raw` replies to, found by `In-Reply-To`.
     async fn mark_answered(&self, raw: &[u8]) {
+        self.mark(&ids_in(raw, "In-Reply-To"), ANSWERED).await;
+    }
+
+    /// `keyword` on the messages `msgids` name, on IMAP and JMAP, for the
+    /// person's other mail programs. Gmail has no such flags, and Outlook
+    /// keeps its own, which this does not write. Every copy in the account
+    /// is marked, which on IMAP means each mailbox the message is filed
+    /// in. The message that named them has gone out by now, so a miss or
+    /// a refusal only goes to the log.
+    async fn mark(&self, msgids: &[String], keyword: &str) {
         if !matches!(
             self.mail.untranslated(),
             AnyMail::Imap(_) | AnyMail::Jmap(_)
         ) {
             return;
         }
-        let answered = in_reply_to(raw);
-        if answered.is_empty() {
+        if msgids.is_empty() {
             return;
         }
-        let account_id = self.account_id;
+        let (account_id, msgids) = (self.account_id, msgids.to_vec());
         let ids = self
             .db
             .read(move |c| {
                 let mut ids = Vec::new();
-                for msgid in &answered {
+                for msgid in &msgids {
                     ids.extend(messages::with_msgid(c, account_id, msgid)?);
                 }
                 Ok(ids)
@@ -79,12 +82,13 @@ impl AccountSync {
         if ids.is_empty() {
             tracing::info!(
                 account = self.account_id,
-                "the message answered is not in the store"
+                keyword,
+                "the message to mark is not in the store"
             );
             return;
         }
         let op = MailOp::SetKeyword {
-            keyword: ANSWERED.to_string(),
+            keyword: keyword.to_string(),
             on: true,
         };
         let moves = self.mail.hold_moves().await;
@@ -96,7 +100,8 @@ impl AccountSync {
             // No server text, address or message id in the log.
             tracing::info!(
                 account = self.account_id,
-                "could not mark a message answered"
+                keyword,
+                "could not mark a message"
             );
         }
     }
@@ -522,11 +527,11 @@ pub(crate) fn message_id_header(raw: &[u8]) -> Option<String> {
     mailrs_mime::head::message_id(raw)
 }
 
-/// The Message-IDs `raw` answers, from `In-Reply-To`, without their angle
-/// brackets. RFC 5322 lets the header name more than one.
-fn in_reply_to(raw: &[u8]) -> Vec<String> {
+/// The Message-IDs the header `name` of `raw` holds, without their angle
+/// brackets. RFC 5322 lets `In-Reply-To` name more than one.
+fn ids_in(raw: &[u8], name: &str) -> Vec<String> {
     mailrs_mime::head::head(raw)
-        .header("In-Reply-To")
+        .header(name)
         .map(|value| {
             value
                 .split_whitespace()
@@ -540,7 +545,7 @@ fn in_reply_to(raw: &[u8]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EXPORT_BATCH_BYTES, export_batches, in_reply_to, message_id_header};
+    use super::{EXPORT_BATCH_BYTES, export_batches, ids_in, message_id_header};
 
     #[test]
     fn an_export_asks_for_small_messages_together_and_large_ones_alone() {
@@ -557,10 +562,10 @@ mod tests {
     }
 
     #[test]
-    fn in_reply_to_names_every_message_answered() {
+    fn a_header_names_every_message_it_holds() {
         let raw = b"Subject: Re\r\nIn-Reply-To: <a@x>\r\n <b@x>\r\n\r\nHi";
-        assert_eq!(in_reply_to(raw), ["a@x", "b@x"]);
-        assert!(in_reply_to(b"Subject: Hi\r\n\r\nHi").is_empty());
+        assert_eq!(ids_in(raw, "In-Reply-To"), ["a@x", "b@x"]);
+        assert!(ids_in(b"Subject: Hi\r\n\r\nHi", "In-Reply-To").is_empty());
     }
 
     #[test]
