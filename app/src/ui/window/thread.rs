@@ -302,8 +302,16 @@ impl Effects for Ports {
         message_ids: Vec<String>,
     ) -> Answer<'_, Vec<(String, Result<MessageBody, String>)>> {
         Box::pin(async move {
-            let Ok(sync) = self.sync(account_id) else {
-                return Vec::new();
+            // Each body fails with the reason, so the page says so rather
+            // than loading for ever, and a reply knows nothing will come.
+            let sync = match self.sync(account_id) {
+                Ok(sync) => sync,
+                Err(reason) => {
+                    return message_ids
+                        .into_iter()
+                        .map(|id| (id, Err(reason.clone())))
+                        .collect();
+                }
             };
             let fetches = message_ids.into_iter().map(|id| {
                 let (core, sync) = (Rc::clone(&self.core), sync.clone());
