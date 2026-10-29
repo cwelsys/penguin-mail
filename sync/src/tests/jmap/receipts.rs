@@ -309,3 +309,19 @@ async fn an_answered_receipt_is_open_no_longer() {
     h.sync.answer_receipt(&id, false).await.unwrap();
     assert!(!h.sync.receipt_open(&id).await.unwrap());
 }
+
+#[tokio::test]
+async fn sending_a_reply_marks_the_original_answered() {
+    let h = over(FakeJmap::new()).await;
+    let id = asked(&h).await;
+    let reply = b"From: me@example.com\r\nTo: ines@allotment.example\r\nSubject: Re: Rota\r\n\
+Message-ID: <re-rota@example.com>\r\nIn-Reply-To: <rota@allotment.example>\r\n\r\nSeen it.\r\n";
+
+    h.sync.send(reply.to_vec(), None, None).await.unwrap();
+
+    assert!(
+        h.fake
+            .with(|s| s.emails[&id].keywords.contains("$answered")),
+        "other mail programs show the reply arrow"
+    );
+}

@@ -458,3 +458,22 @@ fn unread_in_inbox_keeps_only_the_mail_still_waiting_to_be_read() {
         "only what was asked, and only unread Inbox mail"
     );
 }
+
+#[test]
+fn with_msgid_finds_every_copy_in_either_spelling_within_the_account() {
+    let (conn, a, b) = common::mixed_mail();
+    let mut bare = meta(a, "a6", "ta6", 600, &["INBOX"]);
+    bare.rfc822_msgid = Some("a1@example.com".into());
+    let mut other = meta(b, "b4", "tb4", 900, &["INBOX"]);
+    other.rfc822_msgid = Some("<a1@example.com>".into());
+    store(&conn, &[bare, other]);
+
+    let mut found = messages::with_msgid(&conn, a, "a1@example.com").unwrap();
+    found.sort();
+    assert_eq!(found, ["a1", "a6"]);
+    assert!(
+        messages::with_msgid(&conn, a, "nobody@example.com")
+            .unwrap()
+            .is_empty()
+    );
+}

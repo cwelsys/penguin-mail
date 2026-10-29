@@ -376,16 +376,40 @@ async fn an_account_gmail_names_no_sender_for_takes_the_name_on_its_sent_mail() 
     });
     let named = |id: &str, name: Option<&str>, from: &str, date, labels: &[&str]| {
         let mut m = meta(id, id, date, labels);
-        m.from = Some(mailrs_domain::Address { name: name.map(str::to_string), email: from.into() });
+        m.from = Some(mailrs_domain::Address {
+            name: name.map(str::to_string),
+            email: from.into(),
+        });
         m
     };
     let now = crate::now_millis();
-    h.fake.deliver(named("old", Some("Old Name"), &email, now - 3000, &["SENT"]));
-    h.fake.deliver(named("mine", Some("Dana Reis"), &email.to_uppercase(), now - 2000, &["SENT"]));
-    h.fake.deliver(named("bare", None, &email, now - 1000, &["SENT"]));
-    h.fake.deliver(named("spoof", Some("Not Me"), &email, now, &["INBOX"]));
+    h.fake.deliver(named(
+        "old",
+        Some("Old Name"),
+        &email,
+        now - 3000,
+        &["SENT"],
+    ));
+    h.fake.deliver(named(
+        "mine",
+        Some("Dana Reis"),
+        &email.to_uppercase(),
+        now - 2000,
+        &["SENT"],
+    ));
+    h.fake
+        .deliver(named("bare", None, &email, now - 1000, &["SENT"]));
+    h.fake
+        .deliver(named("spoof", Some("Not Me"), &email, now, &["INBOX"]));
     h.sync.incremental().await.unwrap();
-    assert_eq!(settings(&h).display_name(h.account_id).await.unwrap().as_deref(), Some("Dana Reis"));
+    assert_eq!(
+        settings(&h)
+            .display_name(h.account_id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("Dana Reis")
+    );
 }
 
 #[tokio::test]
@@ -1240,4 +1264,21 @@ async fn a_message_sent_during_a_switch_waits_for_the_switch_to_end() {
     let posted = posting.await.unwrap().unwrap();
     assert!(matches!(posted, Posted::Sent(_)), "{posted:?}");
     assert_eq!(h.fake.with(|s| s.sent.len()), 1);
+}
+
+#[tokio::test]
+async fn a_reply_marks_nothing_on_gmail_which_keeps_no_answered_state() {
+    let h = harness().await;
+    h.fake.deliver(meta("a", "t1", 100, &["INBOX"]));
+    h.bootstrap_all().await;
+    let before = h.fake.usage();
+    let reply = b"From: me@example.com\r\nTo: a@example.com\r\nSubject: Re\r\n\
+Message-ID: <re-a@example.com>\r\nIn-Reply-To: <a@example.com>\r\n\r\nYes.\r\n";
+
+    h.sync.send(reply.to_vec(), None, None).await.unwrap();
+
+    let after = h.fake.usage();
+    for method in ["users.messages.modify", "users.messages.batchModify"] {
+        assert_eq!(after.calls_to(method), before.calls_to(method));
+    }
 }

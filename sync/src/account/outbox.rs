@@ -6,13 +6,14 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
+use mailrs_domain::mailbox::keyword::ANSWERED;
 use mailrs_domain::translate::gettext;
 use mailrs_domain::{ChangeEvent, Role};
 use mailrs_store::messages::Change;
 use mailrs_store::{drafts, messages, outbox};
 
 use super::AccountSync;
-use crate::{BackendError, SavedDraft, SyncError};
+use crate::{AnyMail, BackendError, MailOp, SavedDraft, SyncError};
 
 impl AccountSync {
     /// Sends raw RFC 822 bytes, then deletes `draft_id` if the message came
@@ -40,8 +41,64 @@ impl AccountSync {
             }
             self.forget_draft(&draft_id).await;
         }
+        self.mark_answered(&raw).await;
         self.tell_local(&message_id).await;
         Ok(message_id)
+    }
+
+    /// `\Answered` on the message `raw` replies to, on IMAP and JMAP,
+    /// for the person's other mail programs. Gmail has no such flag, and
+    /// Outlook keeps its own, which this does not write. The original is
+    /// found by `In-Reply-To`, so every copy of it in the account is
+    /// marked, which on IMAP means each mailbox it is filed in. The
+    /// message has gone out by now, so a miss or a refusal only goes to
+    /// the log.
+    async fn mark_answered(&self, raw: &[u8]) {
+        if !matches!(
+            self.mail.untranslated(),
+            AnyMail::Imap(_) | AnyMail::Jmap(_)
+        ) {
+            return;
+        }
+        let answered = in_reply_to(raw);
+        if answered.is_empty() {
+            return;
+        }
+        let account_id = self.account_id;
+        let ids = self
+            .db
+            .read(move |c| {
+                let mut ids = Vec::new();
+                for msgid in &answered {
+                    ids.extend(messages::with_msgid(c, account_id, msgid)?);
+                }
+                Ok(ids)
+            })
+            .await
+            .unwrap_or_default();
+        if ids.is_empty() {
+            tracing::info!(
+                account = self.account_id,
+                "the message answered is not in the store"
+            );
+            return;
+        }
+        let op = MailOp::SetKeyword {
+            keyword: ANSWERED.to_string(),
+            on: true,
+        };
+        let moves = self.mail.hold_moves().await;
+        let marked = match moves.named(&ids).await {
+            Ok(named) => moves.apply(&named, &[op]).await.is_ok(),
+            Err(_) => false,
+        };
+        if !marked {
+            // No server text, address or message id in the log.
+            tracing::info!(
+                account = self.account_id,
+                "could not mark a message answered"
+            );
+        }
     }
 
     /// On an account whose mailboxes are local the adapter wrote the
@@ -182,9 +239,15 @@ impl AccountSync {
     /// Sends a draft as the server holds it, as a scheduled send does.
     /// Returns `None` when the draft is gone, sent or deleted elsewhere. A
     /// server that does not file what it sends gets a copy of the draft in
-    /// Sent, read before the draft goes.
+    /// Sent, read before the draft goes. On IMAP and JMAP the bytes are
+    /// read either way, to find the message the draft answers.
     pub async fn send_draft(&self, draft_id: &str) -> Result<Option<String>, SyncError> {
-        let copy = match self.mail.capabilities().files_sent_mail {
+        let marks = matches!(
+            self.mail.untranslated(),
+            AnyMail::Imap(_) | AnyMail::Jmap(_)
+        );
+        let files = self.mail.capabilities().files_sent_mail;
+        let raw = match files && !marks {
             true => None,
             false => match self.raw(draft_id).await {
                 Ok(raw) => Some(raw),
@@ -192,17 +255,21 @@ impl AccountSync {
                 Err(err) => return Err(err),
             },
         };
+        let copy = raw.as_deref().filter(|_| !files);
         let sent = match self.mail.send_draft(draft_id).await {
             Ok(id) => Some(id),
             Err(SyncError::Backend(BackendError::NotFound)) => None,
             Err(err) => return Err(err),
         };
         let sent = match (sent, copy) {
-            (Some(id), Some(raw)) => Some(self.file_sent(&raw).await.unwrap_or(id)),
+            (Some(id), Some(raw)) => Some(self.file_sent(raw).await.unwrap_or(id)),
             (sent, _) => sent,
         };
         self.forget_draft(draft_id).await;
         if let Some(id) = &sent {
+            if let Some(raw) = &raw {
+                self.mark_answered(raw).await;
+            }
             self.tell_local(id).await;
         }
         Ok(sent)
@@ -455,9 +522,25 @@ pub(crate) fn message_id_header(raw: &[u8]) -> Option<String> {
     mailrs_mime::head::message_id(raw)
 }
 
+/// The Message-IDs `raw` answers, from `In-Reply-To`, without their angle
+/// brackets. RFC 5322 lets the header name more than one.
+fn in_reply_to(raw: &[u8]) -> Vec<String> {
+    mailrs_mime::head::head(raw)
+        .header("In-Reply-To")
+        .map(|value| {
+            value
+                .split_whitespace()
+                .map(|id| id.trim_matches(['<', '>']))
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EXPORT_BATCH_BYTES, export_batches, message_id_header};
+    use super::{EXPORT_BATCH_BYTES, export_batches, in_reply_to, message_id_header};
 
     #[test]
     fn an_export_asks_for_small_messages_together_and_large_ones_alone() {
@@ -471,6 +554,13 @@ mod tests {
         let half = Some(EXPORT_BATCH_BYTES / 2);
         assert_eq!(export_batches(&[half, half, half]), [0..2, 2..3]);
         assert!(export_batches(&[]).is_empty());
+    }
+
+    #[test]
+    fn in_reply_to_names_every_message_answered() {
+        let raw = b"Subject: Re\r\nIn-Reply-To: <a@x>\r\n <b@x>\r\n\r\nHi";
+        assert_eq!(in_reply_to(raw), ["a@x", "b@x"]);
+        assert!(in_reply_to(b"Subject: Hi\r\n\r\nHi").is_empty());
     }
 
     #[test]
