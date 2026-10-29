@@ -852,9 +852,11 @@ impl Effects for FakeWindow {
         Box::pin(async move { said })
     }
 
+    /// Yields once, as the window's timeout does, so what else the run
+    /// has going gets a turn before the sleep ends.
     fn sleep(&self, _seconds: u32) -> Answer<'_, ()> {
         self.reached(Step::Sleep);
-        Box::pin(async {})
+        Box::pin(tokio::task::yield_now())
     }
 
     fn show(&self, thread: OpenThread) {

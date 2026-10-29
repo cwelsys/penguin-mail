@@ -802,6 +802,9 @@ impl Effects for Ports {
 
     fn mark_read(&self, target: Target) {
         if let Some(window) = self.window() {
+            // The row loses its dot now; the store's change event finds
+            // it already read and redraws it as it is.
+            window.list.mark_read(&target);
             window.perform(
                 vec![target],
                 MailAction::Triage(TriageAction::MarkRead),

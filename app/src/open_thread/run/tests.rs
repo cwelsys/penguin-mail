@@ -117,8 +117,8 @@ async fn a_reader_who_moves_on_while_the_bodies_load_gets_none_of_them() {
     window.run().open(row(THREAD)).await;
     assert!(!window.took(Step::BodiesArrived));
     assert!(
-        window.took(Step::MarkRead),
-        "the reader sat through the delay before moving on"
+        !window.took(Step::MarkRead),
+        "they left before the delay was up"
     );
 }
 
@@ -158,15 +158,25 @@ async fn an_unread_thread_is_marked_read_after_the_delay() {
     assert_eq!(window.0.borrow().marked, [target(None)]);
 }
 
-/// The stored copy says the thread is unread, so the mark goes out as
-/// the thread shows, before the server is asked for anything, and once.
+/// The stored copy says the thread is unread, so the delay before the
+/// mark starts as the thread shows, before the server is asked for
+/// anything, and the mark goes out once however long the server takes.
 #[tokio::test]
 async fn the_read_mark_does_not_wait_for_the_server() {
     let window = FakeWindow::new();
     window.run().open(row(THREAD)).await;
     let steps = window.steps();
     let at = |step: Step| steps.iter().position(|s| *s == step).unwrap();
-    assert!(at(Step::MarkRead) < at(Step::Ensure), "{steps:?}");
+    assert!(at(Step::Sleep) < at(Step::Ensure), "{steps:?}");
+    assert_eq!(window.0.borrow().marked, [target(None)]);
+}
+
+#[tokio::test]
+async fn marking_read_at_once_waits_for_nothing() {
+    let window = FakeWindow::new();
+    window.with(|screen| screen.delay = Some(0));
+    window.run().open(row(THREAD)).await;
+    assert!(!window.took(Step::Sleep));
     assert_eq!(window.0.borrow().marked, [target(None)]);
 }
 
