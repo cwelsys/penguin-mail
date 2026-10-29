@@ -287,13 +287,27 @@ fn reply_to(id: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-fn answered(h: &ImapHarness, mailbox: &str, uid: u32) -> bool {
+/// A forward of Ann's message, naming it in the app's private header.
+fn forward_of(id: &str) -> Vec<u8> {
+    format!(
+        "From: me@example.com\r\nTo: bo@example.com\r\nSubject: Fwd: Kites\r\n\
+         Message-ID: <fwd-{id}@example.com>\r\nX-Penguin-Mail-Forwarded: <{id}@example.com>\r\n\r\n\
+         See below.\r\n"
+    )
+    .into_bytes()
+}
+
+fn flagged(h: &ImapHarness, mailbox: &str, uid: u32, flag: &str) -> bool {
     h.imap
         .message(mailbox, uid)
         .unwrap()
         .flags
         .iter()
-        .any(|f| f.eq_ignore_ascii_case("\\Answered"))
+        .any(|f| f.eq_ignore_ascii_case(flag))
+}
+
+fn answered(h: &ImapHarness, mailbox: &str, uid: u32) -> bool {
+    flagged(h, mailbox, uid, "\\Answered")
 }
 
 #[tokio::test]
@@ -343,4 +357,61 @@ async fn sending_a_draft_that_replies_marks_the_original_answered() {
     h.sync.send_draft(&saved.draft_id).await.unwrap();
 
     assert!(answered(&h, "INBOX", 1));
+}
+
+#[tokio::test]
+async fn sending_a_forward_marks_the_original_forwarded_and_keeps_the_header_to_itself() {
+    let h = imap_harness().await;
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.bootstrap().await;
+
+    h.sync.send(forward_of("a"), None, None).await.unwrap();
+
+    assert!(flagged(&h, "INBOX", 1, "$forwarded"));
+    let submitted = h.smtp.sent();
+    assert_eq!(submitted.len(), 1);
+    assert!(
+        !String::from_utf8_lossy(&submitted[0].raw).contains("X-Penguin-Mail-Forwarded"),
+        "no recipient sees the app's own header"
+    );
+    let copy = h.imap.body("Sent", 1, "").await.unwrap().unwrap();
+    assert!(
+        !String::from_utf8_lossy(&copy).contains("X-Penguin-Mail-Forwarded"),
+        "nor does the copy in Sent carry it"
+    );
+}
+
+#[tokio::test]
+async fn a_mailbox_that_keeps_no_keywords_is_not_asked_to_mark_a_forward() {
+    let imap = FakeImap::new();
+    imap.with(|s| {
+        s.mailbox_mut("INBOX").permanent_flags = ["\\Seen", "\\Answered", "\\Flagged", "\\Draft"]
+            .map(String::from)
+            .to_vec()
+    });
+    let h = imap_harness_on(imap, fake_settings()).await;
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.bootstrap().await;
+    let before = h.imap.calls_to("store");
+
+    h.sync.send(forward_of("a"), None, None).await.unwrap();
+
+    assert!(!flagged(&h, "INBOX", 1, "$forwarded"));
+    assert_eq!(h.imap.calls_to("store"), before, "no flag write at all");
+}
+
+#[tokio::test]
+async fn a_draft_saved_from_bytes_on_their_way_out_loses_the_forward_header() {
+    let h = imap_harness().await;
+    h.bootstrap().await;
+
+    h.sync
+        .save_draft(forward_of("a"), None, None)
+        .await
+        .unwrap();
+
+    let draft = h.imap.body("Drafts", 1, "").await.unwrap().unwrap();
+    assert!(!String::from_utf8_lossy(&draft).contains("X-Penguin-Mail-Forwarded"));
 }

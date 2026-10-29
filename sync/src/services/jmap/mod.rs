@@ -33,7 +33,7 @@ use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use mailrs_domain::mailbox::keyword::{ANSWERED, DRAFT, FLAGGED, MDN_SENT, MUTED, SEEN};
+use mailrs_domain::mailbox::keyword::{ANSWERED, DRAFT, FLAGGED, FORWARDED, MDN_SENT, MUTED, SEEN};
 use mailrs_domain::{EpochMillis, MailSet, RemoteMailbox, Role};
 use mailrs_gmail::LabelColor;
 use mailrs_jmap::{Identity, Mailbox};
@@ -57,7 +57,7 @@ use crate::{BackendError, MailOp};
 
 /// The keywords the adapter reads and restates. A JMAP server stores any
 /// keyword; these are the ones the app acts on.
-pub(super) const KEYWORDS: &[&str] = &[SEEN, FLAGGED, ANSWERED, DRAFT, MUTED, MDN_SENT];
+pub(super) const KEYWORDS: &[&str] = &[SEEN, FLAGGED, ANSWERED, DRAFT, MUTED, FORWARDED, MDN_SENT];
 
 /// What a JMAP account's mail service can do. `labels` follows the
 /// session's `maxMailboxesPerEmail`, read at sign-in.

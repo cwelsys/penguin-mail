@@ -111,6 +111,27 @@ async fn send_later_on_a_server_that_holds_mail_leaves_it_with_the_server() {
 }
 
 #[tokio::test]
+async fn a_held_forward_leaves_its_private_header_here() {
+    let h = holding().await;
+    let forward = Queued {
+        raw: Some(
+            b"From: me@example.com\r\nTo: ada@example.com\r\nSubject: Fwd: Trip\r\nMessage-ID: <trip@example.com>\r\n\
+X-Penguin-Mail-Forwarded: <orig@example.com>\r\n\r\nSee below\r\n"
+                .to_vec(),
+        ),
+        ..later(&h, now_millis() + HOUR)
+    };
+
+    put(&h, forward).await;
+
+    let held = h.fake.with(|s| {
+        let hold = s.holds.values().next().expect("the server holds it");
+        String::from_utf8_lossy(&s.emails[&hold.email_id].raw).into_owned()
+    });
+    assert!(!held.contains("X-Penguin-Mail-Forwarded"), "{held}");
+}
+
+#[tokio::test]
 async fn the_hour_passing_files_the_held_message_in_sent() {
     let h = holding().await;
     let id = scheduled(&h, now_millis() + HOUR).await;

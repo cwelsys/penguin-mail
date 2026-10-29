@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use mailrs_domain::mailbox::keyword::ANSWERED;
+use mailrs_domain::mailbox::keyword::{ANSWERED, FORWARDED};
 use mailrs_domain::translate::gettext;
-use mailrs_domain::{ChangeEvent, Role};
+use mailrs_domain::{ChangeEvent, Location, Role};
+use mailrs_mime::head::{FORWARDED_HEADER, without_header};
 use mailrs_store::messages::Change;
 use mailrs_store::{drafts, messages, outbox};
 
@@ -19,13 +20,16 @@ impl AccountSync {
     /// Sends raw RFC 822 bytes, then deletes `draft_id` if the message came
     /// from a draft. A draft that is already gone does not fail the send.
     /// A server that does not file what it sends gets a copy in Sent.
-    /// Returns the sent message's id.
+    /// Returns the sent message's id. The composer's own header naming
+    /// the message forwarded is read here and goes no further.
     pub async fn send(
         &self,
         raw: Vec<u8>,
         thread_id: Option<String>,
         draft_id: Option<String>,
     ) -> Result<String, SyncError> {
+        let forwarded = ids_in(&raw, FORWARDED_HEADER);
+        let raw = without_header(&raw, FORWARDED_HEADER);
         let sent = self.mail.send(&raw, thread_id.as_deref()).await?;
         let message_id = self.file_sent(&raw).await.unwrap_or_else(|| sent.clone());
         if let Some(draft_id) = draft_id {
@@ -42,6 +46,7 @@ impl AccountSync {
             self.forget_draft(&draft_id).await;
         }
         self.mark_answered(&raw).await;
+        self.mark(&forwarded, FORWARDED).await;
         self.tell_local(&message_id).await;
         Ok(message_id)
     }
@@ -55,8 +60,11 @@ impl AccountSync {
     /// person's other mail programs. Gmail has no such flags, and Outlook
     /// keeps its own, which this does not write. Every copy in the account
     /// is marked, which on IMAP means each mailbox the message is filed
-    /// in. The message that named them has gone out by now, so a miss or
-    /// a refusal only goes to the log.
+    /// in, and only in a mailbox that stores the keyword: `\Answered` is
+    /// a system flag every mailbox has, and `$forwarded` is one a mailbox
+    /// takes only when its PERMANENTFLAGS say so (RFC 5788). The message
+    /// that named them has gone out by now, so a miss or a refusal only
+    /// goes to the log.
     async fn mark(&self, msgids: &[String], keyword: &str) {
         if !matches!(
             self.mail.untranslated(),
@@ -87,6 +95,15 @@ impl AccountSync {
             );
             return;
         }
+        let ids = self.where_stored(ids, keyword).await;
+        if ids.is_empty() {
+            tracing::info!(
+                account = self.account_id,
+                keyword,
+                "the server does not store the keyword where the message is"
+            );
+            return;
+        }
         let op = MailOp::SetKeyword {
             keyword: keyword.to_string(),
             on: true,
@@ -104,6 +121,31 @@ impl AccountSync {
                 "could not mark a message"
             );
         }
+    }
+
+    /// The messages among `ids` whose mailbox stores `keyword`. A server
+    /// name on IMAP says the mailbox; a name that says none, as JMAP's,
+    /// asks the server's one list.
+    async fn where_stored(&self, ids: Vec<String>, keyword: &str) -> Vec<String> {
+        let names = match self.mail.server_names(&ids).await {
+            Ok(names) => names,
+            Err(_) => return ids,
+        };
+        let mut kept = Vec::new();
+        for (id, name) in ids.into_iter().zip(names) {
+            let mailbox = Location::parse(&name)
+                .map(|at| at.mailbox)
+                .unwrap_or_default();
+            if self
+                .mail
+                .keywords_stored(&mailbox)
+                .await
+                .is_ok_and(|stored| stored.contains(&keyword))
+            {
+                kept.push(id);
+            }
+        }
+        kept
     }
 
     /// On an account whose mailboxes are local the adapter wrote the
@@ -195,13 +237,16 @@ impl AccountSync {
     }
 
     /// [`AccountSync::save_draft`] for the outbox, which saves over a held
-    /// copy only once the server has let go of it.
+    /// copy only once the server has let go of it. Bytes built to go out
+    /// lose the composer's header naming the message forwarded: a draft
+    /// Gmail keeps for Send Later goes out as the server holds it.
     pub(crate) async fn put_back_draft(
         &self,
         raw: Vec<u8>,
         thread_id: Option<String>,
         draft_id: Option<String>,
     ) -> Result<SavedDraft, SyncError> {
+        let raw = without_header(&raw, FORWARDED_HEADER);
         let thread_id = thread_id.as_deref();
         let saved = match self
             .mail

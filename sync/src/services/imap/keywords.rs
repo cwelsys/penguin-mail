@@ -9,13 +9,14 @@ use super::SYSTEM_KEYWORDS;
 use crate::services::RemoteChange;
 
 /// The keywords a mailbox stores when its PERMANENTFLAGS take `\*` or
-/// name `$muted`: the system flags and the app's own.
+/// name `$muted`: the system flags, the app's own, and `$forwarded`.
 pub(super) const EVERY_KEYWORD: &[&str] = &[
     keyword::SEEN,
     keyword::FLAGGED,
     keyword::ANSWERED,
     keyword::DRAFT,
     keyword::MUTED,
+    keyword::FORWARDED,
 ];
 
 /// A message's flags as keywords: the system flags in the app's spelling,
