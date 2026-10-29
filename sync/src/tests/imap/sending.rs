@@ -277,3 +277,70 @@ async fn a_message_with_a_non_ascii_address_is_refused_when_the_server_cannot_ca
     );
     assert!(h.smtp.sent().is_empty(), "nothing went out");
 }
+
+/// A reply to Ann's message, naming it in `In-Reply-To`.
+fn reply_to(id: &str) -> Vec<u8> {
+    format!(
+        "From: me@example.com\r\nTo: ann@example.com\r\nSubject: Re: Kites\r\n\
+         Message-ID: <re-{id}@example.com>\r\nIn-Reply-To: <{id}@example.com>\r\n\r\nSunday.\r\n"
+    )
+    .into_bytes()
+}
+
+fn answered(h: &ImapHarness, mailbox: &str, uid: u32) -> bool {
+    h.imap
+        .message(mailbox, uid)
+        .unwrap()
+        .flags
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case("\\Answered"))
+}
+
+#[tokio::test]
+async fn sending_a_reply_marks_every_copy_of_the_original_answered() {
+    let h = imap_harness().await;
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("Archive", &message("a", "Kites", ""), &[], days_ago(1));
+    h.imap
+        .deliver_flagged("INBOX", &message("b", "Plans", ""), &[], days_ago(1));
+    h.bootstrap().await;
+
+    h.sync.send(reply_to("a"), None, None).await.unwrap();
+
+    assert!(answered(&h, "INBOX", 1));
+    assert!(answered(&h, "Archive", 1));
+    assert!(!answered(&h, "INBOX", 2), "a message not replied to stays");
+}
+
+#[tokio::test]
+async fn a_send_that_answers_nothing_marks_nothing() {
+    let h = imap_harness().await;
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.bootstrap().await;
+    let before = h.imap.calls_to("store");
+
+    h.sync.send(outgoing(), None, None).await.unwrap();
+
+    assert!(!answered(&h, "INBOX", 1));
+    assert_eq!(h.imap.calls_to("store"), before, "no flag write at all");
+}
+
+#[tokio::test]
+async fn sending_a_draft_that_replies_marks_the_original_answered() {
+    let settings = ImapSettings {
+        files_sent_mail: true,
+        ..fake_settings()
+    };
+    let h = imap_harness_on(FakeImap::new(), settings).await;
+    h.imap
+        .deliver_flagged("INBOX", &message("a", "Kites", ""), &[], days_ago(1));
+    h.bootstrap().await;
+    let saved = h.sync.save_draft(reply_to("a"), None, None).await.unwrap();
+
+    h.sync.send_draft(&saved.draft_id).await.unwrap();
+
+    assert!(answered(&h, "INBOX", 1));
+}

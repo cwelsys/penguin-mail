@@ -873,6 +873,21 @@ pub fn sent_copies(
     by_ids(conn, account_id, &ids)
 }
 
+/// The ids of the account's messages whose Message-ID is `msgid`, given
+/// without angle brackets, in either spelling, wherever they are filed.
+/// On IMAP the same message in two mailboxes is two copies, and a
+/// caller marking it answered marks each.
+pub fn with_msgid(conn: &Connection, account_id: AccountId, msgid: &str) -> Result<Vec<String>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT id FROM messages WHERE account_id = ?1 AND rfc822_msgid IN (?2, ?3) LIMIT 8",
+        )?
+        .query_map(params![account_id, msgid, format!("<{msgid}>")], |row| {
+            row.get(0)
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
 /// The stored metadata for `ids`, oldest first. Ids the store does not
 /// hold are simply missing, so a caller asks Gmail only for those.
 pub fn by_ids(
