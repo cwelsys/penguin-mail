@@ -10,6 +10,9 @@
 # The Docker suites call plain `docker`, which follows the active context.
 # Pinning DOCKER_CONTEXT keeps them on this computer when another context,
 # such as a remote server, is selected.
+#
+# The OAuth clients .envrc exports would make the sign-in tests find a client
+# in the environment where they expect none, so the gate runs without them.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,6 +31,7 @@ for arg in "$@"; do
 done
 
 unset DOCKER_HOST
+unset PENGUIN_MAIL_GOOGLE_CLIENT_ID PENGUIN_MAIL_GOOGLE_CLIENT_SECRET PENGUIN_MAIL_MICROSOFT_CLIENT_ID
 export DOCKER_CONTEXT=default
 run=(nice -n 19 ionice -c2 -n7)
 
