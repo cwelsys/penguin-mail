@@ -32,6 +32,10 @@ pub struct Settings {
     pub bold_unread: bool,
     pub bold_senders: bool,
     pub show_avatars: bool,
+    /// Draw messages on the CPU rather than through the GPU, for a
+    /// computer whose graphics driver leaves them blank. Read once at
+    /// startup, before the web engine starts.
+    pub software_rendering: bool,
     pub color_scheme: ColorScheme,
     /// Dark message mode: in a dark window, messages written for a white
     /// page lose those colors and follow the window.
@@ -488,6 +492,7 @@ impl Default for Settings {
             bold_unread: true,
             bold_senders: false,
             show_avatars: true,
+            software_rendering: false,
             color_scheme: ColorScheme::System,
             dark_message_mode: false,
             tray_penguin: true,
