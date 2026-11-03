@@ -3746,7 +3746,7 @@ impl MainWindow {
             .build();
         crate::ui::name(&button, &gettext("Main Menu"));
         crate::ui::name_menu_items_of(&button);
-        self.sidebar.header.pack_end(&button);
+        self.sidebar.set_menu(&button);
     }
 
     fn install_keys(self: &Rc<Self>) {
