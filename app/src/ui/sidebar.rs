@@ -428,7 +428,6 @@ impl Sidebar {
             .build();
         header.pack_start(&titles);
         let content = gtk::Stack::builder()
-            .hhomogeneous(false)
             .transition_type(gtk::StackTransitionType::Crossfade)
             .transition_duration(150)
             .build();
@@ -706,14 +705,20 @@ impl Sidebar {
     /// the next-event card belongs to Mail alone: the calendar shows the
     /// same event on its own page.
     pub fn show_calendar(&self, content: &gtk::Widget) {
-        if self.content.child_by_name("calendar").is_none() {
-            self.content.add_named(content, Some("calendar"));
-        }
+        self.hold_calendar(content);
         self.content.set_visible_child_name("calendar");
         self.mail_showing.set(false);
         self.title.set_label(&gettext("Calendars"));
         self.sync_foot();
         self.sync_badges();
+    }
+
+    /// Keeps the calendar's own sidebar, `content`, behind the mailbox
+    /// list, so both spaces share the width the wider one needs.
+    pub fn hold_calendar(&self, content: &gtk::Widget) {
+        if self.content.child_by_name("calendar").is_none() {
+            self.content.add_named(content, Some("calendar"));
+        }
     }
 
     /// Puts the mailbox list back.
@@ -2417,15 +2422,11 @@ pub(crate) mod checks {
         sidebar.set_waiting(100);
         assert_eq!(sidebar.badges[1].1.label(), gettext("99+"));
         assert!(sidebar.badges[1].1.is_visible());
-        let mail_min = sidebar.content.measure(gtk::Orientation::Horizontal, -1).0;
         let calendar = gtk::Box::builder().width_request(600).build();
         sidebar.show_calendar(calendar.upcast_ref());
         assert!(sidebar.content.measure(gtk::Orientation::Horizontal, -1).0 >= 600);
         sidebar.show_mail();
-        assert_eq!(
-            sidebar.content.measure(gtk::Orientation::Horizontal, -1).0,
-            mail_min
-        );
+        assert!(sidebar.content.measure(gtk::Orientation::Horizontal, -1).0 >= 600);
         sidebar.next.when.set_label("Next");
         let event_min = sidebar
             .next
