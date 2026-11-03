@@ -20,6 +20,7 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 
 ### Fixed
 
+- On macOS, messages stay visible after shrinking and expanding the window.
 - Hidden calendar content and absent switch counts no longer keep the mailbox sidebar wide.
 - Summarize and Explain limit the mail sent to the model and say when some text was left out.
 - Unsubscribe asks before loading a sender's page, and image loading asks before enabling several senders in a conversation.
@@ -33,6 +34,8 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 - The message view scrolls at once with the wheel instead of animating each tick, which stuttered on some graphics drivers.
 - Microsoft 365 calendars keep syncing when Outlook leaves fields unset or schedules a reminder after an event starts.
 - Mail pages release cached resources sooner, and signed messages share a fixed memory budget for bodies and attachments.
+- Marking mail read clears the unread mark in the list and open conversation while keeping expanded message details and quoted text open.
+- Mail belonging to one account no longer turns up as a row in the mailbox you are looking at in another account, whether it arrived or was read, starred or moved elsewhere.
 
 ## 1.0.11 (2026-10-28)
 
