@@ -789,19 +789,13 @@ impl MainWindow {
                 .invert_boolean()
                 .sync_create()
                 .build();
-            split
-                .bind_property("collapsed", &list.sidebar_button, "visible")
-                .sync_create()
-                .build();
+            list.sidebar_button.set_visible(true);
             split
                 .bind_property("show-sidebar", &list.sidebar_button, "active")
                 .bidirectional()
                 .sync_create()
                 .build();
-            split
-                .bind_property("collapsed", &calendar.sidebar_button, "visible")
-                .sync_create()
-                .build();
+            calendar.sidebar_button.set_visible(true);
             split
                 .bind_property("show-sidebar", &calendar.sidebar_button, "active")
                 .bidirectional()
