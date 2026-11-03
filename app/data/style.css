@@ -997,8 +997,9 @@ toggle-group.space-switch > toggle { font-size: 0.89em; font-weight: 600; }
 /* The mockup's switch is a 204 x 32 pill of three 64 px toggles. */
 toggle-group.view-switch > toggle { min-width: 64px; padding-left: 0; padding-right: 0; }
 /* The Mail / Calendar pill shows icons alone, 34 px tall like the header
-   buttons beside it: 30 px toggles, 2 px in. */
-toggle-group.space-switch > toggle { -gtk-icon-size: 16px; padding: 0 16px; min-height: 30px; }
+   buttons beside it: 30 px toggles, 2 px in. No minimum width, which
+   would leave room beside an icon with no badge after it. */
+toggle-group.space-switch > toggle { -gtk-icon-size: 16px; padding: 0 12px; min-width: 0; min-height: 30px; }
 toggle-group.space-switch { padding: 2px; }
 /* The view switch folded into one button when the header runs short: the
    same grey pill and 32 px height, naming the view on screen. */
