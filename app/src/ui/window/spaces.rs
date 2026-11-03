@@ -214,6 +214,10 @@ impl MainWindow {
         let visible =
             !only_calendars && crate::offered::shows_space_switch(&started, waiting, remembered);
         self.sidebar.set_switch_visible(visible);
+        if visible {
+            self.sidebar
+                .hold_calendar(self.calendar.sidebar.upcast_ref());
+        }
         if only_calendars {
             self.show_space(Space::Calendar);
         } else if !visible && self.space() == Space::Calendar {
