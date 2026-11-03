@@ -186,6 +186,15 @@ fn reading_page(app: &Rc<App>, settings: &Settings) -> adw::PreferencesPage {
         settings.mark_read,
         Change::MarkRead,
     ));
+    reading.add(&switch(
+        app,
+        &gettext("Follow Navigation After Removing Mail"),
+        Some(&gettext(
+            "After deleting, archiving, or moving mail, select the neighbor in the direction you last moved",
+        )),
+        settings.follow_selection_direction,
+        Change::FollowSelectionDirection,
+    ));
     page.add(&reading);
     let images = adw::PreferencesGroup::builder()
         .title(gettext("Images and Receipts"))
@@ -391,6 +400,7 @@ fn calendar_rows(app: &Rc<App>, settings: &Settings) -> Vec<gtk::Widget> {
         )
         .upcast(),
         week_start_row(app, settings.week_start).upcast(),
+        calendar_clock_row(app, settings.calendar_clock).upcast(),
         working_hours_row(app, settings.working_hours).upcast(),
     ]
 }
@@ -1365,6 +1375,19 @@ fn ending_at(mut hours: WorkingHours, hour: u32) -> WorkingHours {
         hours.start_minutes = end - 60;
     }
     hours
+}
+
+fn calendar_clock_row(app: &Rc<App>, clock: crate::settings::CalendarClock) -> adw::ComboRow {
+    let title = gettext("Time Format");
+    let row = combo(
+        app,
+        &title,
+        Some(&gettext("Automatic follows the system clock format")),
+        clock,
+        Change::CalendarClock,
+    );
+    crate::ui::name(&row, &title);
+    row
 }
 
 /// The "Week Starts On" row: Automatic follows the locale's own first

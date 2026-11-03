@@ -3,6 +3,14 @@
 What a screen reader gets from Penguin Mail, how to check it, and what is
 still out of a keyboard's reach.
 
+## Mail navigation
+
+Moving between single rows with the keyboard or pointer sets the direction
+used after deleting, archiving, or moving mail. At the list edge, selection
+falls back to the other side. A new mailbox starts by choosing the next row.
+Turn off **Follow Navigation After Removing Mail** in Reading preferences
+to always prefer the next row.
+
 ## Names
 
 Every control a person acts on carries a name in the accessible tree. A
@@ -42,6 +50,9 @@ and then the name it builds is the one a reader hears.
 The mailbox sidebar and message list have named, focusable dividers.
 Drag either divider, or Tab to it and use Left and Right to resize in
 12-pixel steps. Home and End select its minimum and maximum width.
+The Mail and Calendar buttons switch to icons when the sidebar is narrow.
+Their tooltips and accessible names keep the space name and unread or
+invitation count. Expanding the sidebar restores the labels.
 The widths are remembered between starts. In a narrow window, the
 existing sidebar overlay and one-page mail navigation take over, and
 hidden dividers leave the keyboard focus order.
@@ -192,6 +203,10 @@ card above it that says when it goes or why it has not gone, with
 buttons that act on it.
 
 ## The calendar from the keyboard
+
+The Time Format row in Calendar preferences offers Automatic, 12-hour and
+24-hour clocks. It has an accessible name and uses the standard combo row
+keyboard controls. Changing it redraws the calendar without a restart.
 
 In Day and Week, Tab passes the day headings first, each of which opens
 its day, then the all-day row, then the events, day by day and earliest

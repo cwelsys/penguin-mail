@@ -2037,7 +2037,7 @@ fn file_part(attachment: &OutgoingAttachment) -> MimePart<'_> {
 
 #[cfg(test)]
 mod tests {
-    use mail_parser::{MessageParser, MimeHeaders};
+    use mail_parser::MessageParser;
 
     use super::*;
 
@@ -3154,7 +3154,7 @@ mod tests {
         let raw = build_request(&draft, 0, "id@example.com").expect("built");
         let parsed = MessageParser::default().parse(&raw).expect("parsed");
 
-        assert_eq!(parsed.parts.len(), 1, "{}", String::from_utf8_lossy(&raw));
+        assert_eq!(parsed.parts().len(), 1, "{}", String::from_utf8_lossy(&raw));
         let kind = parsed.content_type().expect("a content type");
         assert_eq!((kind.ctype(), kind.subtype()), ("text", Some("plain")));
         let sent = parsed
@@ -3163,7 +3163,11 @@ mod tests {
             .replace("\r\n", "\n");
         assert_eq!(sent, body);
         assert_eq!(parsed.subject(), Some("Remove me"));
-        let to = parsed.to().and_then(|to| to.as_list()).expect("a To list");
+        let to = parsed
+            .to()
+            .expect("a To list")
+            .mailboxes()
+            .collect::<Vec<_>>();
         assert_eq!(to.len(), 1);
         assert_eq!(to[0].address(), Some("leave@news.example"));
         assert!(!String::from_utf8_lossy(&raw).contains("text/html"));
@@ -3300,9 +3304,12 @@ mod tests {
         );
         assert_eq!(parsed.subject(), Some("Plans"));
         assert_eq!(parsed.message_id(), Some("new@example.com"));
-        assert_eq!(parsed.in_reply_to().as_text(), Some("m2@mail.example.com"));
         assert_eq!(
-            parsed.references().as_text_list().unwrap(),
+            parsed.in_reply_to().and_then(|ids| ids.get(0)),
+            Some("m2@mail.example.com")
+        );
+        assert_eq!(
+            parsed.references().unwrap().iter().collect::<Vec<_>>(),
             ["m1@mail.example.com", "m2@mail.example.com"]
         );
         assert_eq!(
@@ -3319,7 +3326,7 @@ mod tests {
                 .unwrap()
                 .contains("<strong>Ann</strong>")
         );
-        assert_eq!(parsed.attachment_count(), 1);
+        assert_eq!(parsed.attachments().len(), 1);
         assert_eq!(
             parsed.attachments().next().unwrap().attachment_name(),
             Some("menu.pdf")
@@ -3601,7 +3608,7 @@ mod tests {
             "mixed holds related holds alternative"
         );
         let parsed = MessageParser::default().parse(&raw).unwrap();
-        assert_eq!(parsed.attachment_count(), 2);
+        assert_eq!(parsed.attachments().len(), 2);
     }
 
     #[test]
