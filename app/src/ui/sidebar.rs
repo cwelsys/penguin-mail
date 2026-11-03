@@ -426,13 +426,16 @@ impl Sidebar {
             .show_end_title_buttons(false)
             .show_title(true)
             .build();
-        // Measure both layouts in this locale, including the largest off-screen badge.
+        // Measure both layouts in this locale, the height with the largest
+        // off-screen badge and the labeled width with none: `resize` adds
+        // the badges actually shown.
         switch.set_visible(true);
         title.set_visible(false);
         badges[1].1.set_label(&gettext("99+"));
         badges[1].1.set_visible(true);
-        let wide = titles.measure(gtk::Orientation::Horizontal, -1).1;
         let height = titles.measure(gtk::Orientation::Vertical, -1).1;
+        badges[1].1.set_visible(false);
+        let wide = titles.measure(gtk::Orientation::Horizontal, -1).1;
         for label in &labels {
             label.set_label("");
         }
@@ -466,6 +469,7 @@ impl Sidebar {
         // The compact width follows the rooted widgets and the badges actually shown.
         let resize: Rc<dyn Fn()> = {
             let adaptive = adaptive.downgrade();
+            let narrow = narrow.downgrade();
             let switch = switch.downgrade();
             let badges = badges.each_ref().map(|(_, badge)| badge.downgrade());
             let icons = Cell::new(compact);
@@ -484,6 +488,13 @@ impl Sidebar {
                     icons.set(switch.measure(gtk::Orientation::Horizontal, -1).0 - extra);
                 }
                 adaptive.set_width_request(icons.get() + extra);
+                if let Some(narrow) = narrow.upgrade() {
+                    narrow.set_condition(Some(&adw::BreakpointCondition::new_length(
+                        adw::BreakpointConditionLengthType::MaxWidth,
+                        f64::from(wide + extra - 1),
+                        adw::LengthUnit::Px,
+                    )));
+                }
             })
         };
         for (_, badge) in &badges {
@@ -504,7 +515,12 @@ impl Sidebar {
             glib::idle_add_local_once(move || resize());
         });
         adaptive.add_breakpoint(narrow);
-        header.set_title_widget(Some(&adaptive));
+        // One row across the header, the menu button at its end, so the
+        // switch has all the room up to it. A centred title would leave as
+        // much room again on its start side as the menu button takes.
+        let row = gtk::Box::builder().spacing(6).build();
+        row.append(&adaptive);
+        header.set_title_widget(Some(&row));
         let content = gtk::Stack::builder()
             .hhomogeneous(false)
             .transition_type(gtk::StackTransitionType::Crossfade)
@@ -771,6 +787,13 @@ impl Sidebar {
             row.activate();
         }
         true
+    }
+
+    /// Puts the main menu at the end of the header row, after the switch.
+    pub fn set_menu(&self, button: &gtk::MenuButton) {
+        if let Some(row) = self.header.title_widget().and_downcast::<gtk::Box>() {
+            row.append(button);
+        }
     }
 
     /// Shows the switch, or the name of the list in its place.
