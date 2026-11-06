@@ -801,6 +801,27 @@ impl MainWindow {
                 .bidirectional()
                 .sync_create()
                 .build();
+            // The open sidebar already shows the state, so the button keeps
+            // its flat look and says what a click does next.
+            for (button, show, hide) in [
+                (
+                    &list.sidebar_button,
+                    gettext("Show Mailboxes"),
+                    gettext("Hide Mailboxes"),
+                ),
+                (
+                    &calendar.sidebar_button,
+                    gettext("Show Calendars"),
+                    gettext("Hide Calendars"),
+                ),
+            ] {
+                button.add_css_class("sidebar-toggle");
+                let tip = move |button: &gtk::ToggleButton| {
+                    button.set_tooltip_text(Some(if button.is_active() { &hide } else { &show }));
+                };
+                tip(button);
+                button.connect_active_notify(tip);
+            }
 
             let w = weak.clone();
             let microsoft = super::add_account::signs_in_to_microsoft(&app.core);
