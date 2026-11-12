@@ -56,16 +56,21 @@ impl TranslationCard {
         lines.append(&title);
         lines.append(&detail);
 
-        let button = gtk::Button::builder()
-            .label(gettext("Translate"))
-            .valign(gtk::Align::Center)
-            .build();
+        let button = gtk::Button::builder().label(gettext("Translate")).build();
         button.connect_clicked(move |_| on_press());
-        let never = gtk::Button::builder()
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .visible(false)
+        let never = gtk::Button::builder().visible(false).build();
+        // The buttons go under the words, as the queued card's do, and wrap
+        // onto a line each when the pane is narrow. Never Translate carries
+        // a language's name, and beside the words it left them a column one
+        // letter wide.
+        let actions = adw::WrapBox::builder()
+            .child_spacing(6)
+            .line_spacing(6)
+            .margin_top(6)
             .build();
+        actions.append(&button);
+        actions.append(&never);
+        lines.append(&actions);
 
         let inside = gtk::Box::builder()
             .spacing(12)
@@ -73,8 +78,6 @@ impl TranslationCard {
             .build();
         inside.append(&icon);
         inside.append(&lines);
-        inside.append(&never);
-        inside.append(&button);
 
         let widget = super::page_column(&inside, "translation-area");
 
