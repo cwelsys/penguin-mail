@@ -12,7 +12,7 @@ use crate::open_thread::Unsent;
 use mailrs_domain::translate::gettext;
 
 pub struct QueuedCard {
-    pub widget: adw::BreakpointBin,
+    pub widget: gtk::Overlay,
     title: gtk::Label,
     detail: gtk::Label,
     /// Edit, Send Now and Delete, for a message in the Outbox.

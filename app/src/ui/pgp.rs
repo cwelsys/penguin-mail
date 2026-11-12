@@ -16,7 +16,7 @@ use crate::protection::{Mark, Tone};
 use crate::ui::name;
 
 pub struct PgpCard {
-    pub widget: adw::BreakpointBin,
+    pub widget: gtk::Overlay,
     icon: gtk::Image,
     title: gtk::Label,
     detail: gtk::Label,

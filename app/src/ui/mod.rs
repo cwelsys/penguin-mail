@@ -189,9 +189,9 @@ pub fn header_least(header: &impl IsA<gtk::Widget>) -> (i32, i32) {
 
 /// Lays `card` above the conversation page in the page's own column: as
 /// wide as the page's text at most, with the page's room at each side,
-/// which shrinks at the page's narrow width as the page's does. The bin
+/// which shrinks at the page's narrow width as the page's does. The overlay
 /// returned is the band to show, hide and pack; `class` styles it.
-pub fn page_column(card: &impl IsA<gtk::Widget>, class: &str) -> adw::BreakpointBin {
+pub fn page_column(card: &impl IsA<gtk::Widget>, class: &str) -> gtk::Overlay {
     use crate::render::{PAGE_MAX_WIDTH, PAGE_NARROW, PAGE_NARROW_SIDE, PAGE_SIDE};
     use adw::prelude::BreakpointBinExt;
     let width = PAGE_MAX_WIDTH - 2 * PAGE_SIDE;
@@ -202,24 +202,28 @@ pub fn page_column(card: &impl IsA<gtk::Widget>, class: &str) -> adw::Breakpoint
         .margin_start(PAGE_SIDE)
         .margin_end(PAGE_SIDE)
         .build();
-    // A breakpoint bin asks for a minimum size of its own; the band's
-    // content sets its real height.
-    let bin = adw::BreakpointBin::builder()
-        .child(&clamp)
+    // A breakpoint bin with breakpoints measures its child at no width, so
+    // a card whose words wrap would get the height of one line each. The
+    // bin sits empty over the card instead, only to watch the band's width.
+    let watch = adw::BreakpointBin::builder()
+        .child(&gtk::Box::new(gtk::Orientation::Horizontal, 0))
         .width_request(1)
         .height_request(1)
-        .visible(false)
+        .can_target(false)
+        .accessible_role(gtk::AccessibleRole::Presentation)
         .build();
-    bin.add_css_class(class);
     if let Ok(condition) = adw::BreakpointCondition::parse(&format!("max-width: {PAGE_NARROW}px")) {
         let narrow = adw::Breakpoint::new(condition);
         narrow.add_setters(&[
             (&clamp, "margin-start", PAGE_NARROW_SIDE),
             (&clamp, "margin-end", PAGE_NARROW_SIDE),
         ]);
-        bin.add_breakpoint(narrow);
+        watch.add_breakpoint(narrow);
     }
-    bin
+    let band = gtk::Overlay::builder().child(&clamp).visible(false).build();
+    band.add_overlay(&watch);
+    band.add_css_class(class);
+    band
 }
 
 /// A toast that shows `text` as written. libadwaita reads a toast's title

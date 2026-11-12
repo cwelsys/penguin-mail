@@ -15,7 +15,7 @@ use crate::translation::Language;
 use mailrs_domain::translate::{fill, gettext};
 
 pub struct TranslationCard {
-    pub widget: adw::BreakpointBin,
+    pub widget: gtk::Overlay,
     title: gtk::Label,
     detail: gtk::Label,
     button: gtk::Button,
