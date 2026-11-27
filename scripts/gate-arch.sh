@@ -13,6 +13,9 @@
 #
 # The OAuth clients .envrc exports would make the sign-in tests find a client
 # in the environment where they expect none, so the gate runs without them.
+#
+# Clippy here is newer than upstream's toolchain and reads needless_bool into
+# `if` blocks followed by a `#[cfg(windows)]` branch, so that lint is allowed.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -59,7 +62,7 @@ if $quick; then
 fi
 
 GDK_BACKEND=x11 "${run[@]}" xvfb-run -a cargo test "${scope[@]}"
-"${run[@]}" cargo clippy "${scope[@]}" --all-targets -- -D warnings
+"${run[@]}" cargo clippy "${scope[@]}" --all-targets -- -D warnings -A clippy::needless_bool
 if $ui; then
     copy=scripts/a11y-names.arch.sh
     trap 'rm -f "$copy"' EXIT
