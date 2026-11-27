@@ -7,6 +7,7 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 
 ### Fixed
 
+- A recipient chip no longer runs its background past its Remove button when a longer chip sits beside it.
 - Closing Customize Mailboxes releases its folder lists.
 - Smart mailboxes combining Gmail folders over IMAP include selected Trash and Junk messages and keep the newest matches when results are limited.
 - Renaming or moving IMAP folders preserves their Favorites, visibility and custom order, including nested folders.
@@ -17,6 +18,11 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 - Favorites stay visible when their account is collapsed, and folder moves respect the customized order.
 
 ### New
+
+- Penguin Mail runs on Windows 10 and later: mail pages draw with WebView2, a tray icon keeps it working in the background, toast notifications carry their action buttons, the taskbar button shows the unread count, Preferences can start it at sign-in, and PGP and S/MIME work with Gpg4win installed.
+- On Windows, a per-user installer sets up the app, its Start Menu entry and its mail and calendar file associations, and removes all of it on uninstall.
+- On Windows, Penguin Mail updates itself from About, like on Linux, and brings its own spell checking dictionaries.
+- On Windows, assistant skills run their scripts inside a sandbox that opens only the skill's folder and a scratch folder to them, not your files.
 
 - Notifications can show a message preview with a choice of length, and macOS can show the subject in bold, when enabled in Preferences.
 
@@ -30,6 +36,7 @@ the [releases page](https://github.com/c9dev/penguin-mail/releases).
 - IMAP accounts show only the folders you subscribe to, as Thunderbird does. Turn off Show Only Subscribed Folders in Preferences → Accounts to see every folder.
 - Subscribe to IMAP folders and unsubscribe from them in Manage Folders, in the account's menu in the sidebar.
 - Moving mail on an IMAP account offers the folders the sidebar shows, and its search finds every other folder on the server.
+- Drag a recipient from To, Cc or Bcc onto one of the other rows to move them there, or press the Menu key on a chip and choose Move to To, Cc or Bcc.
 - Drag a message onto a collapsed account and hold it there: the account opens so the message can be dropped on a folder that was out of sight.
 
 ### Improved
